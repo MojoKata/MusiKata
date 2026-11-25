@@ -68,9 +68,13 @@ design reference for what isn't built yet.
 
 ## Shared configuration
 
-As in the other Kata projects, two submodules are planned:
+As in the other Kata projects, two submodules hold what the projects share; after cloning,
+`git submodule update --init` fetches them.
 
-- `agents/`: the shared Claude configuration (hooks, walk thrus, review and relay skills), imported
-  by the repository's `CLAUDE.md`.
-- `coworker/`: the coworker protocol, which lists what a machine needs for the builds and tests
-  (`.coworker/deps.json`) and what waits on a human.
+- `agents/` (EpiphanySoft/agents): the shared Claude configuration (hooks, walk thrus, review and
+  relay skills), imported by the repository's `CLAUDE.md`.
+- `coworker/` (MojoKata/coworker): the coworker protocol, which lists what a machine needs for the
+  builds and tests (`.coworker/deps.json`, written once there are builds and tests to need it) and
+  what waits on a human.
+
+Each is pinned to a commit, and moves only by a commit here that says why.
