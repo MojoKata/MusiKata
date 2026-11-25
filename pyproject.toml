@@ -1,0 +1,28 @@
+# The tools' settings (docs/process/coding.md, "Style and types"; docs/process/testing.md). The
+# package's own table comes with its first code (DEVELOP.md, slice 1).
+
+[tool.ruff]
+line-length = 100
+# the mockup renderer draws the design, it isn't MusiKata: written dense, before these rules;
+# the submodules are their own projects
+extend-exclude = ["docs/mockups/src", "agents", "coworker"]
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle's errors, import order, bugbear, pyupgrade, simplify
+select = ["F", "E", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: over 100 ms; left out of the fast set (docs/process/testing.md, \"Speed\")"]
+
+[tool.coverage.run]
+source = ["src", "scripts"]
+branch = true
+parallel = true
+relative_files = true
+concurrency = ["thread", "multiprocessing"]
+patch = ["subprocess"]
+
+[tool.coverage.paths]
+src = ["src/", "/src/src/"]
+scripts = ["scripts/", "/src/scripts/"]

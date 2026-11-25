@@ -31,7 +31,9 @@ written here so this repository stands on its own.
    recommendation, and nothing is built until the whole batch is approved. The answers go into the
    requirements and the question issues are closed.
 5. **Build on a branch,** written as [`coding.md`](coding.md) says and tested as
-   [`testing.md`](testing.md) says, in a pull request.
+   [`testing.md`](testing.md) says, in a pull request. It is ready when every box of the pull
+   request's checklist (`.github/pull_request_template.md`) is ticked or struck through as not
+   applying.
 6. **Review** before merging: the diff, against the requirements it claims, with findings fixed or
    filed.
 7. **Squash merge,** then confirm the merged code matches the branch, and clean up the branch, its
