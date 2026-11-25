@@ -194,9 +194,10 @@ Once step 7 is done, every line is `ok`:
 scripts/publish.sh check
 ```
 
-Two lines read `FAIL` until step 7 is done: `release key` until 7.3's pull request is merged, and
-`release environment: secrets` until 7.4. A `FAIL` on any other line is a setting that isn't as it
-should be: walk its step again.
+Four lines read `FAIL` until their step is done: `release key` until 7.3's pull request is merged,
+`release environment: secrets` until 7.4, and the master ruleset's `rules` and `required checks`
+until CI has passed once and setup has added the `ci` check (step 8). A `FAIL` on any other line is
+a setting that isn't as it should be: walk its step again.
 
 ## Each release
 

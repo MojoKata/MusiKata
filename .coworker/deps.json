@@ -1,0 +1,198 @@
+{
+  "host": [
+    {
+      "package": "mesa-libGL",
+      "platform": "rocky-10*",
+      "min": "25.2.7",
+      "why": "OpenGL for Qt: the Mesa driver behind libGL; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "mesa-libEGL",
+      "platform": "rocky-10*",
+      "min": "25.2.7",
+      "why": "EGL for Qt: the Mesa driver behind libEGL; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libglvnd-glx",
+      "platform": "rocky-10*",
+      "min": "1.7.0",
+      "why": "libGL.so.1, which every Qt GUI library links; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libglvnd-egl",
+      "platform": "rocky-10*",
+      "min": "1.7.0",
+      "why": "libEGL.so.1; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libX11",
+      "platform": "rocky-10*",
+      "min": "1.8.10",
+      "why": "libX11.so.6: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libX11-xcb",
+      "platform": "rocky-10*",
+      "min": "1.8.10",
+      "why": "libX11-xcb.so.1: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "freetype",
+      "platform": "rocky-10*",
+      "min": "2.13.2",
+      "why": "libfreetype.so.6: Qt's text rendering; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "fontconfig",
+      "platform": "rocky-10*",
+      "min": "2.15.0",
+      "why": "libfontconfig.so.1: Qt finds fonts with it; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libwayland-client",
+      "platform": "rocky-10*",
+      "min": "1.24.0",
+      "why": "Qt's Wayland platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libwayland-cursor",
+      "platform": "rocky-10*",
+      "min": "1.24.0",
+      "why": "Qt's Wayland platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libwayland-egl",
+      "platform": "rocky-10*",
+      "min": "1.24.0",
+      "why": "Qt's Wayland platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libwayland-server",
+      "platform": "rocky-10*",
+      "min": "1.24.0",
+      "why": "Qt's Wayland compositor library; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libxkbcommon-x11",
+      "platform": "rocky-10*",
+      "min": "1.7.0",
+      "why": "keyboard handling in Qt's xcb plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "libxcb",
+      "platform": "rocky-10*",
+      "min": "1.17.0",
+      "why": "libxcb.so.1: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "xcb-util",
+      "platform": "rocky-10*",
+      "min": "0.4.1",
+      "why": "libxcb-util.so.1: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "xcb-util-cursor",
+      "platform": "rocky-10*",
+      "min": "0.1.4",
+      "why": "libxcb-cursor.so.0: Qt 6.5+ refuses xcb without it; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "xcb-util-wm",
+      "platform": "rocky-10*",
+      "min": "0.4.2",
+      "why": "libxcb-icccm.so.4: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "xcb-util-image",
+      "platform": "rocky-10*",
+      "min": "0.4.1",
+      "why": "libxcb-image.so.0: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "xcb-util-keysyms",
+      "platform": "rocky-10*",
+      "min": "0.4.1",
+      "why": "libxcb-keysyms.so.1: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "xcb-util-renderutil",
+      "platform": "rocky-10*",
+      "min": "0.3.10",
+      "why": "libxcb-render-util.so.0: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    }
+  ],
+  "network": [
+    {
+      "host": "github.com",
+      "why": "git, releases"
+    },
+    {
+      "host": "api.github.com",
+      "why": "GitHub's API: releases, publish.sh"
+    },
+    {
+      "host": "codeload.github.com",
+      "why": "GitHub source archives"
+    },
+    {
+      "host": "objects.githubusercontent.com",
+      "why": "GitHub release downloads (python-build-standalone)"
+    },
+    {
+      "host": "release-assets.githubusercontent.com",
+      "why": "GitHub release downloads (newer host)"
+    },
+    {
+      "host": "raw.githubusercontent.com",
+      "why": "raw files from GitHub repositories"
+    },
+    {
+      "host": "pypi.org",
+      "why": "the pinned packages (packaging/versions.env), and scripts/pins-newest.py's release dates"
+    },
+    {
+      "host": "files.pythonhosted.org",
+      "why": "the pinned packages' wheels"
+    },
+    {
+      "host": "musicbrainz.org",
+      "why": "scripts/check-services.py: one real request, by hand and weekly (A7.8)"
+    },
+    {
+      "host": "coverartarchive.org",
+      "why": "scripts/check-services.py (A7.8)"
+    },
+    {
+      "host": "lrclib.net",
+      "why": "scripts/check-services.py (A7.8)"
+    },
+    {
+      "host": "registry-1.docker.io",
+      "why": "Docker Hub: ubuntu, debian, linuxmintd, pywine and innosetup images (packaging/versions.env)"
+    },
+    {
+      "host": "auth.docker.io",
+      "why": "Docker Hub: sign-in tokens for pulls"
+    },
+    {
+      "host": "production.cloudflare.docker.com",
+      "why": "Docker Hub: image layers"
+    },
+    {
+      "host": "archive.ubuntu.com",
+      "port": 80,
+      "why": "apt in the Ubuntu-based containers (tier 1, the AppImage build, Mint) (plain HTTP, as the images ship)"
+    },
+    {
+      "host": "security.ubuntu.com",
+      "port": 80,
+      "why": "apt security updates in the Ubuntu-based containers (plain HTTP, as the images ship)"
+    }
+  ],
+  "container_images": [
+    {
+      "image": "ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
+      "why": "tier 1: the release's Python and PySide6 on Ubuntu 24.04 (packaging/versions.env)"
+    }
+  ]
+}

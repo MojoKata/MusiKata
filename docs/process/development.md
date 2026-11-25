@@ -18,13 +18,14 @@ DEVELOP.md           where the build stands, and the short version of running fr
 ## Running from source
 
 For development only; MusiKata is installed from its release (R1.4). It runs on the Python its
-release carries, which a script fetches:
+release carries, which a script fetches, with every package at its pin (`packaging/versions.env`;
+`--no-deps`, so nothing unpinned comes with them):
 
 ```sh
 "$(scripts/python-standalone.sh)" -m venv .venv
-(. packaging/versions.env && .venv/bin/pip install -e . \
-    "PySide6-Essentials==$PYSIDE" "PySide6-Addons==$PYSIDE" "shiboken6==$PYSIDE" \
-    $PYTEST $RUFF $MYPY)
+(. packaging/versions.env && .venv/bin/pip install --no-deps -e . \
+    "PySide6-Essentials==$PYSIDE" "PySide6-Addons==$PYSIDE" "shiboken6==$PYSIDE" $RUNTIME \
+    $PYTEST $COVERAGE $RUFF $MYPY $HYPOTHESIS $JSONSCHEMA)
 .venv/bin/musikata                     # or: .venv/bin/python -m musikata
 .venv/bin/python -m pytest -m "not slow"   # the fast set, under 30 seconds: on every save
 .venv/bin/ruff format && .venv/bin/ruff check && .venv/bin/mypy

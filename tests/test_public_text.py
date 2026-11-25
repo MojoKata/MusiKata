@@ -26,7 +26,7 @@ def _tracked():
             capture_output=True,
             check=True,
         ).stdout
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         pytest.skip("not a git work tree")
     return [p for p in out.decode().split("\0") if p]
 
