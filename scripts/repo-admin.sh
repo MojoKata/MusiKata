@@ -6,8 +6,9 @@
 #                          but some couldn't be read (GitHub shows some only to admins), else 0
 #   repo-admin.sh apply    set what differs, then check; a second run changes nothing
 #
-# Options: --repo OWNER/NAME (another repository, a fork, to try it); --yes (no questions from the
-# release settings' script, below).
+# Options: --repo OWNER/NAME (another repository, a fork, to try it); --reviewer LOGIN (passed to
+# the release settings' script: who approves a release's signing, when an admin for a time applies
+# these for the owner); --yes (no questions from the release settings' script, below).
 #
 # What it sets, the same in each MojoKata repository apart from the block below:
 # - a ruleset named after the default branch, on it: no deletion, no force push, a pull request to
@@ -30,9 +31,11 @@ RELEASE=scripts/publish.sh      # the release's own settings, set and checked by
 set -eu
 HERE=$(cd "$(dirname "$0")" && git rev-parse --show-toplevel)
 YES=
+REVIEWER=
 while [ $# -gt 0 ]; do
     case $1 in
         --repo) REPO=$2; shift 2 ;;
+        --reviewer) REVIEWER="--reviewer $2"; shift 2 ;;
         --yes) YES=--yes; shift ;;
         *) break ;;
     esac
@@ -90,7 +93,7 @@ check() {
     is "private vulnerability reporting" "$(pvr_now)" true
     if [ -n "$RELEASE" ]; then
         say "== the release's settings: $RELEASE check"
-        sh "$HERE/$RELEASE" --repo "$REPO" check || DRIFT=1
+        sh "$HERE/$RELEASE" --repo "$REPO" $REVIEWER check || DRIFT=1
     fi
     [ "$DRIFT" = 0 ] || exit 1
     [ "$UNREAD" = 0 ] || exit 3
@@ -140,7 +143,7 @@ apply() {
     fi
     if [ -n "$RELEASE" ]; then
         say "== the release's settings: $RELEASE setup"
-        sh "$HERE/$RELEASE" --repo "$REPO" $YES setup
+        sh "$HERE/$RELEASE" --repo "$REPO" $REVIEWER $YES setup
     fi
     check
 }

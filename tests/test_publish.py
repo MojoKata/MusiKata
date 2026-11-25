@@ -139,6 +139,7 @@ def test_check_says_it_cant_read_what_github_refuses_and_goes_on(tmp_path):
     assert "  release key: " in lines[-1], r.stderr  # it went on to the end
     for name in dict.fromkeys(re.findall(r'\bis "([^"]+)" "\$\((?:api|gh) ', _checks())):
         if name in (
+            "release environment: reviewer",
             "release environment: deploys",
             "release environment: secrets",
         ) or name.startswith(("master ruleset:", "tags ruleset:")):
@@ -661,3 +662,50 @@ def test_git_keeps_every_file_the_release_reads():
 def test_the_field_test_templates_environments_are_the_scripts():
     template = _read(".github", "ISSUE_TEMPLATE", "field-test.yml")
     assert re.findall(r"^        - label: (.+)$", template, re.M) == list(ft.environments())
+
+
+SETUP_GH = r"""#!/usr/bin/env python3
+# gh for publish.sh setup, without GitHub: no release environment yet; each call logged as JSON
+import json, os, sys
+d, a = os.environ["FAKE_GH_DIR"], sys.argv[1:]
+call = {"args": a}
+if a[:2] == ["api", "user"]:
+    print(1)
+elif a[0] == "api" and a[1].startswith("users/"):
+    print(4242)
+elif a[:2] == ["api", "repos/owner/name/environments/release"]:
+    sys.exit(1)
+elif "--input" in a:
+    call["body"] = sys.stdin.read()
+with open(os.path.join(d, "calls"), "a") as f:
+    f.write(json.dumps(call) + "\n")
+"""
+
+
+@needs_sh
+@pytest.mark.parametrize(("option", "reviewer"), [([], 1), (["--reviewer", "the-owner"], 4242)])
+def test_setup_makes_the_named_reviewer_approve_the_signing(tmp_path, option, reviewer):
+    """setup's release environment: its required reviewer is whoever runs setup, or the login
+    --reviewer names, so an admin for a time can set it up for the owner (genesis.md, 8)."""
+    gh = tmp_path / "bin" / "gh"
+    gh.parent.mkdir()
+    gh.write_text(SETUP_GH)
+    gh.chmod(0o755)
+    subprocess.run(
+        ["sh", SCRIPT, "--repo", "owner/name", *option, "--yes", "setup"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=dict(
+            os.environ,
+            FAKE_GH_DIR=str(tmp_path),
+            PATH=f"{gh.parent}{os.pathsep}{os.environ['PATH']}",
+        ),
+    )
+    calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
+    put = next(
+        c
+        for c in calls
+        if c["args"][:4] == ["api", "-X", "PUT", "repos/owner/name/environments/release"]
+    )
+    assert json.loads(put["body"])["reviewers"] == [{"type": "User", "id": reviewer}]

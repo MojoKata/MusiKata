@@ -167,8 +167,10 @@ Renewing the subkey before it expires, and replacing a leaked copy:
 setting already in place prints `there` (or `on`, `required`) and asks nothing:
 
 - **The `release` environment** (Settings → Environments): you are its required reviewer, and it
-  deploys only for tags matching `v*`. Its secrets come from step 7.4. The signing job names it, so
-  a release is signed only after you approve its run.
+  deploys only for tags matching `v*`. Setup makes whoever runs it the reviewer; someone given admin
+  for a time to run it for you names you instead, with `--reviewer LOGIN` (on `publish.sh`, and on
+  `repo-admin.sh`, which passes it on), and `check` reads the reviewer back. Its secrets come from
+  step 7.4. The signing job names it, so a release is signed only after you approve its run.
 - **The `tags` ruleset:** all tags. Only admins may create, move or delete one, so starting a
   release takes an admin, and a release can't be published on a tag nobody reviewed.
 - **Immutable releases** (Settings → General → Releases): a published release's files and tag can't
