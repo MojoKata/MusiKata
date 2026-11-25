@@ -133,7 +133,7 @@ def _git_files():
             text=True,
             check=True,
         ).stdout.split()
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         out = []
         for top, dirs, files in os.walk(ROOT):
             dirs[:] = [

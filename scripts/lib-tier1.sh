@@ -10,7 +10,7 @@ tier1_setup() {
     # libfaketime, for the suite run at a set time (MUSIKATA_CLOCK, scripts/test-clock.sh). The
     # image's tag follows this recipe, so a change makes a new image.
     _df="FROM $NOBLE_IMAGE"'
-RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git libgl1 libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0t64 libpulse0 libasound2t64 fonts-noto-core fontconfig python3 ca-certificates libfaketime >/dev/null
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git libgl1 libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0t64 libpulse0 libasound2t64 fonts-noto-core fontconfig python3 ca-certificates gnupg libfaketime >/dev/null
 RUN printf "<?xml version=\"1.0\"?><!DOCTYPE fontconfig SYSTEM \"fonts.dtd\"><fontconfig><alias><family>sans-serif</family><prefer><family>Noto Sans</family></prefer></alias></fontconfig>\n" > /etc/fonts/local.conf && fc-match sans-serif | grep -q "Noto Sans"'
     IMG=musikata-tier1:$(printf '%s' "$_df" | sha256sum | cut -c1-12)
     # The build is quiet but bounded: a build takes a minute at most, so ten fail it (apt-get can

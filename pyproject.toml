@@ -1,5 +1,34 @@
-# The tools' settings (docs/process/coding.md, "Style and types"; docs/process/testing.md). The
-# package's own table comes with its first code (DEVELOP.md, slice 1).
+# MusiKata's package, and its tools' settings (docs/process/coding.md, "Style and types";
+# docs/process/testing.md). The versions are pinned in packaging/versions.env, not here: these say
+# only what it needs.
+
+[project]
+name = "musikata"
+dynamic = ["version"]
+description = "A music player and organizer whose library is its files"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.14"          # the Python the release carries: packaging/versions.env (R1.2)
+dependencies = [
+    "PySide6-Essentials>=6.12",
+    "PySide6-Addons>=6.12",
+    "mutagen>=1.48",
+    "numpy>=2.5",
+    "av>=19",
+    "truststore>=0.10",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "musikata_core.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+musikata_core = ["schemas/*.json"]
 
 [tool.ruff]
 line-length = 100
@@ -11,7 +40,20 @@ extend-exclude = ["docs/mockups/src", "agents", "coworker"]
 # pyflakes, pycodestyle's errors, import order, bugbear, pyupgrade, simplify
 select = ["F", "E", "I", "B", "UP", "SIM"]
 
+[tool.mypy]
+files = ["src"]
+python_version = "3.14"
+
+[[tool.mypy.overrides]]
+module = ["musikata_core", "musikata_core.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["musikata", "musikata.*"]
+disallow_untyped_defs = true       # the Qt bridge's looseness is allowed, and nothing else
+
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["tests"]
 markers = ["slow: over 100 ms; left out of the fast set (docs/process/testing.md, \"Speed\")"]
 

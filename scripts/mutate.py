@@ -759,7 +759,7 @@ def export(args) -> int:
     else:  # a run stopped before its summary: the diffs from its mutants, or the names alone
         try:
             write_survivors(out / "survivors.txt", survivors, files_of(MUTANTS))
-        except (OSError, subprocess.CalledProcessError, ValueError):
+        except OSError, subprocess.CalledProcessError, ValueError:
             (out / "survivors.txt").write_text("".join(f"# {n}\n" for n in survivors))
     if (WORK / "mutmut.log").exists():
         shutil.copy2(WORK / "mutmut.log", out / "mutmut.log")
