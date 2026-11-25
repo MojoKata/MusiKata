@@ -1,8 +1,8 @@
 # A2. Library and scanning
 
-A2.1. **The database** is `musikata.db` (R1.5), one per root on the computer's own disk, SQLite in
-WAL mode. It is an index: everything in it is rebuilt from the root's files and its `.musikata`
-folder (A2.8). Its tables, in outline:
+A2.1. **The database** is `musikata.db` (R1.5), one per root on the computer's own disk (A2.9),
+SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's files and its
+`.musikata` folder (A2.8). Its tables, in outline:
 
 | Table | Holds |
 |---|---|
@@ -27,8 +27,8 @@ A2.2. **The scan.**
 1. Walk the root with `os.scandir`, skipping what R2.3.1 skips.
 2. Compare each audio file's size and modification time with its row; unchanged files cost one
    `stat`.
-3. Read changed and new files with Mutagen on the worker pool, in batches of 200, and write each
-   batch in one transaction.
+3. Read changed and new files with Mutagen on the worker processes (A1.3), in batches of 200, and
+   write each batch in one transaction.
 4. Rows whose file wasn't seen are removed at the end, unless the file reappears elsewhere with
    the same `audio_hash`, which is a move: the row's path changes and its play counts stay.
 
@@ -61,7 +61,7 @@ of a large library is one indexed query on `parent`, not a walk of the disk.
   row and each of its ancestors' rows are recomputed, bottom up, in the batch's transaction:
   counts, the worst state (R2.9.5), its own cover (R5.8 step 1) and, when it has none, the
   mosaic's sources (step 2), chosen from its children's rows without reading any file.
-- **Mosaic images.** A mosaic is drawn on the worker pool with `QImage` and `QPainter` from its
+- **Mosaic images.** A mosaic is drawn on the thread pool with `QImage` and `QPainter` from its
   sources' thumbnails, at the two sizes the views use, and kept in the cache folder (R1.5) under
   a hash of its sources' identities and modification times. A changed cover changes the hash of
   every mosaic it is in, and they are redrawn when next shown; stale ones are removed with the
@@ -78,14 +78,35 @@ apart instead:
 - Each computer has an id, made on its first start and kept in the shared settings, with its name
   for display.
 - Play counts are a file per computer, `plays/<computer id>.json`, written whole by that computer
-  alone from the counts it keeps in the index; the count shown is the sum of the files. No two
-  computers ever write the same file, so plays are never lost or counted twice, and a root kept in
-  sync by Dropbox, OneDrive or Syncthing gets no "conflicted copy" files from them.
+  alone from the counts it keeps in the index, at most once a minute while playing and at quit; the
+  count shown is the sum of the files. No two computers ever write the same file, so plays are never
+  lost or counted twice, and a root kept in sync by Dropbox, OneDrive or Syncthing gets no
+  "conflicted copy" files from them, nor a new upload each time a song ends. A crash loses nothing:
+  the counts are in the index, and the file is written at the next start.
+- Each entry of `plays/`, `ratings.json` and `ignored.json` names its song by its path under the
+  root and its audio hash (A2.3), as in `{"path": "…", "hash": "…", "count": 12, "last": "…"}`. A
+  reader matches an entry by path, and by hash when no song has that path, so a song moved by any
+  means, by MusiKata (R12) or in a file manager, keeps its plays, rating and dismissal on every
+  computer. Two exact copies (R2.12) are told apart by path while both exist. Each computer rewrites
+  the paths in its own files when its scan finds a move.
 - `ignored.json` and `ratings.json` change seldom and are merged entry by entry: before writing,
   MusiKata reads the file again, and the newest entry wins.
 - The change history is one file per entry (A3.5), never rewritten, so there is nothing to merge.
-- A move made by MusiKata (R12) is an entry in the change history. Each computer rewrites the
-  moved songs' paths in its own files, and reads other computers' play files through the moves
-  they haven't caught up with yet.
 - When `.musikata` can't be written (R1.5.2), the same data is kept in the index only, and the
   root's settings are read and never written.
+
+A2.9. **Finding a root's index.** Each root has an id, made when it is first opened and kept in
+`<root>/.musikata/root.json`, apart from the root's settings, which a new root copies (R13.9). Its
+index and caches (R1.5) are kept under that id, with the path the root was last opened at, so a
+drive given another letter or mount point keeps its index:
+
+- Opened at its last path, the root uses its index.
+- Opened at another path, while the last path no longer holds a root with its id, the root has
+  moved: the index is used and its path updated.
+- Opened at another path while the last path still holds a root with its id, the root is a copy: it
+  gets a new id and an index of its own, and is scanned.
+- A root whose `.musikata` can't be written (R1.5.2), so that it has no id of its own, is kept under
+  a hash of its path instead.
+
+At start, the index and caches of every root not opened for 180 days are removed, and the App log
+names each. A root that comes back after that is scanned again, which loses only time (R1.5.1).

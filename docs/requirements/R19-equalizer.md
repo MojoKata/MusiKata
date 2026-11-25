@@ -16,8 +16,9 @@ R19.1. **The bands.** Each preset is one of two kinds:
   it plays exactly as the same parametric preset would.
 
 Both kinds have a preamp from −12 to +12 dB. The equalizer is on or off as a whole. It works after
-ReplayGain (R7.5) and before the volume, and never clips: when a boost would push the sound past
-full scale, the level is held down instead.
+ReplayGain (R7.5) and before the volume, and never clips: when the preamp and the largest boost
+together would pass full scale, the level is held down by the difference, and the panel says so
+under the preamp ("−2.7 dB more, to keep from clipping").
 
 R19.2. **The Equalizer panel** opens from the **Equalizer** button in Now Playing's top row
 (R11.4), from ⋮ › **Equalizer…** (R6.6), and from Settings (R13.7). It floats over the view and
@@ -32,13 +33,12 @@ stays open while the music plays: the on/off switch; the preset picker, the pres
   columns from the graph's left edge: the selected band's handle, with a delete button at the
   foot of the row; its type, as a vertical segmented control (Bell, Low shelf, High shelf, Low cut,
   High cut); sliders for its frequency and for the preamp; and sliders for its gain and Q. Each
-  slider's value is shown above its right end and can be typed into. The panel shows no
-  instructions for the mouse.
+  slider's value is shown above its right end and can be typed into.
 - **Graphic** (`N06-equalizer-graphic`): the preamp and a slider per band with its value, and the
   curve they make drawn across them. Double-clicking a slider sets it back to 0 dB.
 
-Every handle, slider and field works from the keyboard (R18.2): Tab moves between bands, the
-arrow keys move the selected one.
+The panel shows no instructions for the mouse. Every handle, slider and field works from the
+keyboard (R18.2): Tab moves between bands, the arrow keys move the selected one.
 
 R19.3. **Presets.**
 

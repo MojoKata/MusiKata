@@ -17,8 +17,10 @@ A4.1. **The pipeline.**
 - **Decoding** is PyAV, the Python binding of FFmpeg, whose wheels carry FFmpeg's decoders for
   every kind of R2.2. Qt's own `QAudioDecoder` can't seek and doesn't report encoder padding, and
   `QMediaPlayer` plays files one at a time with a gap between them.
-- **Output** is Qt Multimedia's `QAudioSink` in pull mode, reading float samples from a ring
-  buffer at the device's own sample rate.
+- **Output** is Qt Multimedia's `QAudioSink` in pull mode, reading float samples from a ring buffer
+  at the device's own sample rate. In pull mode the sink asks for samples on the thread it lives on,
+  so it lives on the playback thread, which runs its own event loop, and its own buffer is set to
+  about 250 ms: a busy GUI thread or a wait for Python's lock never starves the device.
 - The playback thread (A1.3) decodes and processes blocks of about 20 ms until the ring buffer
   holds two seconds; the device pulls from it on its own schedule, so a busy GUI or a slow disk
   doesn't stop the sound.
@@ -37,7 +39,8 @@ in the same stream, so there is no gap:
 
 A4.3. **The analyzer's audio.** Each block handed to the ring buffer is also copied, with its
 position, into the analyzer's ring buffer of the last few seconds (A5.2). The analyzer reads it
-delayed by the device's reported latency, so what is drawn is what is heard.
+delayed by the device's reported latency and the limiter's look-ahead (A4.4), so what is drawn is
+what is heard.
 
 A4.4. **Gain and the equalizer.**
 
@@ -53,7 +56,11 @@ A4.4. **Gain and the equalizer.**
 - **Parametric to graphic** (R19.6): the ten slider gains are the least-squares fit of the ten
   bells to the parametric curve, in dB, sampled every twelfth of an octave and held to ±12 dB; how
   close they come is the largest difference between the two curves.
-- **Never clipping:** after the preamp, a peak limiter holds the stream under full scale.
+- **Never clipping** (R19.1): when a filter is built, its curve's largest boost is known. When the
+  preamp plus that boost is above 0 dB, the level is lowered by the difference, ramped with the
+  filter's 50 ms crossfade, and the panel shows by how much. A look-ahead peak limiter of 5 ms then
+  catches the few peaks the filter's phase still pushes over full scale; on ordinary music it seldom
+  acts. Its look-ahead delays the sound by 5 ms, which the analyzer allows for (A4.3).
 - **Volume** is applied last, so the equalizer works at full resolution.
 
 A4.5. **The system's media controls** (R7.8):

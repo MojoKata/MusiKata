@@ -20,9 +20,9 @@ R1.2.2. Tags are read and written with Mutagen (A3), and the visualizations' ari
 (A5), as is the equalizer's (R19). Nothing else is added without a reason written in the
 architecture.
 
-R1.3. MusiKata is one desktop-user process with no service and no administrator rights. It reads
-and writes only the music root (R2.1), its own data folders (R1.5) and the files the user hands
-it.
+R1.3. MusiKata runs as the desktop user, with no service and no administrator rights: one app, whose
+worker processes (A1.3) are its own and end when it quits. It reads and writes only the music root
+(R2.1), its own data folders (R1.5) and the files the user hands it.
 
 R1.4. Distribution:
 
@@ -47,8 +47,10 @@ R1.5. **Local data,** in three places:
   R13.9): `~/.musikata/` on Linux, `%USERPROFILE%\.musikata\` on Windows, `~/Library/Application
   Support/MusiKata/` on macOS.
 - **This computer's index and caches,** one set per root: the library index, a SQLite database
-  (`musikata.db`) whose schema is versioned and migrated at start, and the caches (cover
-  thumbnails, waveforms, lookup answers); and the App log (R14) in text files.
+  (`musikata.db`) whose schema is versioned and migrated at start, and the caches (cover thumbnails,
+  waveforms, lookup answers); and the App log (R14) in text files. A root's set follows the root
+  when its drive is mounted at another path, and is removed when the root hasn't been opened for 180
+  days (A2.9).
 
 | | Index, per root | Caches, per root | App log |
 |---|---|---|---|

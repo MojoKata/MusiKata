@@ -36,10 +36,12 @@ environment leaves this list, and R1.1, together.
   across sample rates and kinds, with MP3, AAC and Opus padding trimmed; seeking lands on the
   sample; the equalizer's measured response matches each preset's curve, for every band type;
   parametric to graphic and back gives the same bands; Equalizer APO files round-trip; nothing
-  clips.
-- **The root's own files** (A2.8): two computers playing at once each write their own play file and
-  the sums add up; `ignored.json` and `ratings.json` written at once lose nothing; a read-only
-  `.musikata` keeps everything in the index.
+  clips, and the level held down matches the preamp and the largest boost.
+- **The root's own files** (A2.8, A2.9): two computers playing at once each write their own play
+  file and the sums add up; `ignored.json` and `ratings.json` written at once lose nothing; a song
+  moved in a file manager keeps its plays, rating and dismissal on the other computer; a read-only
+  `.musikata` keeps everything in the index; a root mounted at another path finds its index, and a
+  copy of a root gets its own.
 - **Sort names** (R2.13): sort tags win, articles are skipped without them, and the sort tokens of
   R12.1 move the article to the end.
 - **Sleep timer** (R7.10): each choice stops at its time or at the end of its song or album, the

@@ -1,11 +1,11 @@
 # A5. Visualizations
 
-A5.1. **Waveforms** (R11.1). A worker decodes the song with PyAV (A4.1) to mono floats and reduces
-it to 2,000 peak pairs (the largest and smallest sample in each slice), whatever the song's length:
-enough for a 1920-pixel-wide view at two bars per pixel or fewer. The peaks are stored as a 16-bit
-blob (8 KB a song) in the `waveform` table, keyed by the audio hash (A2.3), so retagging or moving a
-song keeps its waveform. Views draw as many bars as fit and take the largest peak of the slices
-under each bar.
+A5.1. **Waveforms** (R11.1). A worker process (A1.3) decodes the song with PyAV (A4.1) to mono
+floats and reduces it to 2,000 peak pairs (the largest and smallest sample in each slice), whatever
+the song's length: enough for a 1920-pixel-wide view at two bars per pixel or fewer. The peaks are
+stored as a 16-bit blob (8 KB a song) in the `waveform` table, keyed by the audio hash (A2.3), so
+retagging or moving a song keeps its waveform. Views draw as many bars as fit and take the largest
+peak of the slices under each bar.
 
 A5.2. **The spectrum** (R11.3). Each frame takes the newest 4,096 samples from the ring buffer of
 A4.3, mixes them to mono, applies a Hann window and runs NumPy's `rfft`. The magnitudes are gathered
@@ -32,8 +32,8 @@ landscape's "3D" is a projection of 2D lines that the scene graph draws directly
 `N02-now-playing-3d-analyzer` is drawn with the same projection.
 
 A5.5. **When nothing is shown** (R11.3.2), neither the analyzer nor the cover's spectrum (A5.6) on
-screen, in Now Playing or the mini player (R15.5), they stop requesting frames and the ring buffer
-stops being read; the audio tap stays attached, as detaching it would interrupt playback.
+screen, in Now Playing or the mini player (R15.5), they stop requesting frames, and the playback
+thread stops copying blocks into the analyzer's ring buffer (A4.3) until one is shown again.
 
 A5.6. **The cover's spectrum** (R11.4.3) is the spectrum of A5.2 gathered into 32 bands, drawn as
 one translucent geometry node over the cover image and updated at 30 frames a second, which is

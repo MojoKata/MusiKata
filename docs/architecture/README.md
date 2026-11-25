@@ -12,13 +12,13 @@ status; git holds the history.
 
 # 1. Overview
 
-[A1](A1-overview.md): the stack, the two packages and what may import what, threads, the data
-flow from a file to the screen and back, and the decisions that shape everything else.
+[A1](A1-overview.md): the stack, the two packages and what may import what, threads and processes,
+the data flow from a file to the screen and back, and the decisions that shape everything else.
 
 # 2. Library and scanning
 
-[A2](A2-library-and-scanning.md): the database, the scan, watching the root, search, and how the
-index stays a copy of the files.
+[A2](A2-library-and-scanning.md): the database, the scan, watching the root, search, how the index
+stays a copy of the files, and finding a root's index.
 
 # 3. Tags
 
@@ -27,8 +27,8 @@ and the change history.
 
 # 4. Playback
 
-[A4](A4-playback.md): Qt Multimedia, the queue, taking the audio for the analyzer, ReplayGain, and
-the system's media controls on each platform.
+[A4](A4-playback.md): decoding with PyAV, gapless joins between songs, ReplayGain, the equalizer and
+never clipping, the analyzer's audio, the system's media controls on each platform, and devices.
 
 # 5. Visualizations
 

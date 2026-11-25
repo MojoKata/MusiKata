@@ -22,12 +22,25 @@ A1.2. **Two packages,** as in the rest of the Kata suite:
   `Player`, `Library`) exposed to QML, playback, the system integrations of A4.5, and the tour
   (A1.6).
 
-A1.3. **Threads.** The GUI thread only draws and answers clicks. Scanning, reading and writing
-tags, decoding for waveforms and moving files run on a worker pool (`QThreadPool`), each job
-reporting progress and results through Qt signals queued to the GUI thread. The database has one
-writer connection, owned by a single writer thread, and read connections per thread (WAL mode),
-so a long write never stalls a list scrolling. Playback has a thread of its own (A4.1), which
-decodes a few seconds ahead of the sound device, so nothing else running can make the sound stop.
+A1.3. **Threads and processes.** The GUI thread only draws and answers clicks.
+
+- **Worker processes** do the Python work that keeps a core busy: the scan's tag reads and audio
+  hashes (A2.2) and decoding for waveforms (A5.1). Python runs one thread's Python code at a time,
+  so on threads this work would gain no speed and would make the GUI thread wait behind it for every
+  row a list draws. A `ProcessPoolExecutor` of one process fewer than the cores, started when first
+  needed with `spawn` (forking a process whose Qt threads are running is unsafe), runs
+  `musikata_core` code that imports no Qt and sends plain data back. Each process lowers its own
+  priority as it starts: `nice` and the idle I/O class (`ioprio_set`) on Linux,
+  `PROCESS_MODE_BACKGROUND_BEGIN` on Windows, `PRIO_DARWIN_BG` on macOS, so a first scan never slows
+  the window or the sound. They are MusiKata's own children and end with it; there is no service
+  (R1.3). The frozen builds call `multiprocessing.freeze_support()`.
+- **A thread pool** (`QThreadPool`) does the work that waits on the disk or the network: safe writes
+  (A3.4), moving files (R12), mosaics (A2.7), lookups (A7), and passing the processes' results on.
+  Each job reports progress and results through Qt signals queued to the GUI thread.
+- **The database** has one writer connection, owned by a single writer thread, and read connections
+  per thread (WAL mode), so a long write never stalls a list scrolling.
+- **Playback** has a thread of its own (A4.1), which decodes a few seconds ahead of the sound
+  device, so nothing else running can make the sound stop.
 
 A1.4. **From a file to the screen and back.**
 
@@ -51,14 +64,6 @@ library and saves `DIR/<screen>.png`, offscreen, as AppKata's does. It is how th
 made and how layout regressions are caught: each screen's visible text is checked against the box
 it is drawn in.
 
-A1.8. **Two windows.** The mini player (R15) is a second top-level `Window` created from the same
-QML engine, so it binds to the same `Player` and models as the main window and nothing is copied
-between them; each layout is a QML component loaded into it. It is frameless
-(`Qt.FramelessWindowHint`), moved and resized with `startSystemMove()` and `startSystemResize()`,
-which work on Wayland as well as X11, Windows and macOS, and kept on top with
-`Qt.WindowStaysOnTopHint`, which Wayland compositors may ignore (R15.2). Its visuals reuse the
-items of A5.3 at a smaller size.
-
 A1.7. **Decisions.**
 
 A1.7.1. **QML over Qt Widgets.** Widgets would give native-looking tables for free, but the look of
@@ -81,3 +86,11 @@ seeking, buffering and devices that come and go are MusiKata's to write and test
 playback, the equalizer, the analyzer's audio without a second tap, and the ground for crossfade
 ([#4](https://github.com/MojoKata/MusiKata/issues/4)) and computing loudness
 ([#2](https://github.com/MojoKata/MusiKata/issues/2)).
+
+A1.8. **Two windows.** The mini player (R15) is a second top-level `Window` created from the same
+QML engine, so it binds to the same `Player` and models as the main window and nothing is copied
+between them; each layout is a QML component loaded into it. It is frameless
+(`Qt.FramelessWindowHint`), moved and resized with `startSystemMove()` and `startSystemResize()`,
+which work on Wayland as well as X11, Windows and macOS, and kept on top with
+`Qt.WindowStaysOnTopHint`, which Wayland compositors may ignore (R15.2). Its visuals reuse the
+items of A5.3 at a smaller size.

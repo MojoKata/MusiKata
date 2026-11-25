@@ -3,7 +3,7 @@
 How MusiKata talks to the services of R16 and R17.4, politely and only when asked.
 
 A7.1. **The client.** Lookups live in `musikata_core.online`, one module per service over one small
-HTTP client built on Python's `urllib.request`, run on the worker pool (A1.3). Not Qt's
+HTTP client built on Python's `urllib.request`, run on the thread pool (A1.3). Not Qt's
 `QNetworkAccessManager`: the core imports `QtCore` at most (A1.2), and a plain client is easy to
 replace with recorded answers in tests (A7.8). HTTPS only. Certificates are checked against the
 operating system's own trust store through `truststore`, the same way on all three platforms;

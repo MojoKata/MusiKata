@@ -2412,7 +2412,8 @@ def n06_equalizer_graphic(p):
     p.setPen(QPen(grad(xs[0], 0, xs[-1], 0, [(0, "cyan"), (0.5, "accent"), (1, "pink")]), 2.4)); p.setBrush(Qt.NoBrush)
     p.drawPath(path_)
     text(p, xs[0] - 30, bot + 28, "Hz", 10.5, "faint", w=60, align="center")
-    text(p, ix, bot + 52, "Double-click a slider to set it back to 0 dB.", 11.5, "faint", w=pw - 56)
+    # the preamp plus Car's largest boost (+4.7 dB) passes full scale, so the level is held down (R19.1)
+    text(p, ix, bot + 52, "−2.7 dB more, to keep from clipping", 11.5, "muted", w=pw - 56)
 
 
 def l09_needs_attention(p):
