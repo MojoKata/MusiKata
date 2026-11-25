@@ -19,6 +19,13 @@ import re
 import stat
 
 import pytest
+from hypothesis import settings
+
+# Hypothesis (docs/process/testing.md, "Properties"): tier 1 tries a fixed 50 examples a property,
+# so a run is fast and never flaky; HYPOTHESIS_PROFILE=deep, weekly and before a release, thousands
+settings.register_profile("tier1", max_examples=50, derandomize=True, database=None)
+settings.register_profile("deep", max_examples=5000, database=None)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "tier1"))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIPS = os.path.join(ROOT, "tests", "skips")
