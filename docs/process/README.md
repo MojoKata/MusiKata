@@ -46,6 +46,8 @@ written here so this repository stands on its own.
   product and its releases) and `DEVELOP.md` (the build).
 - **References are ids,** never file names or line numbers: `R3.6.1`, `A3.4`, `[Q#13]`.
 - **A file past 500 lines** becomes a folder with a file per first-level item.
+- **Names sort by id:** each number in a file or folder name is zero-padded to the width of the
+  largest among its siblings (`R01-…` to `R19-…`); ids themselves are never padded.
 - **Free standing.** The documents describe MusiKata in its own terms; another project may be
   named as where a practice comes from, never as where MusiKata's behaviour is defined.
 - **Code comments** say why, cite requirement ids (`R4.7`), and never cite a review or other

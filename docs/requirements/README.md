@@ -12,7 +12,7 @@ takes more than a sentence, is in the [architecture](../architecture/README.md);
 done is in [`../process/`](../process/README.md). Mockups live in
 [`../mockups/`](../mockups/README.md).
 
-**How the requirements are organised.** Each section below has a file of its own, R1 to R14. A
+**How the requirements are organised.** Each section below has a file of its own, R1 to R19. A
 section's items are numbered within it: `R3.4` is item 4 of the tags-from-paths section, and
 `R3.6.1` item 1 under R3.6. A reference names an item by its id.
 
@@ -20,8 +20,8 @@ section's items are numbered within it: `R3.4` is item 4 of the tags-from-paths 
    renumbered or reused: a new section or item takes the next free number, and one that is
    removed leaves its number unused.
 2. **Splitting a section.** A section file that grows past 500 lines becomes a folder,
-   `RN-name/README.md`, that keeps the section's introduction and a table of its first-level
-   items, each in a file of its own named by its id. References do not change.
+   `RNN-name/README.md`, that keeps the section's introduction and a table of its first-level items,
+   each in a file of its own named by its id (`R03.04-name.md`). References do not change.
 3. **A statement, not a changelog.** The requirements say what MusiKata is and does, in the
    present tense, and carry no dates, versions or status of their own; git holds their history,
    and `DEVELOP.md` says where the build stands.
@@ -32,6 +32,11 @@ section's items are numbered within it: `R3.4` is item 4 of the tags-from-paths 
 5. **Mockups in step.** A change here that touches what a user sees or does (a screen, field,
    button, dialog, setting, state or message) updates the mockups in the same change
    ([process](../process/README.md#mockups-in-step-with-the-requirements)).
+6. **Names that sort.** A file or folder is named by its id with each number zero-padded to the
+   width of the largest among its siblings, so a listing sorts by id:
+   `R01-platform-and-architecture.md` to `R19-equalizer.md`, and inside a split section `R03.01-…`
+   to `R03.12-…`. When a new sibling needs another digit, they are all renamed. Only names are
+   padded: ids and references never are (`R1`, `R3.4`). `scripts/doccheck.py` checks it.
 
 ## Principles
 
@@ -58,15 +63,15 @@ These hold everywhere, and a section that seems to break one is wrong.
 
 | Id | Section | What it covers |
 |---|---|---|
-| **R1** | [Platform and architecture](R1-platform-and-architecture.md) | Platforms, Python and PySide6, one app and no service, distribution, local data, one MusiKata at a time, updates, language, size and speed |
-| **R2** | [The music root and the library](R2-music-root-and-library.md) | The music root, the file kinds, scanning and watching, what a song, album and artist are, the library views, search, Needs attention, the Folders view, a missing music root, removing songs |
-| **R3** | [Tags from paths](R3-tags-from-paths.md) | Patterns and their tokens, detecting the pattern, the preview, fill or correct, tidying |
-| **R4** | [Tags and bulk editing](R4-tags-and-bulk-editing.md) | The tag fields, the Edit tags panel for one song or many, mixed values, saving, the change history and Undo |
-| **R5** | [Album art](R5-album-art.md) | Where art is found, the Album art dialog, embedding and `cover.jpg`, what Needs attention reports, folder covers and mosaics |
-| **R6** | [Main window and look](R6-main-window.md) | The layout, the sidebar, the header, the now-playing bar, the design tokens, menus, keyboard, drag and drop |
-| **R7** | [Playback](R7-playback.md) | The queue, shuffle and repeat, ReplayGain, seeking, media keys and the system's now-playing |
-| **R8** | [Playlists](R8-playlists.md) | M3U8 files, making and changing playlists, drag and drop, missing songs, smart playlists, export |
-| **R9** | [Genres](R9-genres.md) | The Genres view, several genres per song, renaming and merging, near duplicates |
+| **R1** | [Platform and architecture](R01-platform-and-architecture.md) | Platforms, Python and PySide6, one app and no service, distribution, local data, one MusiKata at a time, updates, language, size and speed |
+| **R2** | [The music root and the library](R02-music-root-and-library.md) | The music root, the file kinds, scanning and watching, what a song, album and artist are, the library views, search, Needs attention, the Folders view, a missing music root, removing songs |
+| **R3** | [Tags from paths](R03-tags-from-paths.md) | Patterns and their tokens, detecting the pattern, the preview, fill or correct, tidying |
+| **R4** | [Tags and bulk editing](R04-tags-and-bulk-editing.md) | The tag fields, the Edit tags panel for one song or many, mixed values, saving, the change history and Undo |
+| **R5** | [Album art](R05-album-art.md) | Where art is found, the Album art dialog, embedding and `cover.jpg`, what Needs attention reports, folder covers and mosaics |
+| **R6** | [Main window and look](R06-main-window.md) | The layout, the sidebar, the header, the now-playing bar, the design tokens, menus, keyboard, drag and drop |
+| **R7** | [Playback](R07-playback.md) | The queue, shuffle and repeat, ReplayGain, seeking, media keys and the system's now-playing |
+| **R8** | [Playlists](R08-playlists.md) | M3U8 files, making and changing playlists, drag and drop, missing songs, smart playlists, export |
+| **R9** | [Genres](R09-genres.md) | The Genres view, several genres per song, renaming and merging, near duplicates |
 | **R10** | [Ratings](R10-ratings.md) | Stars, setting them, writing them into the files |
 | **R11** | [Visualizations](R11-visualizations.md) | The linear waveform, the 3D analyzer, the Now Playing view |
 | **R12** | [Organizing files](R12-organizing-files.md) | Moving and renaming files to match their tags, adding files from outside the root |

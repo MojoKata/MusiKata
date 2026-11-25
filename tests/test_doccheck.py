@@ -84,11 +84,50 @@ def test_a_wrapped_line_starting_with_a_cited_id_reads_as_that_item():
 
 def test_the_requirements_table_and_the_architecture_headings_are_both_read_as_indexes():
     assert doccheck.TABLE_ROW.search(
-        "| **R3** | [Tags from paths](R3-tags-from-paths.md) | x |"
-    ).groups() == ("R", "3", "Tags from paths", "R3-tags-from-paths.md")
+        "| **R3** | [Tags from paths](R03-tags-from-paths.md) | x |"
+    ).groups() == ("R", "3", "Tags from paths", "R03-tags-from-paths.md")
     assert doccheck.SECTION_HEAD.search("# 3. Tags\n").groups() == ("3", "Tags")
 
 
 def test_now_playing_is_not_read_as_a_changelog_word():
     assert not doccheck.CHANGELOG.search("the now-playing bar and Now Playing")
     assert doccheck.CHANGELOG.search("it is now saved")
+
+
+def _book(tmp_path, monkeypatch, names):
+    """A requirements book in tmp_path with these section files (and split-section items)."""
+    top = tmp_path / "docs" / "requirements"
+    for name in names:
+        (top / name).parent.mkdir(parents=True, exist_ok=True)
+        (top / name).write_text("# R1. A\n")
+    monkeypatch.setattr(doccheck, "ROOT", str(tmp_path))
+    monkeypatch.setattr(doccheck, "BOOKS", {"R": "docs/requirements"})
+
+
+def test_names_sort_by_id_zero_padded_among_their_siblings(tmp_path, monkeypatch):
+    """docs/requirements/README.md, rule 6: R1 beside R19 sorts after R19 in a listing."""
+    _book(tmp_path, monkeypatch, ["R01-a.md", "R02-b.md", "R19-c.md"])
+    assert doccheck.padding_problems("R") == []
+    _book(tmp_path, monkeypatch, ["R3-d.md"])
+    assert doccheck.padding_problems("R") == [
+        "docs/requirements/R3-d.md: its number is padded to 2 digits (03), as its siblings' "
+        "widest is (docs/requirements/README.md, rule 6)"
+    ]
+
+
+def test_a_split_sections_items_are_padded_among_themselves(tmp_path, monkeypatch):
+    _book(
+        tmp_path,
+        monkeypatch,
+        ["R01-a.md", "R12-b/README.md", "R12-b/R12.01-x.md", "R12-b/R12.10-y.md"],
+    )
+    assert doccheck.padding_problems("R") == []
+    _book(tmp_path, monkeypatch, ["R12-b/R12.2-z.md"])
+    assert [p.split(":")[0] for p in doccheck.padding_problems("R")] == [
+        "docs/requirements/R12-b/R12.2-z.md"
+    ]
+
+
+def test_a_padded_name_is_not_a_citation():
+    assert [m.group(1) for m in doccheck.CITED.finditer("R01-platform.md, R03.04-x, A01")] == []
+    assert [m.group(1) for m in doccheck.CITED.finditer("R1 and R3.4")] == ["R1", "R3.4"]

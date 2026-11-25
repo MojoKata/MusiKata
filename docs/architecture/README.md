@@ -4,11 +4,12 @@ The [requirements](../requirements/README.md) say what MusiKata does. These file
 it is built the way it is, where that takes more than a sentence: the design, the choices weighed
 and the evidence behind them.
 
-They are laid out as the requirements are, with A in place of R: each section has a file of its
-own, `AN-name.md`, or a folder, `AN-name/README.md`, once it passes 500 lines, with a file per
-first-level item named by its id. `A3.4` is item 4 of the tags design. Ids are never renumbered
-or reused. Like the requirements, they are written in the present tense and carry no dates or
-status; git holds the history.
+They are laid out as the requirements are, with A in place of R: each section has a file of its own,
+`AN-name.md`, or a folder, `AN-name/README.md`, once it passes 500 lines, with a file per
+first-level item named by its id. Names are zero-padded as the requirements' are, to the width of
+the largest number among their siblings (with seven sections, none needs a zero). `A3.4` is item 4
+of the tags design. Ids are never renumbered or reused. Like the requirements, they are written in
+the present tense and carry no dates or status; git holds the history.
 
 # 1. Overview
 

@@ -11,7 +11,7 @@ reports:
 2. a question, gap or other issue (`[Q#n]`, `[G#n]`, `[#n]`) whose link isn't that issue, and a
    placeholder for an issue not made yet (`[G#?name]`);
 3. each index's sections against the files: the requirements' table of sections, the architecture's
-   `# N. Title` headings;
+   `# N. Title` headings; and names that sort by id, zero-padded among their siblings (R01 to R19);
 4. a section file past 500 lines, or an id numbered twice;
 5. words and dates a statement doesn't carry, for a reader to judge: some are fine in context
    ("now" in "now playing" isn't one).
@@ -40,12 +40,13 @@ CODE_SKIP = ("tests/data/", "packaging/licenses/")
 # "# R17.4. Online lyrics".
 DEFINED = re.compile(r"^(?:#+ )?([RA]\d+(?:\.\d+)*)\. ", re.M)
 # A citation. R3-21 (a review finding) is not an item, nor are the mockups' screen names (A01 has no
-# dot): an A id is checked once it is dotted.
-CITED = re.compile(r"(?<![\w.\-/#$])(R\d+(?:\.\d+)*|A\d+(?:\.\d+)+)(?![\w\-]|\.\d)")
+# dot): an A id is checked once it is dotted. An id is never zero-padded, so R01 is a file's name,
+# not a citation (rule 6).
+CITED = re.compile(r"(?<![\w.\-/#$])(R[1-9]\d*(?:\.\d+)*|A[1-9]\d*(?:\.\d+)+)(?![\w\-]|\.\d)")
 ISSUE = re.compile(r"\[([A-Z]*)#(\d+)\](\(([^)\s]*)\))?")
 PLACEHOLDER = re.compile(r"\[([A-Z]*)#\?([\w-]+)\]")
 SECTION_HEAD = re.compile(r"^# (\d+)\. (.+?)\s*$", re.M)
-# The requirements' index is a table: "| **R3** | [Tags from paths](R3-tags-from-paths.md) | … |".
+# The requirements' index is a table: "| **R3** | [Tags from paths](R03-tags-from-paths.md) | … |".
 TABLE_ROW = re.compile(r"^\| \*\*([RA])(\d+)\*\* \| \[([^\]]+)\]\(([^)\s]+)\)", re.M)
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 CHANGELOG = re.compile(
@@ -185,11 +186,11 @@ def index_problems(prefix):
     found, listed = [], {}
     for row in TABLE_ROW.finditer(text):
         if row.group(1) == prefix:
-            listed[row.group(2)] = (row.group(3), row.group(4))
+            listed[str(int(row.group(2)))] = (row.group(3), row.group(4))
     heads = list(SECTION_HEAD.finditer(text))
     for i, h in enumerate(heads):
         body = text[h.end() : heads[i + 1].start() if i + 1 < len(heads) else len(text)]
-        links = [link for link in LINK.findall(body) if re.match(rf"{prefix}{h.group(1)}-", link)]
+        links = [link for link in LINK.findall(body) if re.match(rf"{prefix}0*{h.group(1)}-", link)]
         if not links:
             found.append(
                 f"{readme}: # {h.group(1)}. {h.group(2)} links no {prefix}{h.group(1)} file"
@@ -202,7 +203,7 @@ def index_problems(prefix):
         if "/" in part and not part.endswith("/README.md"):
             continue
         m = re.match(rf"{prefix}(\d+)-", part)
-        sections[m.group(1)] = part
+        sections[str(int(m.group(1)))] = part
     for num, part in sorted(sections.items(), key=lambda kv: int(kv[0])):
         if num not in listed:
             found.append(f"{readme}: section {prefix}{num} ({part}) has no heading")
@@ -227,14 +228,51 @@ def split_problems(prefix):
         parts = rel[len(top) + 1 :].split("/")
         if len(parts) != 2 or parts[1] == "README.md":
             continue
-        m = re.match(rf"({prefix}\d+\.\d+)-[\w-]+\.md$", parts[1])
+        m = re.match(rf"{prefix}(\d+)\.(\d+)-[\w-]+\.md$", parts[1])
         if not m:
             found.append(f"{rel}: an item file is named by its id ({prefix}N.K-name.md)")
             continue
-        if not re.search(rf"^(?:# )?{re.escape(m.group(1))}\. ", _read(rel), re.M):
-            found.append(f"{rel}: doesn't number {m.group(1)}")
+        ident = f"{prefix}{int(m.group(1))}.{int(m.group(2))}"
+        if not re.search(rf"^(?:# )?{re.escape(ident)}\. ", _read(rel), re.M):
+            found.append(f"{rel}: doesn't number {ident}")
         if f"]({parts[1]})" not in _read(f"{top}/{parts[0]}/README.md"):
             found.append(f"{top}/{parts[0]}/README.md: its table doesn't list {parts[1]}")
+    return found
+
+
+# a name's numbers: "R03-tags.md" (3,), "R03.04-name.md" (3, 4)
+NAME_NUMBERS = re.compile(r"^[RA](\d+)(?:\.(\d+))?-")
+
+
+def padding_problems(prefix):
+    """Names that sort by id (docs/requirements/README.md, rule 6): among siblings, each number in a
+    name is zero-padded to the width of the largest, so R01 to R19, and never R1 beside R19."""
+    found = []
+    top = BOOKS[prefix]
+    folders = {}
+    for rel in book_files(prefix):
+        part = rel[len(top) + 1 :]
+        head, _, tail = part.partition("/")
+        folders.setdefault(top, set()).add(head)
+        if tail and tail != "README.md":
+            folders.setdefault(f"{top}/{head}", set()).add(tail)
+    for folder, names in sorted(folders.items()):
+        level = 0 if folder == top else 1
+        numbered = []
+        for name in sorted(names):
+            m = NAME_NUMBERS.match(name)
+            if m and m.group(level + 1):
+                numbered.append((name, m.group(level + 1)))
+        if not numbered:
+            continue
+        width = max(len(str(int(n))) for _, n in numbered)
+        for name, n in numbered:
+            if len(n) != width:
+                padded = str(int(n)).zfill(width)
+                found.append(
+                    f"{folder}/{name}: its number is padded to {width} digits ({padded}), as its "
+                    "siblings' widest is (docs/requirements/README.md, rule 6)"
+                )
     return found
 
 
@@ -255,7 +293,7 @@ def problems():
             continue
         found += citation_problems(rel, text, ids)
     for prefix in BOOKS:
-        found += index_problems(prefix) + split_problems(prefix)
+        found += index_problems(prefix) + split_problems(prefix) + padding_problems(prefix)
         for rel in book_files(prefix):
             n = len(_read(rel).splitlines())
             if n > MAX_LINES:
