@@ -28,11 +28,12 @@ stays open while the music plays: the on/off switch; the preset picker, the pres
 - **Parametric** (`N05-equalizer`): a graph of the response from 20 Hz to 20 kHz, with a numbered
   handle per band. Dragging a handle sets its frequency and gain; the scroll wheel over it sets
   its Q. Double-clicking a handle sets its gain to 0 dB; double-clicking the graph where there is
-  no handle adds a bell there; **Delete** removes the selected band. Under the graph are the
-  selected band's handle, with a delete button under it, and beside them, in two columns of three
-  rows: its type, a drop-down as there are five (four or fewer would be a segmented control);
-  sliders for its frequency, gain and Q; and the preamp's slider. Each slider's value is shown
-  beside it and can be typed into. The panel shows no instructions for the mouse.
+  no handle adds a bell there; **Delete** removes the selected band. Under the graph, in four
+  columns from the graph's left edge: the selected band's handle, with a delete button at the
+  foot of the row; its type, as a vertical segmented control (Bell, Low shelf, High shelf, Low cut,
+  High cut); sliders for its frequency and for the preamp; and sliders for its gain and Q. Each
+  slider's value is shown above its right end and can be typed into. The panel shows no
+  instructions for the mouse.
 - **Graphic** (`N06-equalizer-graphic`): the preamp and a slider per band with its value, and the
   curve they make drawn across them. Double-clicking a slider sets it back to 0 dB.
 

@@ -2255,7 +2255,7 @@ def eq_panel(p, pw, ph, preset, note, note_fg, kind, actions):
 
 
 def n05_equalizer(p):
-    pw, ph = 820, 560
+    pw, ph = 820, 568
     px, py, ix, fy = eq_panel(p, pw, ph, "Electronic", "chosen by genre", "accentHi", 0,
                               [("Duplicate", 96), ("Import…", 88), ("Export…", 88)])
     text(p, ix + 46 + tw("Choose by genre", 13, 600) + 12, fy, "Signal Fires is Electronic, so it plays with Electronic",
@@ -2300,37 +2300,39 @@ def n05_equalizer(p):
             rect(p, hx - 15, hy - 15, 30, 30, 15, col("accent", 0.25))
         rect(p, hx - 10, hy - 10, 20, 20, 10, "accent" if on else "surface", "accentHi" if on else "text", 1.6)
         text(p, hx - 10, hy - 10, str(i + 1), 11, "#ffffff" if on else "text", 700, w=20, h=20, align="center")
-    # the selected band: its handle with Delete under it, then its type and sliders, and the preamp (R19.2)
+    # the selected band, in four columns (R19.2): its handle and Delete; its type; frequency and preamp; gain and Q
     y0 = gy + gh + 34
-    rect(p, ix + 2, y0, 28, 28, 14, "accent", "accentHi", 1.6)
-    text(p, ix + 2, y0, "4", 13, "#ffffff", 700, w=28, h=28, align="center")
-    rect(p, ix, y0 + 40, 32, 32, 8, "surface", "borderStrong")
-    icon(p, "trash", ix + 16, y0 + 56, 15, "muted")
-    gx0 = ix + 56
-    cw = (px + pw - 28 - gx0 - 36) / 2
-    def cell(c, r):
-        return gx0 + c * (cw + 36), y0 + r * 44
-    def hslider(c, r, label, frac, zero, value):
-        x, y = cell(c, r)
-        text(p, x, y, label, 12, "muted", 600, w=78, h=28)
-        tx0, tx1 = x + 84, x + cw - 92
-        rect(p, tx0, y + 12, tx1 - tx0, 4, 2, "borderStrong")
-        a, b = sorted((tx0 + zero * (tx1 - tx0), tx0 + frac * (tx1 - tx0)))
-        rect(p, a, y + 12, max(2, b - a), 4, 2, "accent")
-        if 0 < zero < 1:
-            line(p, tx0 + zero * (tx1 - tx0), y + 6, tx0 + zero * (tx1 - tx0), y + 22, "borderStrong")
-        rect(p, tx0 + frac * (tx1 - tx0) - 8, y + 6, 16, 16, 8, "text")
+    sh = 5 * 26 + 6
+    rect(p, gx, y0, 32, 32, 16, "accent", "accentHi", 1.6)
+    text(p, gx, y0, "4", 13, "#ffffff", 700, w=32, h=32, align="center")
+    rect(p, gx, y0 + sh - 32, 32, 32, 8, "surface", "borderStrong")
+    icon(p, "trash", gx + 16, y0 + sh - 16, 15, "muted")
+    sx, sw_ = gx + 48, 120
+    rect(p, sx, y0, sw_, sh, 9, "input", "border")
+    for i, o in enumerate(("Bell", "Low shelf", "High shelf", "Low cut", "High cut")):
+        oy = y0 + 3 + i * 26
+        if i == 0:
+            rect(p, sx + 3, oy, sw_ - 6, 26, 7, "hover")
+        text(p, sx + 14, oy, o, 12, "text" if i == 0 else "muted", 600, h=26)
+    c3 = sx + sw_ + 28
+    cw = (px + pw - 28 - c3 - 28) / 2
+    def hslider(x, y, label, frac, zero, value):
+        text(p, x, y, label, 12, "muted", 600, h=28)
         rect(p, x + cw - 80, y, 80, 28, 7, "input", "border")
         text(p, x + cw - 80, y, value, 12, "text", w=80, h=28, align="center", mono=True)
-    x, y = cell(0, 0)
-    text(p, x, y, "Type", 12, "muted", 600, w=78, h=28)
-    rect(p, x + 84, y, cw - 84, 28, 7, "input", "border")
-    text(p, x + 96, y, "Bell", 12.5, "text", 600, h=28)
-    icon(p, "chev_down", x + cw - 16, y + 14, 13, "muted")
-    hslider(1, 0, "Frequency", math.log10(4000 / 20) / 3, 0, "4.00 kHz")
-    hslider(0, 1, "Gain", (2.5 + 12) / 24, 0.5, "+2.5 dB")
-    hslider(1, 1, "Q", math.log10(1.2 / 0.1) / 2, 0, "1.20")
-    hslider(0, 2, "Preamp", (12 - 5) / 24, 0.5, "−5.0 dB")
+        tx0, tx1 = x + 8, x + cw - 8
+        ty = y + 46
+        rect(p, tx0, ty - 2, tx1 - tx0, 4, 2, "borderStrong")
+        a, b = sorted((tx0 + zero * (tx1 - tx0), tx0 + frac * (tx1 - tx0)))
+        rect(p, a, ty - 2, max(2, b - a), 4, 2, "accent")
+        if 0 < zero < 1:
+            line(p, tx0 + zero * (tx1 - tx0), ty - 8, tx0 + zero * (tx1 - tx0), ty + 8, "borderStrong")
+        rect(p, tx0 + frac * (tx1 - tx0) - 8, ty - 8, 16, 16, 8, "text")
+    hslider(c3, y0, "Frequency", math.log10(4000 / 20) / 3, 0, "4.00 kHz")
+    hslider(c3, y0 + 74, "Preamp", (12 - 5) / 24, 0.5, "−5.0 dB")
+    c4 = c3 + cw + 28
+    hslider(c4, y0, "Gain", (2.5 + 12) / 24, 0.5, "+2.5 dB")
+    hslider(c4, y0 + 74, "Q", math.log10(1.2 / 0.1) / 2, 0, "1.20")
 
 
 def n06_equalizer_graphic(p):
