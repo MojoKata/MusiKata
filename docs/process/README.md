@@ -1,0 +1,76 @@
+# MusiKata: process
+
+How MusiKata is worked on: the order things happen in, the rules the documents keep, and where
+each step's details are. It follows the Kata suite's way of working (AppKata's in particular),
+written here so this repository stands on its own.
+
+| File | Covers |
+|---|---|
+| This file | The flow of a change, the documents' rules, decisions, reviews, commits and pull requests |
+| [`development.md`](development.md) | The repository's layout, running from source, the demo library, the tour |
+| [`testing.md`](testing.md) | The test tiers, what each environment runs, and CI |
+| [`build-and-release.md`](build-and-release.md) | The three builds, pinned inputs, signing and a release's steps |
+
+## The flow of a change
+
+1. **Requirements first.** What MusiKata does is written in
+   [`../requirements/`](../requirements/README.md) before it is built. A change in behaviour starts
+   as a change there.
+2. **Mockups with it.** If users will see it, the mockups change in the same commit
+   ([below](#mockups-in-step-with-the-requirements)).
+3. **Why, where it isn't obvious.** A choice between real alternatives, or one that a later reader
+   would question, goes into [`../architecture/`](../architecture/README.md) with what was weighed.
+4. **Decisions in a walk thru.** A batch of open choices (the questions in
+   [`questions.md`](../requirements/questions.md), review findings, design options) is settled one
+   item at a time, each with its options lettered and a recommendation, and nothing is built until
+   the whole batch is approved. The answers go into the requirements and the questions are removed.
+5. **Build on a branch,** with its tests (see [`testing.md`](testing.md)), in a pull request.
+6. **Review** before merging: the diff, against the requirements it claims, with findings fixed or
+   filed.
+7. **Squash merge,** then confirm the merged code matches the branch, and clean up the branch, its
+   worktree and anything made only for it.
+
+## The documents' rules
+
+- **Lasting ids.** R and A ids, and Q ids, are never renumbered or reused (requirements README,
+  rule 1).
+- **A statement, not a changelog.** Requirements and architecture say what is, in the present tense,
+  with no dates, versions, "now", "no longer" or status. Status goes in the root `README.md` (the
+  product and its releases) and `DEVELOP.md` (the build).
+- **References are ids,** never file names or line numbers: `R3.6.1`, `A3.4`, `Q5`.
+- **A file past 500 lines** becomes a folder with a file per first-level item.
+- **Free standing.** The documents describe MusiKata in its own terms; another project may be
+  named as where a practice comes from, never as where MusiKata's behaviour is defined.
+- **Code comments** say why, cite requirement ids (`R4.7`), and never cite a review or other
+  document that goes away.
+
+## Mockups in step with the requirements
+
+[`../mockups/`](../mockups/README.md) holds a picture of every main screen, drawn by
+`docs/mockups/src/render.py` from the design tokens of R6.2. Any change to the requirements that
+touches what a user sees or does (a screen, field, button, dialog, setting, state or message, or
+their order) updates the mockups in the same change, and the README's table of what each shows.
+A change that only touches internals needs none; the pull request says so.
+
+The mockups are PNGs of 256 colours (quantized by Pillow), drawn at 1280 × 800 and saved at twice
+the pixels, so they stay small in git and sharp on a laptop's screen. Once the app runs, the tour
+(A1.6) makes screenshots of the real screens under the same names, and the mockups stay the
+design reference for what isn't built yet.
+
+## Commits, branches and pull requests
+
+- Every commit and tag is GPG-signed, by the identity git's configuration chooses.
+- Work is done on a branch, never on `main`; a branch takes `main` in with merge commits, never a
+  rebase, so review comments stay attached.
+- Pull requests are squash merged, so each lands on `main` as one commit with a message that says
+  what changed and why.
+- Nothing is committed that holds a secret (signing keys, tokens, `.env`).
+
+## Shared configuration
+
+As in the other Kata projects, two submodules are planned:
+
+- `agents/`: the shared Claude configuration (hooks, walk thrus, review and relay skills), imported
+  by the repository's `CLAUDE.md`.
+- `coworker/`: the coworker protocol, which lists what a machine needs for the builds and tests
+  (`.coworker/deps.json`) and what waits on a human.

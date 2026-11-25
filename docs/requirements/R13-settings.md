@@ -1,0 +1,37 @@
+# R13. Settings
+
+R13.1. **The Settings dialog** (Ctrl+, / ⌘,, or ⋮ › Settings…) has its groups down the left and
+the chosen group's rows on the right (`S01-settings-tags`). Each row has a name, one line saying
+what it does, and its control. Changes take effect at once; there is no Save button.
+
+R13.2. **Library**: the music root (R2.1), with **Change…** and **Rescan**; **Watch for changes**
+(R2.4, on); the folders to skip (R2.3.1).
+
+R13.3. **Tags**:
+
+- **ID3 version for MP3**: 2.3 or 2.4 (the default) (R4.7.2).
+- **Write ratings into the files** (on) (R10.3).
+- **Rating scale in files**: Windows Media (the default) or MusiKata (R10.4.1).
+- **Keep a history of tag changes** (on), and for how many days (90) (R4.9).
+- **Genre list**: **Edit list…** (R9.6).
+- **Leave file modification times alone** (off) (R4.7.1).
+
+R13.4. **Path patterns**: the user's patterns for R3, tried before the presets, with **Add**,
+reorder and remove; the Organize files layout (R12.1) with a live example from the library.
+
+R13.5. **Album art**: the cover file name (`cover.jpg`), the largest size to embed (1200 × 1200),
+the JPEG quality (90) (R5.3), and the smallest size before Needs attention reports a cover
+(500 × 500) (R5.6).
+
+R13.6. **Playlists**: the playlists folder (R8.1); **Relative paths** (on); the encoding for new
+playlists (`.m3u8`, UTF-8; or `.m3u` in the system's encoding for old players).
+
+R13.7. **Playback**: the output device (R7.7); ReplayGain: Album, Track or Off (R7.5), and the
+pre-amp for songs without it; **Resume where I left off** (on) (R1.8).
+
+R13.8. **Appearance**: the theme (Match system, Dark, Light) (R6.2); the visualization's bands and
+speed (R11.3.1); **Tint views with the cover's colour** (on) (R6.2.2); **Minimize MusiKata when the
+mini player opens** (on) (R15.1).
+
+R13.9. Settings are kept in the database's folder as `settings.json`, readable and hand-editable;
+an unknown or broken value is reported in the log and its default used.
