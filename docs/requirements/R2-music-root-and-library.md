@@ -148,3 +148,31 @@ line saying how ("The path says the album is from 2022, but 1 file has no year")
 as a table: file name, track and title from the tags, artist, genre and year, values that differ
 from the rest of the folder marked, and a chip for each file's path-match state (R3.9)
 (`L08-folder-songs`). The view switch stays, and applies again on leaving the folder.
+
+R2.10. **When the music root isn't there.** If the root can't be reached when MusiKata starts,
+or goes away while it runs (an unplugged drive, a sleeping NAS, a share not mounted), MusiKata
+keeps the library as it was and never takes its songs for removed (`X02-root-unavailable`):
+
+- a banner across the view says "~/Music isn't available. Its drive may be unplugged or its share
+  not mounted.", with **Try again** and **Choose another folder…** (R2.1);
+- the root's card in the sidebar turns red and says "Not available";
+- the library can still be browsed and searched, with covers from the cache, but playing and
+  every change to files are unavailable, each saying why; the song playing stops at its end;
+- when the root comes back, MusiKata rescans it and the banner goes.
+
+R2.10.1. A scan that finds the root but more than a quarter of its songs gone asks before
+taking them out of the library ("12,040 songs are missing from ~/Music. Remove them from the
+library?", **Keep them** / **Remove**), since a folder renamed or a share half mounted looks the
+same as songs deleted.
+
+R2.11. **Removing songs.** **Move to trash** in the ⋯ and right-click menus of songs, albums and
+folders, and Delete in the library views, moves the files to the system's trash after asking,
+naming what goes ("Move 3 songs to the trash?", "Move the folder Kindling and its 10 songs to the
+trash?") (R6.8, Principle 5). Images and sidecar files beside an album's songs go with them when
+the whole album goes (R12.3). Playlists keep their entries, which show as missing (R8.7). The
+change history records the removal, but Undo can't take files out of the trash; the message says
+so.
+
+R2.11.1. A folder under the root can be kept out of the library without removing anything:
+⋯ › **Ignore this folder** writes the `.musikataignore` of R2.3.1, and Settings lists the folders
+ignored (R13.2).

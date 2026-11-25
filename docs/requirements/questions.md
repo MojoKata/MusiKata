@@ -29,3 +29,35 @@ Qt's last version for Windows 10; moving past it drops Windows 10.
 encoding (Cyrillic or Japanese rips, often) show as gibberish. Proposal: a **Fix encoding…** tool
 in the Edit tags panel that previews the text under the likely encodings and rewrites the chosen
 one as UTF-8.
+
+**Q9. Duplicates.** (R2.8, R2.11) Should MusiKata find the same song twice? It already knows exact
+copies by their audio hash (A2.3). Proposal: yes, in the first release, as a Needs attention group
+"Same song more than once": exact copies, and likely ones (same artist and title, lengths within 2
+seconds). Each group shows its copies with format, bit rate, folder, plays and rating, proposes
+keeping the best (lossless over lossy, then the higher bit rate, then the one whose path matches
+its tags), moves the others to the trash after asking (R2.11), and points playlists naming a
+removed copy at the one kept.
+
+**Q10. Computing ReplayGain.** (R4.1, R7.5) MusiKata reads ReplayGain but can't compute it, so
+songs without it play at their own loudness. Proposal: after the first release, **Calculate
+loudness** on an album or a selection: EBU R128 (ReplayGain 2.0, −18 LUFS), track and album gain
+and peak written into the tags through the usual preview and Undo, decoded with Qt and measured
+with NumPy, so nothing new is shipped.
+
+**Q11. CUE sheets.** (R2.2, R12.3) An album kept as one big file with a `.cue` beside it plays as
+one long song. Proposal: not in the first release, where such an album is listed in Needs
+attention as "Album in one file" and plays whole; later, its tracks become songs of their own,
+each a span of the file, with their titles from the `.cue`.
+
+**Q12. What is left out.** None of these is in the requirements. Proposal: leave all of them out
+of the first release and say so in the requirements' README, so their absence is a choice:
+
+- an equalizer;
+- crossfading between songs (gapless playback is Q5);
+- scrobbling plays to Last.fm or ListenBrainz (if wanted later, ListenBrainz first, as one more
+  service of R16);
+- syncing to phones and USB players, beyond exporting a playlist with its files (R8.8);
+- importing ratings, play counts and playlists from iTunes or Apple Music, foobar2000 or other
+  players;
+- internet radio and podcasts;
+- converting between formats.

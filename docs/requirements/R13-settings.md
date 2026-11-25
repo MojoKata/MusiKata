@@ -5,7 +5,7 @@ the chosen group's rows on the right (`S01-settings-tags`). Each row has a name,
 what it does, and its control. Changes take effect at once; there is no Save button.
 
 R13.2. **Library**: the music root (R2.1), with **Change…** and **Rescan**; **Watch for changes**
-(R2.4, on); the folders to skip (R2.3.1).
+(R2.4, on); the folders to skip (R2.3.1, R2.11.1).
 
 R13.3. **Tags**:
 
@@ -31,14 +31,15 @@ pre-amp for songs without it; **Resume where I left off** (on) (R1.8).
 
 R13.8. **Appearance**: the theme (Match system, Dark, Light) (R6.2); the visualization's bands and
 speed (R11.3.1); **Tint views with the cover's colour** (on) (R6.2.2); **Minimize MusiKata when the
-mini player opens** (on) (R15.1).
+mini player opens** (on) (R15.1); **Text size**, 90 % to 150 % (R18.3); **Reduce motion**: Match
+system (the default), On or Off (R18.5).
 
 R13.9. Settings are kept in the database's folder as `settings.json`, readable and hand-editable;
 an unknown or broken value is reported in the log and its default used.
 
 R13.10. **Online**: **Allow online lookups** (off) (R16.2), and under it each service with its
 own switch and what it is used for; **Save MusicBrainz ids in tags** (on) (R16.9); **Clear lookup
-cache**, with its size.
+cache**, with its size; **Check for updates weekly** (off) (R1.9).
 
 R13.11. **Lyrics**: where saved lyrics go: **Beside the song as .lrc** (the default), **In the
 song's tags**, or **Both** (R17.4).

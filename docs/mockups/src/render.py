@@ -43,11 +43,11 @@ SANS, MONO = "Noto Sans", "Noto Sans Mono"
 C = {
     "bg": "#0e1014", "side": "#12151b", "surface": "#171a21", "raised": "#1e222b", "hover": "#252a35",
     "sel": "#2a2550", "border": "#232731", "borderStrong": "#323744", "text": "#eceef4", "muted": "#99a0b2",
-    "faint": "#5f6577", "accent": "#a78bfa", "accentHi": "#c4b5fd", "accentSoft": "#2b2450",
+    "faint": "#838a9d", "accent": "#a78bfa", "accentHi": "#c4b5fd", "accentSoft": "#2b2450",
     "cyan": "#22d3ee", "pink": "#f472b6", "ok": "#34d399", "okSoft": "#123629", "warn": "#fbbf24",
     "warnSoft": "#3a2e12", "err": "#fb7185", "errSoft": "#3d1a22", "star": "#fbbf24", "input": "#0f1217",
     "progress": "#4ade80",
-    "scrim": "#05060a",
+    "scrim": "#05060a", "primaryA": "#6d28d9", "primaryB": "#7c3aed",
 }
 SIDE_W, BAR_H, PANEL_W, HEAD_H = 232, 88, 344, 64
 
@@ -434,7 +434,7 @@ def window_buttons(p, x_right=W):
         icon(p, nm, x_right - 22 - i * 34, 22, 14, "muted", 1.5)
 
 
-def sidebar(p, active="Albums", active_pl=None, drop_on=None):
+def sidebar(p, active="Albums", active_pl=None, drop_on=None, root_missing=False):
     rect(p, 0, 0, SIDE_W, H - BAR_H, 0, "side")
     line(p, SIDE_W - 0.5, 0, SIDE_W - 0.5, H - BAR_H, "border")
     # logo: a soft gradient tile with a waveform glyph
@@ -481,11 +481,12 @@ def sidebar(p, active="Albums", active_pl=None, drop_on=None):
         item(label, "playlist", is_active=(label == active_pl), sub=n, dropping=(label == drop_on))
     # the music root
     y0 = H - BAR_H - 76
-    rect(p, 12, y0, SIDE_W - 24, 62, 10, "surface", "border")
-    icon(p, "folder", 32, y0 + 20, 16, "accentHi")
+    rect(p, 12, y0, SIDE_W - 24, 62, 10, "errSoft" if root_missing else "surface", col("err", 0.5) if root_missing else "border")
+    icon(p, "folder", 32, y0 + 20, 16, "err" if root_missing else "accentHi")
     text(p, 48, y0 + 10, "~/Music", 13, "text", 600)
-    text(p, 24, y0 + 34, "1,412 songs · 128 albums · 9.8 GB", 11, "muted", w=SIDE_W - 48)
-    rect(p, SIDE_W - 40, y0 + 15, 8, 8, 4, "ok")
+    text(p, 24, y0 + 34, "Not available" if root_missing else "1,412 songs · 128 albums · 9.8 GB", 11,
+         "err" if root_missing else "muted", 600 if root_missing else 400, w=SIDE_W - 48)
+    rect(p, SIDE_W - 40, y0 + 15, 8, 8, 4, "err" if root_missing else "ok")
 
 
 def nowbar(p, playing=True, pos=0.38, title="Signal Fires", artist="Lumen Drift — Glass Harbor", seed=11,
@@ -575,7 +576,7 @@ def button(p, x, y, label, kind="primary", ic=None, h=34, w=None, size=13):
     pw = tw(label, size, 600) + 32 + (22 if ic else 0)
     w = w or pw
     fill, fg, stroke = {
-        "primary": (grad(x, y, x + w, y + h, [(0, "#8b5cf6"), (1, "accent")]), "#ffffff", None),
+        "primary": (grad(x, y, x + w, y + h, [(0, "#6d28d9"), (1, "#7c3aed")]), "#ffffff", None),
         "ghost": ("surface", "text", "borderStrong"),
         "quiet": (None, "accentHi", None),
         "danger": ("errSoft", "err", None),
@@ -676,12 +677,24 @@ def x01_first_run(p):
     text(p, 0, 660, "Supported: MP3, FLAC, M4A/AAC, Ogg Vorbis, Opus, WAV, AIFF", 12, "faint", w=W, align="center")
 
 
-def l01_albums(p):
+def l01_albums(p, missing=False):
     window(p)
-    sidebar(p, "Albums")
+    sidebar(p, "Albums", root_missing=missing)
     header(p, "Albums", "128 albums")
     window_buttons(p)
     x0, y0 = SIDE_W + 28, 76
+    if missing:  # R2.10: the library is kept, playing and changes wait
+        bw = W - x0 - 28
+        rect(p, x0, 72, bw, 62, 12, "errSoft", col("err", 0.45))
+        icon(p, "attention", x0 + 24, 103, 18, "err")
+        text(p, x0 + 46, 80, "~/Music isn't available. Its drive may be unplugged or its share not mounted.", 13.5,
+             "text", 600, w=bw - 380)
+        text(p, x0 + 46, 102, "Your library is kept. Playing and changes to files wait until it's back.", 12,
+             "muted", w=bw - 380)
+        bx = x0 + bw - 16
+        bx -= button(p, bx - 206, 86, "Choose another folder…", "quiet", "folder", w=206, h=34, size=12.5) + 8
+        button(p, bx - 112, 86, "Try again", "ghost", "refresh", w=112, h=34, size=12.5)
+        y0 += 74
     # genre chips
     cx = x0
     for i, g in enumerate(("All", "Electronic", "Indie Rock", "Jazz", "Soul", "Folk", "Ambient", "Synthwave",
@@ -699,7 +712,7 @@ def l01_albums(p):
             no_art(p, x, yy, card)
         else:
             art(p, x, yy, card, seed)
-        if i == 0:
+        if i == 0 and not missing:
             rect(p, x, yy, card, card, 10, col("#000000", 0.35))
             rect(p, x + card / 2 - 22, yy + card / 2 - 22, 44, 44, 22, "#ffffff")
             icon(p, "pause", x + card / 2, yy + card / 2, 18, "#111111")
@@ -715,7 +728,11 @@ def l01_albums(p):
         yy = y + 2 * (card + 74)
         if yy < H - BAR_H:
             p.save(); p.setClipRect(QRectF(SIDE_W, 0, W, H - BAR_H)); art(p, x, yy, card, a[4] + 200); p.restore()
-    nowbar(p)
+    nowbar(p, playing=not missing)
+
+
+def x02_root_unavailable(p):
+    l01_albums(p, missing=True)
 
 
 def l02_album(p):
@@ -2245,6 +2262,7 @@ def t03_organize(p):
 
 SCREENS = {
     "X01-first-run": x01_first_run,
+    "X02-root-unavailable": x02_root_unavailable,
     "L01-albums": l01_albums,
     "L02-album": l02_album,
     "L03-songs-bulk-edit": l03_songs_bulk,

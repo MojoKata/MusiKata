@@ -59,8 +59,8 @@ These hold everywhere, and a section that seems to break one is wrong.
 
 | Id | Section | What it covers |
 |---|---|---|
-| **R1** | [Platform and architecture](R1-platform-and-architecture.md) | Platforms, Python and PySide6, one process, distribution, local data, one MusiKata at a time |
-| **R2** | [The music root and the library](R2-music-root-and-library.md) | The music root, the file kinds, scanning and watching, what a song, album and artist are, the library views, search, Needs attention, the Folders view |
+| **R1** | [Platform and architecture](R1-platform-and-architecture.md) | Platforms, Python and PySide6, one process, distribution, local data, one MusiKata at a time, updates, language, size and speed |
+| **R2** | [The music root and the library](R2-music-root-and-library.md) | The music root, the file kinds, scanning and watching, what a song, album and artist are, the library views, search, Needs attention, the Folders view, a missing music root, removing songs |
 | **R3** | [Tags from paths](R3-tags-from-paths.md) | Patterns and their tokens, detecting the pattern, the preview, fill or correct, tidying |
 | **R4** | [Tags and bulk editing](R4-tags-and-bulk-editing.md) | The tag fields, the Edit tags panel for one song or many, mixed values, saving, the change history and Undo |
 | **R5** | [Album art](R5-album-art.md) | Where art is found, the Album art dialog, embedding and `cover.jpg`, what Needs attention reports, folder covers and mosaics |
@@ -76,3 +76,4 @@ These hold everywhere, and a section that seems to break one is wrong.
 | **R15** | [Mini player](R15-mini-player.md) | The small separate window, its seven layouts, its controls |
 | **R16** | [Online lookups](R16-online-lookups.md) | Covers, tags and identifying songs by sound from free online services, when asked; what is sent |
 | **R17** | [Lyrics](R17-lyrics.md) | Where lyrics come from, showing them in step with the song, finding, editing and saving them |
+| **R18** | [Accessibility](R18-accessibility.md) | Screen readers, the keyboard, text size, contrast and colour, motion |

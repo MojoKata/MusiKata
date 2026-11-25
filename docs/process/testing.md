@@ -8,8 +8,8 @@ environment leaves this list, and R1.1, together.
 | Tier | When | What it's for |
 |---|---|---|
 | 1 | every change | the whole pytest suite in one container on the release's Python and PySide6, offscreen: the gate for every commit, run by CI on every pull request and push to `main` |
-| 2 | before pushing | the tour and its layout check, the AppImage built and started, the Windows suite in its VM |
-| 3 | before a release | each platform's build installed and used by hand: playback through real speakers, media keys, drag and drop with the platform's file manager, the mini player moved, resized and kept on top |
+| 2 | before pushing | the tour and its layout check at 100 % and 150 % text (R18.3), the size and speed targets of R1.11 on the demo library built at 50,000 songs, the AppImage built and started, the Windows suite in its VM |
+| 3 | before a release | each platform's build installed and used by hand: playback through real speakers, media keys, drag and drop with the platform's file manager, the mini player moved, resized and kept on top, the platform's screen reader through every view (R18.1), the music root's drive unplugged and plugged back (R2.10), an update from the previous release (R1.9) |
 
 ## What tier 1 covers
 
@@ -31,6 +31,10 @@ environment leaves this list, and R1.1, together.
   ancestors; the mosaic chosen for trees of every shape (1 to 5 subfolders, nested mosaics, no art
   anywhere); a selection of folders resolving to the songs beneath them.
 - **The change history** (R4.9): every kind of save undone and redone.
+- **A missing music root** (R2.10): a root that vanishes, half vanishes or comes back, with the
+  library kept and nothing removed without asking.
+- **Accessibility** (R18): every QML control has an accessible name and role; every text token
+  against every surface it is used on meets R18.4's contrast.
 - **Online lookups** (R16, R17.4, A7): each service against recorded answers, errors and
   `Retry-After` included; release matching on albums with missing, extra and reordered songs;
   nothing requested while lookups are off; lyrics read from and written to `.lrc` files and every

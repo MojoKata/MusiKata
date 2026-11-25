@@ -16,7 +16,7 @@ A6.3. **Linux: AppImage.** Built on Ubuntu 22.04 for its glibc, as AppKata's is,
 appimagetool and runtime pins. It carries Python, Qt, Qt Multimedia's FFmpeg libraries, and the
 xcb libraries Qt needs; from the system it takes only what every desktop of R1.1 has (glibc,
 OpenGL, PulseAudio or PipeWire's Pulse server, D-Bus, fonts). It installs itself into the app menu
-on first start and updates itself from the project's releases.
+on first start and, when asked (R1.9), updates itself from the project's releases.
 
 A6.4. **Windows: Inno Setup,** per user by default, built under Wine in a container as AppKata's
 is, with PyInstaller freezing the app. It registers the file kinds of R1.7 for "Open with" only.

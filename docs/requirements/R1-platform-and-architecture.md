@@ -24,8 +24,8 @@ it.
 
 R1.4. Distribution:
 
-- Linux: an AppImage, x86_64, that installs itself into the app menu on first start and updates
-  itself.
+- Linux: an AppImage, x86_64, that installs itself into the app menu on first start and, when
+  asked, updates itself (R1.9).
 - Windows: an Inno Setup installer, for the current user by default, without a UAC prompt.
 - macOS: a signed and notarized `.dmg` holding `MusiKata.app`.
 
@@ -54,6 +54,31 @@ but never makes itself the default player on its own. A file opened from outside
 plays without being added to the library.
 
 R1.8. **Closing.** Closing the main window quits MusiKata, the mini player (R15) with it; there is
-no tray icon. The queue, the
-position in the current song and the window's layout are saved and restored at the next start,
-paused.
+no tray icon. The queue, the position in the current song and the window's layout are saved and
+restored at the next start, paused.
+
+R1.9. **Updates.** MusiKata looks for a new release only when asked: ⋮ › **Check for updates…**
+(R6.6), or once a week with **Check for updates weekly** on (R13.10, off by default). The check
+asks GitHub for MusiKata's latest release and sends nothing else (R16.1). When there is a newer
+one, it shows the release's notes and **Update**, which downloads it, checks its SHA-256 and
+signature (`build-and-release.md`), and then: the AppImage replaces itself and restarts; on
+Windows the new installer runs; on macOS the new `.dmg` opens. Nothing is installed without the
+user pressing **Update**.
+
+R1.10. **Language.** MusiKata's own words are English, and every one goes through Qt's
+translations (`qsTr`), so a translation is a file added, not a change to the code. Dates, times,
+numbers and sizes follow the system's locale. Tags in any script are shown, sorted and searched
+(R2.7), right-to-left text included.
+
+R1.11. **Size and speed,** on the reference machine (four cores, 8 GB of memory, an SSD, at most
+five years old):
+
+| What | Target |
+|---|---|
+| Library size | 50,000 songs, with every view scrolling at 60 frames a second |
+| Start, library unchanged | A usable window within 2 seconds; the scan of R2.3 goes on behind it |
+| First scan | At least 100 songs a second from a local SSD |
+| Search | Results within 100 ms of each key pressed (R2.7) |
+| Memory | Under 500 MB with 50,000 songs, thumbnails included |
+
+Tier 2 measures each on the demo library built at 50,000 songs (`testing.md`).

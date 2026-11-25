@@ -14,6 +14,7 @@ R16.1. **The services.** These, and no others; none needs an account.
 | **Cover Art Archive** (coverartarchive.org) | Covers (R16.4) | The MusicBrainz id of a release |
 | **AcoustID** (acoustid.org) | Naming a file by its sound (R16.6) | The file's audio fingerprint (A7.3) and its length |
 | **LRCLIB** (lrclib.net) | Lyrics (R17.4) | Artist, title, album and length of one song |
+| **GitHub** (github.com) | MusiKata's own updates (R1.9) | Nothing but the request for MusiKata's latest release |
 
 R16.2. **Off until the user turns it on.** **Allow online lookups** in Settings (R13.10) is off
 when MusiKata is installed. The **Find online…** and **Look up…** buttons are always there; the
