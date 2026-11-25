@@ -1,0 +1,12 @@
+# Python's caches and the development environment (docs/process/development.md)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+# what the scripts, the tour and the demo library build
+build/
+review/
