@@ -11,11 +11,19 @@ environment leaves this list, and R1.1, together.
 - **Fewer integration tests:** the scanner over the demo library, the models with a 50,000-row
   library, the worker pool, the audio chain into a null output. **The tour and tier 3** are for what
   nothing smaller can show.
-- **Generated data, never real music** (A6.7), and no network, sound card or sleeping (below, and
-  `coding.md`).
-- **Speed.** A unit test runs in under 100 ms, or is marked `slow`. The rest, `pytest -m "not
-  slow"`, run in under 30 seconds, so they can run on every save; the whole of tier 1 runs in under
-  5 minutes. Every run lists its slowest tests.
+- **Generated data, never real music** (A6.7), and no network or sound card (the end of "What tier
+  1 covers").
+- **Wait for the event, never for a set time.** Logic that runs on a clock is tested by moving a
+  fake clock (`coding.md`). A test that must wait on real work (a worker process, a thread, the file
+  watcher, a QML view loading, the tour) waits for the signal or state that says it is done
+  (pytest-qt's `waitSignal` and `waitUntil`, or polling), under a generous timeout that only a
+  failure ever reaches; it never sleeps a set time and hopes the work is finished. The one fixed
+  wait is to show that nothing happens (no second rescan of MusiKata's own write, no request while
+  lookups are off): it waits a set time, as short as the claim allows, then checks that nothing
+  changed.
+- **Speed.** A unit test runs in under 100 ms, or is marked `slow`. The rest, run by
+  `pytest -m "not slow"`, take under 30 seconds, so they can run on every save; the whole of tier 1
+  runs in under 5 minutes. Every run lists its slowest tests.
 - **A bug fix starts with its test,** seen failing because of the bug, and both land in the same
   commit. **New code comes with its tests** and its trace rows in the same change, written before or
   after it as the piece suits.
