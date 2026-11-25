@@ -40,7 +40,10 @@
 #
 # Options: --repo OWNER/NAME (the default is MUSIKATA_REPO's in src/musikata_core/__init__.py, else
 # MojoKata/MusiKata: another repository, a fork, to try these); --key FILE (the public key verify
-# trusts; the default is packaging/musikata-release-key.asc); --yes (no questions: for trying it out).
+# trusts; the default is packaging/musikata-release-key.asc); --reviewer LOGIN (who approves a
+# release's signing: the release environment's required reviewer, which setup makes and check reads
+# back; the default is whoever runs it, which is wrong when an admin for a time runs setup for the
+# owner); --yes (no questions: for trying it out).
 #
 # How often release and resume ask GitHub, in seconds: MUSIKATA_RUN_POLL (for the tag's CI run,
 # until it shows; 10 by default) and MUSIKATA_APPROVAL_POLL (for the run, until it waits for the
@@ -51,12 +54,14 @@ INIT="$HERE/src/musikata_core/__init__.py"
 REPO=$(sed -n 's#^MUSIKATA_REPO = "https://github.com/\(.*\)"#\1#p' "$INIT" 2>/dev/null || true)
 REPO=${REPO:-MojoKata/MusiKata}
 KEY="$HERE/packaging/musikata-release-key.asc"
+REVIEWER=
 YES=
 RUN_POLL=${MUSIKATA_RUN_POLL:-10} APPROVAL_POLL=${MUSIKATA_APPROVAL_POLL:-20}
 while [ $# -gt 0 ]; do
     case $1 in
         --repo) REPO=$2; shift 2 ;;
         --key) KEY=$2; shift 2 ;;
+        --reviewer) REVIEWER=$2; shift 2 ;;
         --yes) YES=1; shift ;;
         *) break ;;
     esac
@@ -229,10 +234,14 @@ ruleset_id() {      # NAME: its id, nothing when there's none; fails when the ru
 
 setup() {
     say "== $REPO"
-    me=$(gh api user --jq .id)
+    if [ -n "$REVIEWER" ]; then
+        who=$REVIEWER me=$(gh api "users/$REVIEWER" --jq .id) || die "no GitHub user $REVIEWER"
+    else
+        who=you me=$(gh api user --jq .id)
+    fi
     if gh api "repos/$REPO/environments/release" >/dev/null 2>&1; then say "release environment: there"
     else
-        ask "Make the release environment (you approve, v* tags only)?"
+        ask "Make the release environment ($who approves, v* tags only)?"
         printf '{"reviewers":[{"type":"User","id":%s}],"prevent_self_review":false,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' "$me" |
             gh api -X PUT "repos/$REPO/environments/release" --input - >/dev/null
         gh api -X POST "repos/$REPO/environments/release/deployment-branch-policies" -f name='v*' -f type=tag >/dev/null
@@ -322,6 +331,8 @@ check() {
     envs=$(api /environments '[.environments[].name] | index("release") != null')
     if [ "$envs" = true ]; then
         is "release environment" "$(api /environments/release '"\([.protection_rules[].type] | sort | join(",")), custom: \(.deployment_branch_policy.custom_branch_policies)"')" "branch_policy,required_reviewers, custom: true"
+        want=${REVIEWER:-$(gh api user --jq .login 2>/dev/null || echo "(can't read)")}
+        is "release environment: reviewer" "$(api /environments/release '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers[].reviewer.login] | join(",")')" "$want"
         is "release environment: deploys" "$(api /environments/release/deployment-branch-policies '[.branch_policies[] | "\(.type) \(.name)"] | join(",")')" "tag v*"
         secrets=$(gh secret list --env release --repo "$REPO" --json name --jq '[.[].name] | sort | join(",")' 2>/dev/null) ||
             secrets="(can't read)"
