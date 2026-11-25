@@ -54,8 +54,8 @@ Real music is never committed, used in tests or shown in screenshots. `scripts/d
 makes one (A6.7):
 
 ```sh
-scripts/demo_library.py build build/demo        # short generated audio in every kind of R2.2, tagged
-scripts/demo_library.py build build/big --songs 50000   # the same, at R1.11's size
+.venv/bin/python scripts/demo_library.py build build/demo      # every kind of R2.2, tagged
+.venv/bin/python scripts/demo_library.py build build/big --songs 50000   # at R1.11's size
 MUSIKATA_DATA=build/demo/data .venv/bin/musikata --root build/demo/Music
 ```
 
