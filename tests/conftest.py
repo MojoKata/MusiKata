@@ -8,11 +8,15 @@ need.
 
 How a skip slips past without it: a test that skips says why and the run still passes, and a run's
 result is read as counts ("128 passed, 6 skipped"), so a test that exists for one platform (MPRIS on
-Linux, the media controls on Windows or macOS, A4.5) can skip on that very platform unnoticed."""
+Linux, the media controls on Windows or macOS, A4.5) can skip on that very platform unnoticed.
 
+And every test's own home, below: `own_home`, and the check of MusiKata's files in the real one."""
+
+import contextlib
 import functools
 import os
 import re
+import stat
 
 import pytest
 
@@ -80,6 +84,13 @@ def pytest_runtest_makereport(item, call):
         report.outcome, report.longrepr = "failed", failed
 
 
+collected = set()  # every test id this run collected (tests/test_skip_lists.py)
+
+
+def pytest_itemcollected(item):
+    collected.add(case_id(item))
+
+
 _modules = []  # each module skipped whole, which no test report carries, that the list doesn't name
 
 
@@ -96,7 +107,8 @@ def pytest_make_collect_report(collector):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    if _modules:
+    _home_changed.extend(home_changes(_home_before, home_state()))
+    if _modules or _home_changed:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
@@ -107,3 +119,106 @@ def pytest_terminal_summary(terminalreporter):
         )
         for line in _modules:
             terminalreporter.line(line)
+    if _home_changed:
+        terminalreporter.section(
+            "MusiKata's files in the real home changed while the tests ran"
+            " (a test wrote there, or another process did)",
+            red=True,
+        )
+        for line in _home_changed[:40]:
+            terminalreporter.line(line)
+
+
+# ---- every test's own home ----
+# A test that reads or writes "~" with the run's HOME reaches, on a developer's machine, their own
+# MusiKata: the shared settings, the real library's index and caches, the log (R1.5). AppKata
+# found its tests cloning into the real home and leaving launchers in its menu, and nothing said
+# so. So each test's home is its own, and a run fails when MusiKata's files in the real one
+# changed while it ran, whoever wrote them: a fixture of a wider scope, a thread or worker process
+# a test left running, a test that set HOME back, or the MusiKata installed there playing music.
+# The check can't tell which, so its heading says both. What other programs keep in the menu
+# folder is theirs and doesn't count.
+REAL_HOME = os.path.expanduser(
+    "~"
+)  # read as the suite loads, before any test has a home of its own
+# MusiKata's folders in a home (R1.5), on every platform: all that is in them
+OWNED = (
+    ".musikata",
+    ".local/share/musikata",
+    ".cache/musikata",
+    ".local/state/musikata",
+    "Library/Application Support/MusiKata",
+    "Library/Caches/MusiKata",
+    "Library/Logs/MusiKata",
+    "AppData/Local/MusiKata",
+)
+# what names a home's places, and where a home has each
+OWN = {
+    "HOME": "",
+    "USERPROFILE": "",
+    "XDG_DATA_HOME": ".local/share",
+    "XDG_CONFIG_HOME": ".config",
+    "XDG_CACHE_HOME": ".cache",
+    "XDG_STATE_HOME": ".local/state",
+    "APPDATA": "AppData/Roaming",
+    "LOCALAPPDATA": "AppData/Local",
+    "MUSIKATA_DATA": ".local/share/musikata",
+}
+
+
+@pytest.fixture(autouse=True)
+def own_home(monkeypatch, tmp_path):
+    """Every test's home is its tmp_path: HOME, USERPROFILE, the XDG and Windows folders and
+    MUSIKATA_DATA each name the place a home has for it, under tmp_path, so what the test, or a
+    program or worker process it starts, writes to "~" lands in the folder pytest gives it. Nothing
+    is made there until something writes. A test that needs the real home says so, by setting HOME
+    to conftest.REAL_HOME."""
+    for var, place in OWN.items():
+        monkeypatch.setenv(var, os.path.normpath(os.path.join(str(tmp_path), place)))
+
+
+def _menu_entry(path):
+    """Whether path is the menu entry the AppImage installs for itself (R1.4, A6.3)."""
+    return os.path.basename(path) == "musikata.desktop"
+
+
+# the folders of a home that MusiKata shares with other programs, and which entries of each are its
+SHARED = {".local/share/applications": _menu_entry}
+
+
+def home_state(home=REAL_HOME):
+    """{path: (kind, size, modified)} of MusiKata's files in a home: all that is in its own folders
+    (OWNED), and in the folders it shares (SHARED) its menu entry, not the folders themselves or
+    what else is there. A link is itself, not what it names."""
+    paths = []
+    for top in OWNED:
+        root = os.path.normpath(os.path.join(home, top))
+        paths += [root] + [
+            os.path.join(d, n) for d, dirs, files in os.walk(root) for n in dirs + files
+        ]
+    for top, ours in SHARED.items():
+        folder = os.path.normpath(os.path.join(home, top))
+        with contextlib.suppress(OSError):  # no such folder
+            paths += [p for p in (os.path.join(folder, n) for n in os.listdir(folder)) if ours(p)]
+    out = {}
+    for path in paths:
+        try:
+            st = os.lstat(path)
+        except OSError:  # not there, or gone since it was listed
+            continue
+        out[path] = (stat.S_IFMT(st.st_mode), st.st_size, st.st_mtime_ns)
+    return out
+
+
+def home_changes(before, after):
+    """What differs between two states of a home, a line each: new, gone, changed."""
+    kinds = (
+        ("new", after.keys() - before.keys()),
+        ("gone", before.keys() - after.keys()),
+        ("changed", {p for p in before.keys() & after.keys() if before[p] != after[p]}),
+    )
+    return [f"{kind}: {path}" for kind, paths in kinds for path in sorted(paths)]
+
+
+_home_before = home_state()
+_home_changed = []  # the real home's changes over the run, which fail it (pytest_sessionfinish)

@@ -488,7 +488,7 @@ $left"
     ask "Publish $TAG? From then on every MusiKata that checks for updates is offered it (R1.9)."
     gh release edit "$TAG" --repo "$REPO" --draft=false --latest >/dev/null
     verify "$V"
-    say "Next: docs/process/release.md, 6: publish.sh cask TAP $V, for the Homebrew tap."
+    say "Next: docs/process/release.md, 6: ask the agent to wrap up release $V (the cask and the record)."
 }
 
 field_test() {      # [VERSION]: the release's field-test issue, and a sub-issue for each environment
@@ -501,7 +501,7 @@ field_test() {      # [VERSION]: the release's field-test issue, and a sub-issue
     envs=$(python3 "$HERE/scripts/field_test.py" --environments) || die "can't read the field test's environments"
     ask "Open $REPO's field-test issues for $V: one for the release, one under it for each of $(echo "$envs" | paste -sd, - | sed 's/,/, /g')?"
     parent=$(printf '%s\n\n%s\n' \
-        "The field test of MusiKata $V, before it is published: one sub-issue for each environment of docs/process/release.md, 4, with its checklist (scripts/field_test.py). This issue closes when every sub-issue has closed, or when the owner waives one and says why there." \
+        "The field test of MusiKata $V, before it is published: one sub-issue for each environment of docs/process/release.md, 4, with its checklist (scripts/field_test.py). This issue closes when every sub-issue has closed, or when the owner defers one and says why there." \
         "$(echo "$envs" | sed 's/^/- /')" | gh issue create --repo "$REPO" --title "Field test: $V" --label field-test --body-file -)
     say "the release's: $parent"
     echo "$envs" | while IFS= read -r env; do
@@ -535,9 +535,10 @@ cask() {            # TAP [VERSION]: Casks/musikata.rb in a clone of the tap, at
         grep -q "intel: *\"$intel\"" "$D/musikata.rb" || die "$rb has no version line or no arm:/intel: sha256 to set"
     cp "$D/musikata.rb" "$rb"
     git -C "$TAP" diff --stat >&2
-    ask "Commit the cask at $V in $TAP?"
+    ask "Commit the cask at $V in $TAP, on the branch musikata-$V?"
+    git -C "$TAP" switch -q -c "musikata-$V"
     git -C "$TAP" commit -q -am "musikata $V"
-    say "Committed in $TAP. Push it, then docs/process/release.md, 7: ask the agent to wrap up release $V."
+    say "Committed in $TAP on musikata-$V: push it and open its pull request (docs/process/release-agent.md, 3)."
 }
 
 case $CMD in

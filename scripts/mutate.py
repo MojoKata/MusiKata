@@ -94,7 +94,7 @@ UNFIT: dict[str, str] = {}
 
 # What the sweep mutates unless told otherwise: musikata_core's areas (docs/process/testing.md,
 # "Principles"). mutmut can't change QML, and the app's bridge code is mostly Qt's to run.
-CORE_AREAS = ("library", "tags", "audio", "online")
+CORE_AREAS = ("library", "tags", "files", "playback", "analysis", "online")
 
 # mutmut's exit codes as outcomes (mutmut.stats.status_by_exit_code), the run's own stop as killed.
 OUTCOME = {1: "killed", 3: "killed", OUT_OF_MEMORY: "killed", 0: "survived", 5: "no tests",

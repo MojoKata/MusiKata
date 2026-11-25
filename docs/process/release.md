@@ -19,8 +19,9 @@ fixed by a new version, never in place.
                                                  the draft, checked → the field-test issues
  4. You           the field test, each environment: its sub-issue's checklist; close it
  5. You           scripts/publish.sh publish     the release is published
- 6. You           scripts/publish.sh cask TAP    the Homebrew tap points at it
- 7. You → agent   "Wrap up release 0.2.0"       the release's record      (release-agent.md, 3)
+ 6. You → agent   "Wrap up release 0.2.0"       the cask's pull request on the tap, and the
+                                                 release's record          (release-agent.md, 3)
+ 7. You           merge both                     the Homebrew tap points at the release
 ```
 
 Each command checks that the step before it is done, and refuses otherwise, saying what's missing:
@@ -100,12 +101,14 @@ gh release download v$V --repo MojoKata/MusiKata --pattern '*.AppImage'   # or *
 The checks use the demo library, made from a clone of the repository at the tag
 ([`development.md`](development.md), "The demo library"); never real music in what is posted.
 
-Go through the sub-issue's checklist and tick each box that works. A box that doesn't is a bug:
-open an issue labelled `bug`, link it from the box it leaves unticked, and tell the agent. A box
-that can't be tried there (no USB drive to hand; the update, on a first release) is left unticked
-with a comment saying why. Close the sub-issue when its checklist is done. To release without an
-environment, or without a box, close its issue with a comment saying why: that's a waiver. The
-release's issue closes once every environment's has.
+Every environment's sub-issue is made each release, so the whole list is in front of the owner;
+Windows 11 has none, and is tested only by what tier 2 automates in its VM. Go through the
+sub-issue's checklist and tick each box that works. A box that doesn't is a bug: open an issue
+labelled `bug`, link it from the box it leaves unticked, and tell the agent. A box that can't be
+tried there (no USB drive to hand; the update, on a first release) is left unticked with a comment
+saying why. Close the sub-issue when its checklist is done. Any environment, or any box, can be
+deferred: close its issue as not planned, with a comment saying why. The release's issue closes once
+every environment's has.
 
 ## 5. Publish: `publish.sh publish`
 
@@ -124,30 +127,22 @@ publishes it as the latest release and verifies it once more. What to check:
 - Between the `(published)` line and the SHA-256s, `gh release verify` prints GitHub's release
   attestation.
 
-## 6. The Homebrew cask: `publish.sh cask`
+## 6. Ask the agent to wrap up
+
+Tell the agent: **"Wrap up release 0.2.0"**. It checks the published release from its own clone,
+updates the Homebrew cask in a pull request on the tap, and adds what was released to the record
+(the run, the SHA-256s, the field test and anything deferred, the tap's pull request) in a pull
+request here ([`release-agent.md`](release-agent.md), 3).
+
+## 7. Merge the cask and the record
 
 The tap's cask names both `.dmg`s with their SHA-256 (A6.5.2), so it can point only at a published
-release. In a clone of the tap:
-
-```sh
-git clone git@github.com:MojoKata/homebrew-musikata.git ../homebrew-musikata   # once
-git -C ../homebrew-musikata pull
-scripts/publish.sh cask ../homebrew-musikata
-git -C ../homebrew-musikata push
-```
-
-It sets the cask's `version` and its `arm:` and `intel:` SHA-256s from the published release's
-`.dmg.sha256` files, changes nothing else, shows the change and commits it after asking. Then, on
-a Mac, `brew update && brew upgrade --cask musikata`, or
-`brew install --cask mojokata/musikata/musikata`, installs the new version: the Intel Mac's
-environment in [`testing.md`](testing.md) is installed from the tap.
-
-## 7. Ask the agent to wrap up
-
-Tell the agent: **"Wrap up release 0.2.0"**. It checks the published release and the cask from its
-own clone, and adds what was released to the record (the run, the SHA-256s, the field test and any
-waiver, the cask's commit) in a pull request for you to merge
-([`release-agent.md`](release-agent.md), 3).
+release; `publish.sh cask` sets its `version` and its `arm:` and `intel:` SHA-256s from the
+published release's `.dmg.sha256` files and changes nothing else. Check the pull request's SHA-256s
+against those `release` showed in step 3, and merge it. Then, on a Mac, `brew update && brew upgrade
+--cask musikata`, or `brew install --cask mojokata/musikata/musikata`, installs the new version: the
+Intel Mac's environment in [`testing.md`](testing.md) is installed from the tap. Merge the record's
+pull request too.
 
 ## 8. When a step stops
 
@@ -185,7 +180,7 @@ commands, `setup`, `check` and the `key-` ones, are in [`genesis.md`](genesis.md
 | `verify [VERSION]` | Downloads the release, or its draft, into `build/publish/v<version>/` and checks it: exactly nine files (the four builds, a `.sha256` for each, the AppImage's `.asc`), each build against its `.sha256`, and the AppImage's signature by the release key (`packaging/musikata-release-key.asc`, matched by fingerprint). |
 | `field-test [VERSION]` | Opens the release's field-test issue and, under it, one for each environment with its checklist (`scripts/field_test.py`). `release` does this itself; on its own it's for when you answered `n` there. |
 | `publish [VERSION]` | Checks that every field-test issue is closed, verifies the draft again, asks, publishes it as the latest release, and verifies the published one. |
-| `cask TAP [VERSION]` | In `TAP`, a clone of the tap, sets `Casks/musikata.rb`'s version and its two SHA-256s from the published release, and commits it after asking, for you to push. |
+| `cask TAP [VERSION]` | In `TAP`, a clone of the tap, sets `Casks/musikata.rb`'s version and its two SHA-256s from the published release, and commits it on the branch `musikata-<version>` after asking, for the agent's pull request on the tap. |
 
 `.github/workflows/ci.yml` runs tier 1 and the four builds on every pull request and every push to
 `main`. On a `v*` tag it also signs the builds (after your approval, in the `release` environment)

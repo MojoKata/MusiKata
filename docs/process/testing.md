@@ -11,8 +11,10 @@ environment leaves this list, and R1.1, together.
 - **Fewer integration tests:** the scanner over the demo library, the models with a 50,000-row
   library, the worker pool, the audio chain into a null output. **The tour and tier 3** are for what
   nothing smaller can show.
-- **Generated data, never real music** (A6.7), and no network or sound card (the end of "What tier
-  1 covers").
+- **Generated data, never real music** (A6.7), and no network or sound card (the end of "What tier 1
+  covers"). Each test has a home of its own (`own_home`, `tests/conftest.py`): `HOME`, the XDG and
+  Windows folders and `MUSIKATA_DATA` point into its temporary folder, and a run fails when
+  MusiKata's files in the real home changed while it ran.
 - **Wait for the event, never for a set time.** Logic that runs on a clock is tested by moving a
   fake clock (`coding.md`). A test that must wait on real work (a worker process, a thread, the file
   watcher, a QML view loading, the tour) waits for the signal or state that says it is done
@@ -35,10 +37,10 @@ environment leaves this list, and R1.1, together.
   its code is built, and every section of the first release (`DEVELOP.md`) is in it by that release.
 - **Coverage.** Tier 1 runs under coverage.py, lines and branches, the worker processes included
   (`concurrency = ["thread", "multiprocessing"]`). Each area of `scripts/areas.py` (the core's
-  `library`, `tags`, `audio` and `online`, the `app`, the `scripts`) has a floor in
-  `tests/coverage-floor.json` that may only rise: a change that drops an area below its floor fails
-  tier 1, and one that raises it moves the floor up in the same change, squashed into one commit
-  ([`ci.md`](ci.md), "Coverage").
+  `library`, `tags`, `files`, `playback`, `analysis` and `online`, the `app`, the `scripts`) has a
+  floor in `tests/coverage-floor.json` that may only rise: a change that drops an area below its
+  floor fails tier 1, and one that raises it moves the floor up in the same change, squashed into
+  one commit ([`ci.md`](ci.md), "Coverage").
 - **Mutation testing.** Once a first pass of the code is written, mutmut sweeps `musikata_core` for
   code the tests run but don't check; each survivor is killed by a new test or noted with the reason
   it isn't worth one. It isn't run as each piece is written; coverage is the measure until then
@@ -139,7 +141,8 @@ display ("last played", the 180-day cleanup of A2.9, the sleep timer).
 | Ubuntu 24.04 container | 1, 2 | the suite (CI too); the tour and its layout check |
 | Ubuntu 22.04 container | 2 | the AppImage build, on the oldest glibc it supports |
 | Linux Mint 22.3, LMDE 7, Ubuntu 26.04 | 2, 3 | the AppImage started on X11 and Wayland, MPRIS seen by the desktop |
-| Windows 10 22H2 and Windows 11 VMs | 2, 3 | the installer, the suite on Windows, the tour, uninstall |
+| Windows 10 22H2 VM | 2, 3 | the installer, the suite on Windows, the tour, uninstall |
+| Windows 11 VM | 2 | the installer, the suite on Windows, the tour, uninstall: what can be automated, and never a field test |
 | macOS 14 or newer, Apple silicon (CI runner, and a real Mac) | 2, 3 | the arm64 bundle, the suite on macOS |
 | macOS, Intel (the owner's Mac, on the newest macOS it runs) | 3 | the x86_64 bundle installed from the tap and used by hand |
 
@@ -159,9 +162,9 @@ publishes the Pages site, and a failed step posts why ([`ci.md`](ci.md)).
 `<=`, a string emptied, a call's argument dropped) and runs the tests on each change. A change some
 test fails on is **killed**; one every test passes with **survives**, and shows code the tests run
 but don't check. It complements coverage, which says only that a line ran. The sweep is
-`musikata_core`'s areas (`library`, `tags`, `audio`, `online`); mutmut can't change QML, and the
-app's bridge code is mostly Qt's to run. The first sweep comes once a first pass of the code is
-written, never as each piece is written.
+`musikata_core`'s areas (`library`, `tags`, `files`, `playback`, `analysis`, `online`); mutmut can't
+change QML, and the app's bridge code is mostly Qt's to run. The first sweep comes once a first pass
+of the code is written, never as each piece is written.
 
 `scripts/mutate.py` holds the tools. mutmut changes the code it tests, so a run never touches the
 checkout: it works in a copy (`MUSIKATA_MUTATE_WORK`, `build/mutate` unless set) with `src/`,

@@ -585,8 +585,8 @@ end
 @pytest.mark.parametrize("draft", ["false", "true"])
 def test_cask_points_the_tap_at_the_published_releases_dmgs(tmp_path, draft):
     """cask sets the cask's version and its two SHA-256s from the published release's .dmg.sha256
-    files, changes nothing else, and commits; a draft is refused, since the cask's URLs are a
-    published release's."""
+    files, changes nothing else, and commits on the branch musikata-<version> for a pull request
+    on the tap; a draft is refused, since the cask's URLs are a published release's."""
     tap, bin_ = tmp_path / "tap", tmp_path / "bin"
     (tap / "Casks").mkdir(parents=True)
     bin_.mkdir()
@@ -628,6 +628,10 @@ def test_cask_points_the_tap_at_the_published_releases_dmgs(tmp_path, draft):
         f'arm:   "{"0" * 64}"', f'arm:   "{"e" * 64}"'
     ).replace(f'intel: "{"0" * 64}"', f'intel: "{"f" * 64}"')
     assert log[0] == "musikata 0.9.9"
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=tap, capture_output=True, text=True
+    ).stdout.strip()
+    assert branch == "musikata-0.9.9"
 
 
 def test_the_steps_release_requires_are_the_ones_the_agent_is_told_to_take():

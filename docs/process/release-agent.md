@@ -33,10 +33,12 @@ The owner says: **"Prepare release `<version>`"**. `<last>` is the version relea
    ```sh
    UPDATE_STATE=<version> .venv/bin/python -m pytest tests/test_upgrade_state.py
    ```
-   It writes `tests/data/state/<version>/`: the index (`musikata.db`) and the root's `.musikata`
-   folder (R1.5) that this release makes from the demo library. The test brings every snapshot
-   there into the current code on every run, so a later MusiKata is shown to migrate the index
-   (A2.1) and to read the root's own files (A2.8) that an earlier one left. A snapshot is dropped
+   It writes `tests/data/state/<version>/`: the index (`musikata.db`), the root's `.musikata` folder
+   and the shared settings (R1.5) that this release makes from the demo library, without the caches.
+   The test brings every snapshot there into the current code on every run, so a later MusiKata is
+   shown to migrate the index (A2.1) and to read the root's own files (A2.8) and the shared settings
+   (R13.9) that an earlier one left. A snapshot is dropped only when its release is no longer one
+   MusiKata updates from.
    only when its release is no longer one MusiKata updates from.
 7. **`notes`:** the record's Notes section: what a user sees in this release, not the commits,
    since `v<last>`. CI's draft release takes them as its text.
@@ -87,25 +89,31 @@ The owner says: **"Release `<version>` stopped"**, with what `publish.sh` printe
 
 ## 3. Wrap up a release
 
-The owner says: **"Wrap up release `<version>`"**, after `publish.sh publish` and `publish.sh cask`.
+The owner says: **"Wrap up release `<version>`"**, after `publish.sh publish`.
 
 1. **Check the published release** from your own clone. Anyone can, once it's published:
    ```sh
    scripts/publish.sh verify <version>
    ```
    It must say `(published)` and the release key's fingerprint.
-2. **Check the cask:** the tap's `Casks/musikata.rb` names `<version>` and the two `.dmg`s'
-   SHA-256s that `verify` printed:
+2. **The cask, as a pull request on the tap.** In a clone of `MojoKata/homebrew-musikata`, up to
+   date on `main`:
    ```sh
-   gh api repos/MojoKata/homebrew-musikata/contents/Casks/musikata.rb --jq .content | base64 -d
+   scripts/publish.sh cask ../homebrew-musikata <version>
+   git -C ../homebrew-musikata push -u origin musikata-<version>
+   gh pr create --repo MojoKata/homebrew-musikata --head musikata-<version> \
+       --title "musikata <version>" --body "The cask at MusiKata <version>'s published .dmgs."
    ```
+   `cask` sets the version and the two `.dmg`s' SHA-256s and commits them on the branch
+   `musikata-<version>`. Check that the SHA-256s are those `verify` printed; the owner reviews and
+   merges the pull request.
 3. **Add a "Released" section to the record**, `docs/releases/<version>.md`:
    - the date it was published, and the tag's commit;
    - CI's run of the tag;
    - the four SHA-256s, from `verify`'s output;
-   - the field test: the release's issue, and how each environment's closed. A waived environment
+   - the field test: the release's issue, and how each environment's closed. A deferred environment
      or box says why;
-   - the cask's commit in the tap;
+   - the tap's pull request for the cask;
    - anything that went wrong, and the issue that has it.
 4. **A pull request** with the record, "Release `<version>`: the record".
 

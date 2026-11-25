@@ -60,7 +60,9 @@ def test_a_file_in_two_areas_is_in_none():
 
 def test_a_core_subject_is_a_module_or_a_package():
     assert areas.area_of_code("src/musikata_core/tags.py") == "tags"
-    assert areas.area_of_code("src/musikata_core/audio/eq.py") == "audio"
+    assert areas.area_of_code("src/musikata_core/audio/eq.py") == "playback"
+    assert areas.area_of_code("src/musikata_core/organize.py") == "files"
+    assert areas.area_of_code("src/musikata_core/analysis/peaks.py") == "analysis"
     assert areas.area_of_code("src/musikata/qml/NowPlaying.qml") == "qml"
     assert areas.area_of_code("src/musikata_core/unheard_of.py") is None
 

@@ -30,6 +30,5 @@ body:
         - label: LMDE 7
         - label: Ubuntu 26.04 LTS
         - label: Windows 10 22H2
-        - label: Windows 11
         - label: macOS on Apple silicon
         - label: macOS on Intel

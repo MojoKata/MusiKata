@@ -4,7 +4,7 @@ planned and recorded by area (scripts/mutate.py), and a review's steps are its a
 (docs/process/testing.md). tests/test_areas.py holds every module, script and test file to exactly
 one area.
 
-    area_of_code("src/musikata_core/audio/eq.py") == "audio"
+    area_of_code("src/musikata_core/audio/eq.py") == "playback"
     area_of_test("tests/test_tags_id3.py") == "tags"
 
 Run as a script, it prints the areas one per line, in AREAS' order.
@@ -16,7 +16,19 @@ here."""
 import fnmatch
 
 # every area; docs and tooling hold tests but no code coverage.py measures
-AREAS = ("library", "tags", "audio", "online", "app", "qml", "scripts", "docs", "tooling")
+AREAS = (
+    "library",
+    "tags",
+    "files",
+    "playback",
+    "analysis",
+    "online",
+    "app",
+    "qml",
+    "scripts",
+    "docs",
+    "tooling",
+)
 
 CORE = "src/musikata_core"
 
@@ -43,12 +55,14 @@ CODE = {
             "workers",
         ),
     ],
-    # A3, R3, R4, R5, R8, R12, R17: what is written into the files, and how they are named and moved
-    "tags": _core(
-        "tags", "encodings", "patterns", "art", "playlists", "organize", "history", "lyrics"
-    ),
-    # A4, A5: decoding, joins, gain, the equalizer and the limiter, the queue; waveforms and spectra
-    "audio": _core("audio", "analysis"),
+    # A3, R4, R5, R17: what is written into the files: tags, encodings, covers, lyrics
+    "tags": _core("tags", "encodings", "art", "lyrics"),
+    # R3, R8, R12, A3.5: how files are named, listed, moved and renamed, and Undo
+    "files": _core("patterns", "playlists", "organize", "history"),
+    # A4: decoding, joins, gain, the equalizer and the limiter, the queue
+    "playback": _core("audio"),
+    # A5: waveforms and spectra
+    "analysis": _core("analysis"),
     # A7: the HTTP client and each service
     "online": _core("online"),
     # the app's Python: models, bridges, the sound device and media controls (A4.5), the tour

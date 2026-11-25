@@ -22,7 +22,6 @@ ENVIRONMENTS = [
     ("LMDE 7", "linux", "LMDE 7"),
     ("Ubuntu 26.04 LTS", "linux", "Ubuntu 26.04"),
     ("Windows 10 22H2", "windows", "Windows 10 22H2"),
-    ("Windows 11", "windows", "Windows 11"),
     ("macOS on Apple silicon", "macos", "Apple silicon"),
     ("macOS on Intel", "macos", "Intel"),
 ]
@@ -163,7 +162,7 @@ def issue_body(environment: str) -> str:
         "Tick each box that works. A box that doesn't is a bug: open it with the `bug` label "
         "and link it from its box, which is ticked once a later build, after the fix, works. A "
         "box that can't be tried here is left unticked with a comment saying why, and the owner "
-        "waives it or not.\n\n"
+        "defers it or not.\n\n"
         + "".join(f"- [ ] **{cid}** {text}\n" for cid, text in checklist(environment))
     )
 
