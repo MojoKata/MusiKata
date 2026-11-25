@@ -42,7 +42,8 @@ cd MusiKata
 - `MUSIKATA_REPO` in `src/musikata_core/__init__.py` names it. MusiKata's update check asks this
   repository's releases (R1.9), so **publishing a release offers it to every MusiKata that checks**.
 - **MojoKata/homebrew-musikata** is the Homebrew tap (A6.5.2): public, holding one cask,
-  `Casks/musikata.rb`, which each release points at its two `.dmg`s through a pull request ([`release.md`](release.md), 7).
+  `Casks/musikata.rb`, which each release points at its two `.dmg`s through a pull request
+  ([`release.md`](release.md), 7).
 
 Check: `gh api repos/MojoKata/MusiKata --jq '"\(.visibility) \(.default_branch)"'` prints
 `public main`, and `gh api repos/MojoKata/homebrew-musikata --jq .visibility` prints `public`.
