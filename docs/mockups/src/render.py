@@ -2255,14 +2255,14 @@ def eq_panel(p, pw, ph, preset, note, note_fg, kind, actions):
 
 
 def n05_equalizer(p):
-    pw, ph = 820, 528
+    pw, ph = 820, 560
     px, py, ix, fy = eq_panel(p, pw, ph, "Electronic", "chosen by genre", "accentHi", 0,
                               [("Duplicate", 96), ("Import…", 88), ("Export…", 88)])
     text(p, ix + 46 + tw("Choose by genre", 13, 600) + 12, fy, "Signal Fires is Electronic, so it plays with Electronic",
          12, "muted", h=36, w=380)
     button(p, px + pw - 28 - 120, fy, "Genres…", "ghost", "genre", w=120, h=34, size=12.5)
     # the graph: 20 Hz to 20 kHz across, −12 to +12 dB up
-    gx, gy, gw, gh = ix + 40, py + 112, pw - 56 - 40, 212
+    gx, gy, gw, gh = ix + 40, py + 112, pw - 56 - 40, 200
     rect(p, gx, gy, gw, gh, 10, "input", "border")
     def xf(f):
         return gx + 10 + (math.log10(f) - math.log10(20)) / 3 * (gw - 20)
@@ -2300,21 +2300,37 @@ def n05_equalizer(p):
             rect(p, hx - 15, hy - 15, 30, 30, 15, col("accent", 0.25))
         rect(p, hx - 10, hy - 10, 20, 20, 10, "accent" if on else "surface", "accentHi" if on else "text", 1.6)
         text(p, hx - 10, hy - 10, str(i + 1), 11, "#ffffff" if on else "text", 700, w=20, h=20, align="center")
-    # the selected band's fields, and the preamp
-    fy0 = gy + gh + 30
-    fx = ix
-    text(p, fx, fy0 + 20, "Band 4", 13, "text", 700, h=34)
-    fx += 70
-    field(p, fx, fy0, 132, "Type", "Bell"); icon(p, "chev_down", fx + 116, fy0 + 37, 13, "muted"); fx += 144
-    field(p, fx, fy0, 112, "Frequency", "4.00 kHz", mono=True); fx += 124
-    field(p, fx, fy0, 100, "Gain", "+2.5 dB", mono=True); fx += 112
-    field(p, fx, fy0, 80, "Q", "1.20", mono=True); fx += 92
-    rect(p, fx, fy0 + 20, 34, 34, 8, "surface", "borderStrong")
-    icon(p, "trash", fx + 17, fy0 + 37, 15, "muted")
-    line(p, px + pw - 28 - 112 - 16, fy0 + 8, px + pw - 28 - 112 - 16, fy0 + 54, "border")
-    field(p, px + pw - 28 - 112, fy0, 112, "Preamp", "−5.0 dB", mono=True)
-    text(p, ix, fy0 + 62, "Drag a handle for frequency and gain, scroll for Q. Double-click empty space to add a band, "
-         "a handle for 0 dB.", 11.5, "faint", w=pw - 56)
+    # the selected band: its handle with Delete under it, then its type and sliders, and the preamp (R19.2)
+    y0 = gy + gh + 34
+    rect(p, ix + 2, y0, 28, 28, 14, "accent", "accentHi", 1.6)
+    text(p, ix + 2, y0, "4", 13, "#ffffff", 700, w=28, h=28, align="center")
+    rect(p, ix, y0 + 40, 32, 32, 8, "surface", "borderStrong")
+    icon(p, "trash", ix + 16, y0 + 56, 15, "muted")
+    gx0 = ix + 56
+    cw = (px + pw - 28 - gx0 - 36) / 2
+    def cell(c, r):
+        return gx0 + c * (cw + 36), y0 + r * 44
+    def hslider(c, r, label, frac, zero, value):
+        x, y = cell(c, r)
+        text(p, x, y, label, 12, "muted", 600, w=78, h=28)
+        tx0, tx1 = x + 84, x + cw - 92
+        rect(p, tx0, y + 12, tx1 - tx0, 4, 2, "borderStrong")
+        a, b = sorted((tx0 + zero * (tx1 - tx0), tx0 + frac * (tx1 - tx0)))
+        rect(p, a, y + 12, max(2, b - a), 4, 2, "accent")
+        if 0 < zero < 1:
+            line(p, tx0 + zero * (tx1 - tx0), y + 6, tx0 + zero * (tx1 - tx0), y + 22, "borderStrong")
+        rect(p, tx0 + frac * (tx1 - tx0) - 8, y + 6, 16, 16, 8, "text")
+        rect(p, x + cw - 80, y, 80, 28, 7, "input", "border")
+        text(p, x + cw - 80, y, value, 12, "text", w=80, h=28, align="center", mono=True)
+    x, y = cell(0, 0)
+    text(p, x, y, "Type", 12, "muted", 600, w=78, h=28)
+    rect(p, x + 84, y, cw - 84, 28, 7, "input", "border")
+    text(p, x + 96, y, "Bell", 12.5, "text", 600, h=28)
+    icon(p, "chev_down", x + cw - 16, y + 14, 13, "muted")
+    hslider(1, 0, "Frequency", math.log10(4000 / 20) / 3, 0, "4.00 kHz")
+    hslider(0, 1, "Gain", (2.5 + 12) / 24, 0.5, "+2.5 dB")
+    hslider(1, 1, "Q", math.log10(1.2 / 0.1) / 2, 0, "1.20")
+    hslider(0, 2, "Preamp", (12 - 5) / 24, 0.5, "−5.0 dB")
 
 
 def n06_equalizer_graphic(p):
