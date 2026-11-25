@@ -34,6 +34,19 @@ release carries, which a script fetches:
 `MUSIKATA_DATA` points the database and caches at another folder, so a development copy never
 touches the real library's index; `MUSIKATA_DEBUG=1` adds debug lines to the log (R14.5).
 
+## Before each commit
+
+```sh
+scripts/check.sh                  # under a minute; stops at the first step that fails
+scripts/check.sh --install-hook   # once per clone, if you want git to run it before each commit
+```
+
+It runs what tier 1 would fail on that can be checked in seconds: `ruff format --check` and `ruff
+check` (their settings are `pyproject.toml`'s), mypy on `src/`, `scripts/doccheck.py`, the
+private-names check over every file git tracks or would add, and the fast tests (`pytest -m "not
+slow"`). It uses `.venv`, or the environment `MUSIKATA_VENV` names. The hook is opt-in, per clone;
+`git commit --no-verify` skips it.
+
 ## The demo library
 
 Real music is never committed, used in tests or shown in screenshots. `scripts/demo_library.py`
