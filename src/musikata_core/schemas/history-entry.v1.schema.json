@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/history-entry.v1.schema.json",
+  "title": "<root>/.musikata/history/<time>-<computer id>.json: one save (A3.5)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC, ISO 8601"
+    },
+    "computer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "undoes": {
+      "type": "string",
+      "description": "The entry this one undoes, by file name"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The file's path under the root, with / separators"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The file's path under the root, with / separators"
+          },
+          "fields": {
+            "type": "object",
+            "description": "Each changed field's old value, by R4.1 field"
+          },
+          "cover": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The old cover, kept as history/images/<sha256>"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  "required": [
+    "format",
+    "time",
+    "computer",
+    "action",
+    "files"
+  ]
+}

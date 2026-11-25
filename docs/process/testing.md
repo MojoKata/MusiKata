@@ -41,12 +41,49 @@ environment leaves this list, and R1.1, together.
   floor in `tests/coverage-floor.json` that may only rise: a change that drops an area below its
   floor fails tier 1, and one that raises it moves the floor up in the same change, squashed into
   one commit ([`ci.md`](ci.md), "Coverage").
+- **Each module at 80 % before it is ready.** A module of `src/` isn't ready, and its pull request
+  doesn't merge, until its tests reach 80 % of it, its lines and branches counted together as
+  coverage.py counts them. An area's floor only stops it sliding back, and a new module could
+  otherwise arrive half tested and hide behind its neighbours. `coverage_report.py --check` fails on
+  a module under 80 %, unless `tests/coverage-exceptions.txt` names it with the reason (a module
+  that runs only on Windows or macOS, measured in that platform's run).
+- **Data from outside is tested in its real shapes.** A module that reads data it didn't write
+  lists, under "Shapes" below, what varies in that data and the test that covers each
+  ([`coding.md`](coding.md), "Data from outside: its shapes"), before its code is ready. Missing
+  fields, fields in another order, other programs' conventions and older versions' files are where
+  most bugs in such code come from, and they are cheaper to list than to find by mutation.
+- **Properties, with Hypothesis.** Where a rule holds for every input, a property states it and
+  Hypothesis tries inputs: the parsers of outside files never fail but with their own error,
+  whatever bytes they get; round trips change nothing (a path made from tags and read back, an M3U
+  written and read); invariants hold (the equalizer's output stays under full scale, play files
+  merged in any order sum the same, unknown fields survive a rewrite). In tier 1 each property runs
+  a fixed set of about 50 examples (`derandomize`), so it is fast and never flaky; a weekly CI run
+  and one before each release try thousands of random ones. A failing case found that way becomes an
+  `@example` on its test, so it is checked on every run after.
 - **Mutation testing.** Once a first pass of the code is written, mutmut sweeps `musikata_core` for
   code the tests run but don't check; each survivor is killed by a new test or noted with the reason
   it isn't worth one. It isn't run as each piece is written; coverage is the measure until then
   ("Mutation testing", below).
 - **Gates.** ruff and mypy ([`coding.md`](coding.md)) run in tier 1 beside the tests and the
   coverage floors.
+
+## Shapes
+
+What varies in the data each module reads but didn't write ([`coding.md`](coding.md), "Data from
+outside: its shapes"): the list it starts from, which the module's tests cover, each shape by a test
+that names it. A module adds the shapes it meets; a bug found in a shape no test had is added here
+with its test.
+
+| Module | Its shapes |
+|---|---|
+| `tags` (A3.2, R4) | ID3v1 only, ID3v2.2, 2.3 and 2.4, and v1 and v2 that disagree; frames repeated or empty; several genres as separate frames, as `;` or `/` in one, or as ID3v1 numbers `(17)`; track as `4`, `04` or `4/10`; years as `2003`, `2003-05-01` or `TYER` with `TDAT`; Vorbis keys in any case and repeated; MP4 freeform atoms; `POPM` from Windows Media Player, MusicBee and foobar2000; Picard's MusicBrainz ids; the text encodings of R4.10 |
+| `playlists` (R8.1.2) | absolute and relative paths, `\` and `/`, `file://` URLs; `#EXTINF` and without; a BOM, CRLF, `.m3u` in the system's encoding; comments and blank lines; files missing, outside the root, or listed twice |
+| `lyrics` (A7.6, R17) | times as `[mm:ss]`, `[mm:ss.xx]` and `[mm:ss.xxx]`, several on one line; `[ar:]`, `[ti:]` and `[offset:]`; lines out of order, blank, or untimed; word times `<mm:ss.xx>`; a BOM and CRLF |
+| `attention` (`.cue`) | `FILE` with and without quotes; the sheet in UTF-8 or the system's encoding; `REM` lines; `INDEX 00` and `01` |
+| `audio.eq` (R19.7) | with and without `Preamp:`; filters `ON` and `OFF`; `PK`, `LSC`, `HSC`, `LP`, `HP` and types it doesn't read; `Fc` with and without `Hz`; `Q` against `BW`; comments; more than ten bands |
+| `online` (A7) | fields missing, `null`, empty or added; dates as a year, a month or a day; several matching releases; answers `503` and `429`; slow answers; text in any script |
+| `rootfiles`, `settings` (A2.10) | each older format, and a newer one; unknown fields and groups; values broken or out of range (R13.9); two computers' entries for one song; a file cut short by a sync in progress; a sync tool's "conflicted copy" beside it |
+| `patterns` (R3) | odd characters, deep and shallow folders, numbers in names, `Disc 1` folders, names longer than a platform allows |
 
 ## Tiers
 

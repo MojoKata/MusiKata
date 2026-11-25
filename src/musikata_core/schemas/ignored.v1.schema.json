@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/ignored.v1.schema.json",
+  "title": "<root>/.musikata/ignored.json: Needs attention entries dismissed (R2.8)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "about": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A path under the root, or for names, the name"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The audio hash of A2.3"
+          },
+          "modified": {
+            "type": "number",
+            "description": "The file's modification time when dismissed, in seconds"
+          },
+          "changed": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC, ISO 8601"
+          }
+        },
+        "required": [
+          "kind",
+          "about",
+          "changed"
+        ]
+      }
+    }
+  },
+  "required": [
+    "format",
+    "entries"
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/root-settings.v1.schema.json",
+  "title": "<root>/.musikata/settings.json: the root's own settings (R13.9)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "tags": {
+      "type": "object",
+      "properties": {
+        "id3_version": {
+          "enum": [
+            "2.3",
+            "2.4"
+          ]
+        },
+        "write_ratings": {
+          "type": "boolean"
+        },
+        "rating_scale": {
+          "enum": [
+            "windows-media",
+            "musikata"
+          ]
+        },
+        "history": {
+          "type": "boolean"
+        },
+        "history_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "genres": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "articles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keep_modified_times": {
+          "type": "boolean"
+        }
+      },
+      "description": "R13.3"
+    },
+    "patterns": {
+      "type": "object",
+      "properties": {
+        "user": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "organize": {
+          "type": "string"
+        }
+      },
+      "description": "R13.4"
+    },
+    "album_art": {
+      "type": "object",
+      "properties": {
+        "file_name": {
+          "type": "string"
+        },
+        "embed_max": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "jpeg_quality": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "attention_min": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "R13.5"
+    },
+    "playlists": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "type": "string"
+        },
+        "relative": {
+          "type": "boolean"
+        },
+        "encoding": {
+          "enum": [
+            "m3u8",
+            "m3u"
+          ]
+        }
+      },
+      "description": "R13.6"
+    },
+    "lyrics": {
+      "type": "object",
+      "properties": {
+        "save": {
+          "enum": [
+            "lrc",
+            "tags",
+            "both"
+          ]
+        }
+      },
+      "description": "R13.11"
+    },
+    "skip": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Folders to skip, under the root (R13.2)"
+    }
+  },
+  "required": [
+    "format"
+  ]
+}

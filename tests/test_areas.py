@@ -75,3 +75,53 @@ def test_run_it_prints_the_areas_one_per_line():
         check=True,
     ).stdout
     assert out == "".join(f"{a}\n" for a in areas.AREAS)
+
+
+def _a1_9():
+    """[(module, area)] of the table of docs/architecture/A1-overview.md's A1.9."""
+    import re
+
+    with open(os.path.join(ROOT, "docs", "architecture", "A1-overview.md"), encoding="utf-8") as f:
+        text = f.read()
+    part = text[text.index("A1.9. **Modules.**") :]
+    return re.findall(r"^\| `([\w./]+)` \| (\w+) \|", part, re.M)
+
+
+def test_the_modules_and_their_areas_are_a1_9s():
+    """A1.9 names each module and its area; areas.py places each module there, and holds no core
+    subject A1.9 doesn't name."""
+    rows = _a1_9()
+    assert rows, "A1.9's table"
+    named = set()
+    for module, area in rows:
+        if module.endswith("/"):
+            path = f"src/{module}View.qml"
+        else:
+            package, _, name = module.partition(".")
+            named.add(name)
+            path = f"src/{package}/{name}.py"
+            assert areas.area_of_code(f"src/{package}/{name}/part.py") == area, module
+        assert areas.area_of_code(path) == area, (module, area, areas.area_of_code(path))
+    core = {
+        p[len("src/musikata_core/") : -len(".py")]
+        for ps in areas.CODE.values()
+        for p in ps
+        if p.startswith("src/musikata_core/") and p.endswith(".py") and "*" not in p
+    }
+    assert core - {"__init__"} <= named, sorted(core - {"__init__"} - named)
+
+
+def test_every_module_in_src_is_one_a1_9_names():
+    names = {m for m, _ in _a1_9()}
+    for top, _dirs, files in os.walk(os.path.join(ROOT, "src")):
+        rel = os.path.relpath(top, os.path.join(ROOT, "src")).replace(os.sep, "/")
+        parts = rel.split("/")
+        if parts[0] not in ("musikata_core", "musikata") or "schemas" in parts:
+            continue
+        for f in files:
+            if not f.endswith(".py") or f == "__init__.py" and len(parts) == 1:
+                continue
+            if parts[0] == "musikata" and len(parts) > 1 and parts[1] == "qml":
+                continue
+            module = f"{parts[0]}.{parts[1] if len(parts) > 1 else f[:-3]}"
+            assert module in names, f"{rel}/{f}: A1.9 names no {module}"

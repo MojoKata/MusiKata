@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/root.v1.schema.json",
+  "title": "<root>/.musikata/root.json: the root's id (A2.9)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "required": [
+    "format",
+    "id"
+  ]
+}

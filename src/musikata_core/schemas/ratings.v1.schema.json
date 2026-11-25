@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/ratings.v1.schema.json",
+  "title": "<root>/.musikata/ratings.json: ratings kept beside the files (R10.3)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "songs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The file's path under the root, with / separators"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The audio hash of A2.3"
+          },
+          "stars": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "changed": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC, ISO 8601"
+          }
+        },
+        "required": [
+          "path",
+          "hash",
+          "stars",
+          "changed"
+        ]
+      }
+    }
+  },
+  "required": [
+    "format",
+    "songs"
+  ]
+}

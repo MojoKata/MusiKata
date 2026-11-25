@@ -1,0 +1,344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/shared-settings.v1.schema.json",
+  "title": "The shared settings.json: this computer's and this person's (R13.9)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "computer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "description": "This computer's id and name (A2.8)"
+    },
+    "library": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "watch": {
+          "type": "boolean"
+        }
+      },
+      "description": "R13.2"
+    },
+    "playback": {
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replaygain": {
+          "enum": [
+            "album",
+            "track",
+            "off"
+          ]
+        },
+        "replaygain_default": {
+          "type": "number",
+          "description": "dB, for songs without ReplayGain"
+        },
+        "resume": {
+          "type": "boolean"
+        }
+      },
+      "description": "R13.7"
+    },
+    "equalizer": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "preset": {
+          "type": "string"
+        },
+        "by_genre": {
+          "type": "boolean"
+        },
+        "presets": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "kind": {
+                    "const": "parametric"
+                  },
+                  "preamp": {
+                    "type": "number",
+                    "minimum": -12,
+                    "maximum": 12
+                  },
+                  "bands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "bell",
+                            "low-shelf",
+                            "high-shelf",
+                            "low-cut",
+                            "high-cut"
+                          ]
+                        },
+                        "freq": {
+                          "type": "number",
+                          "minimum": 20,
+                          "maximum": 20000
+                        },
+                        "gain": {
+                          "type": "number",
+                          "minimum": -12,
+                          "maximum": 12
+                        },
+                        "q": {
+                          "type": "number",
+                          "minimum": 0.1,
+                          "maximum": 10
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "freq",
+                        "q"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "name",
+                  "kind",
+                  "preamp",
+                  "bands"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "kind": {
+                    "const": "graphic"
+                  },
+                  "preamp": {
+                    "type": "number",
+                    "minimum": -12,
+                    "maximum": 12
+                  },
+                  "gains": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "minimum": -12,
+                      "maximum": 12
+                    },
+                    "minItems": 10,
+                    "maxItems": 10
+                  },
+                  "from_bands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "bell",
+                            "low-shelf",
+                            "high-shelf",
+                            "low-cut",
+                            "high-cut"
+                          ]
+                        },
+                        "freq": {
+                          "type": "number",
+                          "minimum": 20,
+                          "maximum": 20000
+                        },
+                        "gain": {
+                          "type": "number",
+                          "minimum": -12,
+                          "maximum": 12
+                        },
+                        "q": {
+                          "type": "number",
+                          "minimum": 0.1,
+                          "maximum": 10
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "freq",
+                        "q"
+                      ]
+                    },
+                    "description": "The parametric bands it was fitted from, until a slider changes (R19.6)"
+                  }
+                },
+                "required": [
+                  "name",
+                  "kind",
+                  "preamp",
+                  "gains"
+                ]
+              }
+            ]
+          },
+          "description": "The custom presets (R19.3)"
+        },
+        "genres": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Genre to preset (R19.4)"
+        }
+      },
+      "description": "R19.5"
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "enum": [
+            "system",
+            "dark",
+            "light"
+          ]
+        },
+        "analyzer_bands": {
+          "enum": [
+            48,
+            96,
+            128
+          ]
+        },
+        "analyzer_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "tint": {
+          "type": "boolean"
+        },
+        "minimize_for_mini": {
+          "type": "boolean"
+        },
+        "text_size": {
+          "type": "integer",
+          "minimum": 90,
+          "maximum": 150
+        },
+        "reduce_motion": {
+          "enum": [
+            "system",
+            "on",
+            "off"
+          ]
+        }
+      },
+      "description": "R13.8"
+    },
+    "online": {
+      "type": "object",
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "save_mbids": {
+          "type": "boolean"
+        },
+        "check_updates": {
+          "type": "boolean"
+        }
+      },
+      "description": "R13.10"
+    },
+    "mini_player": {
+      "type": "object",
+      "properties": {
+        "layout": {
+          "enum": [
+            "strip",
+            "cover",
+            "card",
+            "analyzer",
+            "disc",
+            "details",
+            "remote"
+          ]
+        },
+        "places": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "integer"
+              },
+              "y": {
+                "type": "integer"
+              },
+              "w": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "h": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "w",
+              "h"
+            ]
+          },
+          "description": "Each layout's place and size (R15.3)"
+        }
+      },
+      "description": "R15"
+    }
+  },
+  "required": [
+    "format",
+    "computer"
+  ]
+}
