@@ -14,12 +14,14 @@ the present tense and carry no dates or status; git holds the history.
 # 1. Overview
 
 [A1](A1-overview.md): the stack, the two packages and what may import what, threads and processes,
-the data flow from a file to the screen and back, and the decisions that shape everything else.
+the modules, the data flow from a file to the screen and back, and the decisions that shape
+everything else.
 
 # 2. Library and scanning
 
 [A2](A2-library-and-scanning.md): the database, the scan, watching the root, search, how the index
-stays a copy of the files, and finding a root's index.
+stays a copy of the files, finding a root's index, and the formats of the files other computers
+read.
 
 # 3. Tags
 

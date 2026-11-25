@@ -14,7 +14,9 @@ commit before: a pull request's merge commit's first parent is its base; otherwi
 with master), and writes into build/coverage/ the HTML report (html/), summary.md, totals.json and
 files.json. In GitHub Actions it also writes the job summary and annotations: the headline, and the
 largest stretches of changed lines no test reaches, on those lines in the pull request. `--check`
-fails when an area falls below its floor.
+fails when an area falls below its floor, or when a module of src/ is under MODULE_MIN, lines and
+branches counted together as coverage.py counts them (docs/process/testing.md, "Coverage"), unless
+tests/coverage-exceptions.txt names it with the reason.
 
 `floor` raises each area's floor to what was measured less SLACK lines and SLACK branches, rounded
 down to a tenth of a point, so run-to-run jitter doesn't fail however small the area; it never
@@ -43,6 +45,8 @@ FLOOR = ROOT / "tests" / "coverage-floor.json"
 SLACK = 3  # lines, and branches, an area's measure may move by between runs
 ANNOTATIONS = 9  # GitHub shows 10 notices a step: the headline and the nine largest gaps
 UNMEASURED = ("qml",)
+MODULE_MIN = 80.0  # every module of src/, before its code is ready (docs/process/testing.md)
+EXCEPTIONS = ROOT / "tests" / "coverage-exceptions.txt"
 
 _spec = importlib.util.spec_from_file_location("musikata_areas", ROOT / "scripts" / "areas.py")
 areas = importlib.util.module_from_spec(_spec)
@@ -172,6 +176,33 @@ def file_rows(files):
     ]
 
 
+def module_pct(f):
+    """A file's coverage as coverage.py totals it: lines and branches reached, over both."""
+    whole = len(f.covered) + len(f.missed) + f.branches
+    return pct(len(f.covered) + f.branches_taken, whole)
+
+
+def exceptions(path=EXCEPTIONS):
+    """{path: why} of the modules held to no minimum: a line each, "<path>  # why"."""
+    out = {}
+    if Path(path).exists():
+        for line in Path(path).read_text().splitlines():
+            if line.strip() and not line.startswith("#"):
+                rel, _, why = line.partition("  # ")
+                out[rel.strip()] = why.strip()
+    return out
+
+
+def modules_under(files, excepted):
+    """[(path, percent)] of the modules of src/ under MODULE_MIN that no exception names."""
+    out = []
+    for rel, f in sorted(files.items()):
+        p = module_pct(f)
+        if rel.startswith("src/") and rel not in excepted and p is not None and p < MODULE_MIN:
+            out.append((rel, p))
+    return out
+
+
 # ---------- the changed lines ----------
 
 
@@ -292,7 +323,7 @@ def reached(t, kind):
     return f"{got:,} of {count:,}" if count else "—"
 
 
-def summary(by_area, fl, d, base, below, unmeasured):
+def summary(by_area, fl, d, base, below, unmeasured, low=()):
     out = ["## Coverage", ""]
     if d is not None and d["lines"]:
         out.append(
@@ -342,6 +373,9 @@ def summary(by_area, fl, d, base, below, unmeasured):
         out += [f"- `{rel}`: {a}" + (f"–{b}" if b > a else "") for rel, a, b in d["gaps"]]
     if below:
         out += ["", f"**Below the floor:** {', '.join(below)}."]
+    if low:
+        out += ["", f"**Modules under {show(MODULE_MIN)}:**", ""]
+        out += [f"- `{rel}`: {show(p)}" for rel, p in low]
     return "\n".join(out) + "\n"
 
 
@@ -378,7 +412,8 @@ def cmd_report(data, check):
     base = base_ref()
     d = diff(files, changed_lines(base)) if base else None
     below = under(by_area, fl)
-    text = summary(by_area, fl, d, base, below, unmeasured_files())
+    low = modules_under(files, exceptions())
+    text = summary(by_area, fl, d, base, below, unmeasured_files(), low)
     (OUT / "summary.md").write_text(text)
     (OUT / "totals.json").write_text(json.dumps(by_area, indent=2) + "\n")
     (OUT / "files.json").write_text(json.dumps(file_rows(files), indent=1) + "\n")
@@ -389,7 +424,7 @@ def cmd_report(data, check):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
                 f.write(text)
         print("\n".join(annotations(by_area, d)))
-    return 1 if check and below else 0
+    return 1 if check and (below or low) else 0
 
 
 def cmd_floor(totals_file):

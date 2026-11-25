@@ -110,3 +110,138 @@ drive given another letter or mount point keeps its index:
 
 At start, the index and caches of every root not opened for 180 days are removed, and the App log
 names each. A root that comes back after that is scanned again, which loses only time (R1.5.1).
+
+A2.10. **The formats.** The files another computer, or another version of MusiKata, reads: the
+root's own files (A2.8) and the shared settings (R13.9). Each is JSON in UTF-8, and each has a JSON
+Schema in `src/musikata_core/schemas/`, which the tests hold every example below to.
+
+- **A version in each file.** Each carries `"format": 1`. Within a version a change only adds
+  fields, and every MusiKata keeps the fields it doesn't know when it rewrites a file, so an older
+  computer never erases what a newer one added. A change that can't be made by adding raises
+  `format`: a newer MusiKata reads every older format and writes its own; an older one that meets a
+  newer format reads what it can and never writes that file, and says so ("Changed by a newer
+  MusiKata on Studio-PC; update to change these"), as for a `.musikata` it can't write (R1.5.2).
+- **Values it can't use** are reported in the App log and replaced by their defaults (R13.9); the
+  rest of the file is kept.
+- **Paths** are under the root, with `/` between folders, on every platform. **Times** are UTC, in
+  ISO 8601. **Hashes** are the audio hash of A2.3, as 64 hexadecimal digits.
+- **Who writes it:** `plays/<id>.json` only its computer; `ratings.json` and `ignored.json` any
+  computer, merged entry by entry with the newest `changed` winning (A2.8); a history entry is
+  written once and never changed (A3.5); `root.json` once, when the root is first opened (A2.9).
+
+`root.json` (`root.v1.schema.json`):
+
+```json
+{"format": 1, "id": "6f1c0a5e-2b7d-4c1e-9a43-0f2d8e5b7c11"}
+```
+
+The root's `settings.json` (`root-settings.v1.schema.json`), each group as R13 lists it; a group or
+setting left out takes its default:
+
+```json
+{
+  "format": 1,
+  "tags": {"id3_version": "2.4", "write_ratings": true, "rating_scale": "windows-media",
+           "history": true, "history_days": 90, "articles": ["The", "A", "An"],
+           "keep_modified_times": false},
+  "patterns": {"user": ["{albumartist}/{album}/{track} - {title}"],
+               "organize": "{albumartist}/{year} - {album}/{disc-}{track:02} - {title}"},
+  "album_art": {"file_name": "cover.jpg", "embed_max": 1200, "jpeg_quality": 90,
+                "attention_min": 500},
+  "playlists": {"folder": "Playlists", "relative": true, "encoding": "m3u8"},
+  "lyrics": {"save": "lrc"},
+  "skip": ["_Incoming/Unsorted"]
+}
+```
+
+The shared `settings.json` (`shared-settings.v1.schema.json`). A custom preset is parametric, with
+its bands, or graphic, with its ten gains (R19.1); a graphic one fitted from parametric bands keeps
+them as `from_bands` until a slider changes (R19.6):
+
+```json
+{
+  "format": 1,
+  "computer": {"id": "b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c4d", "name": "Studio-PC"},
+  "library": {"root": "/home/ana/Music", "watch": true},
+  "playback": {"device": null, "replaygain": "album", "replaygain_default": -6.0, "resume": true},
+  "equalizer": {
+    "on": true, "preset": "Car", "by_genre": true,
+    "presets": [
+      {"name": "Car", "kind": "graphic", "preamp": -2.0,
+       "gains": [4.0, 3.5, 1.5, 0.0, -1.0, 0.0, 1.0, 2.0, 2.5, 2.0]},
+      {"name": "Late night", "kind": "parametric", "preamp": -3.0,
+       "bands": [{"type": "low-shelf", "freq": 100, "gain": 3.0, "q": 0.7},
+                 {"type": "high-cut", "freq": 12000, "q": 0.7}]}
+    ],
+    "genres": {"Classical": "Classical", "Jazz": "Jazz", "Electronic": "Late night"}
+  },
+  "appearance": {"theme": "system", "analyzer_bands": 96, "analyzer_seconds": 4, "tint": true,
+                 "minimize_for_mini": true, "text_size": 100, "reduce_motion": "system"},
+  "online": {"allowed": false, "services": {"musicbrainz": true, "coverartarchive": true,
+             "lrclib": true}, "save_mbids": true, "check_updates": false},
+  "mini_player": {"layout": "card", "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582}}}
+}
+```
+
+`plays/<computer id>.json` (`plays.v1.schema.json`), only the songs this computer has played:
+
+```json
+{
+  "format": 1,
+  "computer": {"id": "b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c4d", "name": "Studio-PC"},
+  "songs": [
+    {"path": "Lumen Drift/Glass Harbor/04 Signal Fires.flac",
+     "hash": "3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a",
+     "count": 12, "last": "2026-11-25T20:41:00Z"}
+  ]
+}
+```
+
+`ratings.json` (`ratings.v1.schema.json`), the ratings kept beside the files (R10.3); `stars` 0 is
+a rating cleared, kept so the clearing wins over an older rating from another computer:
+
+```json
+{
+  "format": 1,
+  "songs": [
+    {"path": "Lumen Drift/Glass Harbor/04 Signal Fires.wav",
+     "hash": "9d2b4f6a8c1e3a5b7d9f2c4e6a8b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b",
+     "stars": 5, "changed": "2026-11-24T18:02:13Z"}
+  ]
+}
+```
+
+`ignored.json` (`ignored.v1.schema.json`), Needs attention's dismissals (R2.8). `about` is the file
+or folder an entry is about, or for names that differ only in case, the name; `modified` is the
+file's modification time when it was dismissed, so a change to the file brings the entry back:
+
+```json
+{
+  "format": 1,
+  "entries": [
+    {"kind": "cover-small", "about": "Lumen Drift/Glass Harbor",
+     "changed": "2026-11-20T09:15:00Z"},
+    {"kind": "tags-from-path", "about": "_Incoming/track07.mp3",
+     "hash": "0c4e6b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a3f6a9c1e5b7d2f8a",
+     "modified": 1795600000.0, "changed": "2026-11-21T10:00:00Z"}
+  ]
+}
+```
+
+A history entry, `history/<time>-<computer id>.json` (`history-entry.v1.schema.json`): each file
+saved, with the old value of each field that changed, its old path when it moved (`from`), and its
+old cover by hash when the cover changed:
+
+```json
+{
+  "format": 1,
+  "time": "2026-11-25T20:45:12Z",
+  "computer": "b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c4d",
+  "action": "edit-tags",
+  "files": [
+    {"path": "Lumen Drift/Glass Harbor/04 Signal Fires.flac",
+     "fields": {"year": null, "genre": ["Electronica"]},
+     "cover": "5b7d9f0a2c4e6b8d1f3a3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e"}
+  ]
+}
+```

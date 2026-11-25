@@ -1,0 +1,3 @@
+# The modules of src/ held to no coverage minimum (scripts/coverage_report.py, MODULE_MIN; docs/process/
+# testing.md, "Coverage"), each with why. A line per module, "<path>  # why". Tier 1 runs on Linux,
+# so a module that only runs on another platform is measured there and listed here.

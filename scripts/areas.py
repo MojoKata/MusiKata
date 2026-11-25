@@ -10,8 +10,9 @@ one area.
 Run as a script, it prints the areas one per line, in AREAS' order.
 
 Paths are from the repository's root, with "/". A pattern is an fnmatch one, so `*` crosses folders.
-A test file is named for its area (tests/test_<area>_<subject>.py), so a new one needs no line
-here."""
+The modules and their areas are docs/architecture/A1-overview.md's A1.9, which tests/test_areas.py
+holds this file to. A test file is named for its area (tests/test_<area>_<subject>.py), so a new one
+needs no line here."""
 
 import fnmatch
 
@@ -49,14 +50,17 @@ CODE = {
             "watch",
             "search",
             "folders",
+            "attention",
+            "duplicates",
             "rootfiles",
             "roots",
             "settings",
             "workers",
+            "clock",
         ),
     ],
     # A3, R4, R5, R17: what is written into the files: tags, encodings, covers, lyrics
-    "tags": _core("tags", "encodings", "art", "lyrics"),
+    "tags": _core("tags", "encodings", "art", "genres", "lyrics"),
     # R3, R8, R12, A3.5: how files are named, listed, moved and renamed, and Undo
     "files": _core("patterns", "playlists", "organize", "history"),
     # A4: decoding, joins, gain, the equalizer and the limiter, the queue
@@ -64,7 +68,7 @@ CODE = {
     # A5: waveforms and spectra
     "analysis": _core("analysis"),
     # A7: the HTTP client and each service
-    "online": _core("online"),
+    "online": _core("online", "update"),
     # the app's Python: models, bridges, the sound device and media controls (A4.5), the tour
     "app": ["src/musikata/*.py"],
     # QML, which coverage.py doesn't measure: the area holds its files, without a figure

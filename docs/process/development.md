@@ -3,8 +3,8 @@
 ## The repository's layout
 
 ```
-src/musikata_core/   no GUI: db, scanner, tags, patterns, art, playlists, organize, history, analysis (A1.2)
-src/musikata/        the app: QML (qml/), list models, Backend/Player/Library bridges, platform modules, tour
+src/musikata_core/   no GUI: the modules of A1.9 (db, scanner, tags, patterns, audio, …), schemas/ (A2.10)
+src/musikata/        the app (A1.9): QML (qml/), models, bridges, the player, media controls, the tour
 tests/               pytest: unit tests per core module, QML tests, the tour's layout checks
 scripts/             build, test and demo scripts (shell and Python)
 packaging/           versions.env, qt-modules.txt, the Windows installer script, macOS bundle files, icons

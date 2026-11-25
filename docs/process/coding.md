@@ -37,8 +37,33 @@ wrongly.
 - **Jobs are plain functions.** A job for the worker processes (A1.3) is a function of picklable
   arguments, tested by calling it directly; the pool that runs jobs is tested once, not per job.
 
+## Data from outside: its shapes
+
+A module that reads data it didn't write (a tag another program wrote, a playlist, an `.lrc`, a
+`.cue`, an Equalizer APO file, a service's answer, a root's file written by another computer or
+another version) is written for the shapes that data takes in the real world, not for the shape of
+the first example. Those shapes, not the code's own branches, are where most of its bugs come from,
+and mutation testing finds them only slowly.
+
+- **Each such module names its shapes.** Before its code is ready, its shapes are listed in
+  `testing.md` ("Shapes"): what varies in what it reads, and the test that covers each. What varies
+  depends on the data, and the list is the module's own decision; it starts from these:
+  - fields missing, empty, or present twice;
+  - fields in another order, and fields it doesn't know;
+  - values of another type, out of range, or in another case, encoding or form (a number as text,
+    `4/10` against `4`, a date of four forms);
+  - lines or entries in another order, blank, commented, or with other line ends;
+  - what other programs write: the conventions of iTunes, foobar2000, MusicBee, Mp3tag, Picard,
+    Windows Media Player and the rest, and an older or newer MusiKata;
+  - size: none, one, very many, very long.
+- **Real shapes, generated.** The demo library and the tests make files the way those programs do,
+  and the online services' recorded answers (A7.8) include their odd ones; real music and real
+  users' files are never committed (A6.7). Hypothesis (`testing.md`) generates the variations a list
+  can't enumerate.
+
 ## Layout and imports
 
+- The modules are A1.9's, each in its area; a new one is a row there in the same change.
 - The two packages of A1.2: `musikata_core` imports `PySide6.QtCore` at most, never `QtGui`,
   `QtQuick` or `QtMultimedia`; `musikata` imports both. A test checks it.
 - Each module of `musikata_core` has one subject (`tags`, `patterns`, `scanner`, `audio.eq`, …)
@@ -88,8 +113,8 @@ wrongly.
 
 - Nothing joins what MusiKata carries without a reason written in the architecture (R1.2.2), and
   every package and tool is pinned ([`build-and-release.md`](build-and-release.md)).
-- Tools used only in development (ruff, mypy, pytest, coverage.py, mutmut) are pinned the same
-  way, and no build carries them.
+- Tools used only in development (ruff, mypy, pytest, coverage.py, mutmut, Hypothesis, jsonschema)
+  are pinned the same way, and no build carries them.
 
 ## Comments and names
 
