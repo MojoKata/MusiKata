@@ -52,7 +52,7 @@ environment leaves this list, and R1.1, together.
 
 | Tier | When | What it's for |
 |---|---|---|
-| 1 | every change | ruff, mypy and the whole pytest suite with its coverage floors, in one container on the release's Python and PySide6, offscreen: the gate for every commit, run by CI on every pull request and push to `main` |
+| 1 | every change | ruff, mypy and the whole pytest suite with its coverage floors, in one container on the release's Python and PySide6, offscreen: the gate for every commit, run by CI on every pull request and push to `master` |
 | 2 | before pushing | the tour and its layout check at 100 % and 150 % text (R18.3), the size and speed targets of R1.11 on the demo library built at 50,000 songs, the AppImage built and started, the Windows suite in its VM |
 | 3 | before a release | each platform's build installed and used by hand: playback through real speakers, media keys, drag and drop with the platform's file manager, the mini player moved, resized and kept on top, the platform's screen reader through every view (R18.1), the music root's drive unplugged and plugged back (R2.10), an update from the previous release (R1.9); the field test's checklist is `scripts/field_test.py`, run per environment before a release ([`release.md`](release.md), 4) |
 
@@ -148,7 +148,7 @@ display ("last played", the 180-day cleanup of A2.9, the sleep timer).
 
 ## CI
 
-GitHub Actions, each action pinned by commit SHA: tier 1 on every pull request and push to `main`;
+GitHub Actions, each action pinned by commit SHA: tier 1 on every pull request and push to `master`;
 the tour, with its screenshots kept as the run's artifact; the four builds (`appimage`, `windows`,
 `macos-arm64`, `macos-x86_64`), unsigned, each with its `.sha256`; once a week,
 `scripts/check-services.py` against the real services (A7.8), failing the run when one has changed.

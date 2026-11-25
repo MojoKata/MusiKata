@@ -20,7 +20,7 @@
 #                                 actions pinned by SHA, the field-test label and, once CI has
 #                                 passed, the required ci check: each only if missing
 #     check                       read back every setting docs/process/genesis.md lists
-#   A release, from a clone of the repository on main (docs/process/release.md walks through it):
+#   A release, from a clone of the repository on master (docs/process/release.md walks through it):
 #     release                     once the release pull request is merged and CI passed on it (it
 #                                 refuses before): tag v<version>, push it, wait for CI, show the
 #                                 four builds' SHA-256s, approve the signing, check the draft
@@ -263,14 +263,14 @@ EOF
             gh api -X PUT "repos/$REPO/actions/permissions" --input - >/dev/null
         say "actions pinned by SHA: required"
     fi
-    id=$(ruleset_id main) || die "can't read $REPO's rulesets"
-    if [ -z "$id" ]; then say "main ruleset: missing (scripts/repo-admin.sh apply makes it): the ci check not added"
+    id=$(ruleset_id master) || die "can't read $REPO's rulesets"
+    if [ -z "$id" ]; then say "master ruleset: missing (scripts/repo-admin.sh apply makes it): the ci check not added"
     elif gh api "repos/$REPO/rulesets/$id" --jq '.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' | grep -qx ci; then
         say "the ci check: required"
     elif [ -z "$(gh run list --repo "$REPO" --workflow ci.yml --status success --limit 1 --json databaseId --jq '.[].databaseId' 2>/dev/null)" ]; then
         say "the ci check: not required yet (GitHub offers it once it has passed: run setup again then)"
     else
-        ask "Require the ci check in the main ruleset?"
+        ask "Require the ci check in the master ruleset?"
         gh api "repos/$REPO/rulesets/$id" --jq '{name, target, enforcement, conditions, bypass_actors,
             rules: (.rules + [{type: "required_status_checks", parameters: {strict_required_status_checks_policy: false,
               required_status_checks: [{context: "ci", integration_id: 15368}]}}])}' |
@@ -295,19 +295,19 @@ check() {
     api() { _a=$(gh api "repos/$REPO$1" --jq "$2" 2>/dev/null) && printf '%s\n' "$_a" || echo "(can't read)"; }
     BYPASS='if has("bypass_actors") then [.bypass_actors[] | select(.actor_type == "RepositoryRole" and .actor_id == 5)] | length else "(can'"'"'t read)" end'
     is "visibility" "$(api "" .visibility)" public
-    is "default branch" "$(api "" .default_branch)" main
+    is "default branch" "$(api "" .default_branch)" master
     # GitHub leaves out what only an admin may read (the merge methods, a ruleset's bypass list): that
     # is "(can't read)" too, not a wrong value
     is "merge methods (squash merge rebase)" "$(api "" 'if .allow_squash_merge == null then "(can'"'"'t read)" else "\(.allow_squash_merge) \(.allow_merge_commit) \(.allow_rebase_merge)" end')" "true false false"
-    if ! id=$(ruleset_id main); then is "main ruleset" "(can't read)" there
-    elif [ -z "$id" ]; then is "main ruleset" missing there
+    if ! id=$(ruleset_id master); then is "master ruleset" "(can't read)" there
+    elif [ -z "$id" ]; then is "master ruleset" missing there
     else
         m=/rulesets/$id
-        is "main ruleset" "$(api "$m" '"\(.enforcement) \(.target) \(.conditions.ref_name.include | join(","))"')" "active branch ~DEFAULT_BRANCH"
-        is "main ruleset: rules" "$(api "$m" '[.rules[].type] | sort | join(" ")')" "deletion non_fast_forward pull_request required_status_checks"
-        is "main ruleset: pull requests" "$(api "$m" '.rules[] | select(.type == "pull_request") | .parameters | "\(.required_approving_review_count) approvals, \(.allowed_merge_methods | join(","))"')" "0 approvals, squash"
-        is "main ruleset: required checks" "$(api "$m" '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | join(",")')" ci
-        is "main ruleset: admins bypass" "$(api "$m" "$BYPASS")" 1
+        is "master ruleset" "$(api "$m" '"\(.enforcement) \(.target) \(.conditions.ref_name.include | join(","))"')" "active branch ~DEFAULT_BRANCH"
+        is "master ruleset: rules" "$(api "$m" '[.rules[].type] | sort | join(" ")')" "deletion non_fast_forward pull_request required_status_checks"
+        is "master ruleset: pull requests" "$(api "$m" '.rules[] | select(.type == "pull_request") | .parameters | "\(.required_approving_review_count) approvals, \(.allowed_merge_methods | join(","))"')" "0 approvals, squash"
+        is "master ruleset: required checks" "$(api "$m" '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | join(",")')" ci
+        is "master ruleset: admins bypass" "$(api "$m" "$BYPASS")" 1
     fi
     if ! id=$(ruleset_id tags); then is "tags ruleset" "(can't read)" there
     elif [ -z "$id" ]; then is "tags ruleset" missing there
@@ -387,13 +387,13 @@ prepared() {        # the release pull request is merged, with every step done, 
     grep -q '^## Notes' "$rec" || die "$rec has no Notes section: the release's notes, what a user sees"
     [ -d "tests/data/state/$VERSION" ] || die "tests/data/state/$VERSION/ is missing: the release pull request freezes it"
     grep -Eq "^## Status \($(echo "$VERSION" | sed 's/\./\\./g')[:)]" DEVELOP.md || die "DEVELOP.md's Status heading doesn't name $VERSION"
-    ci=$(gh run list --repo "$REPO" --workflow ci.yml --branch main --event push --commit "$(git rev-parse HEAD)" --limit 1 \
+    ci=$(gh run list --repo "$REPO" --workflow ci.yml --branch master --event push --commit "$(git rev-parse HEAD)" --limit 1 \
         --json status,conclusion --jq '.[] | "\(.status) \(.conclusion)"') || die "can't read CI's runs on $REPO"
     case $ci in
-        "completed success") say "CI passed on main at $short, and $rec has every step done." ;;
-        "") die "CI hasn't run on main at $short: run release again once it has passed" ;;
-        completed*) die "CI failed on main at $short ($ci): gh run list --repo $REPO --branch main. Ask the agent to look into it" ;;
-        *) die "CI is still running on main at $short: run release again once it has passed" ;;
+        "completed success") say "CI passed on master at $short, and $rec has every step done." ;;
+        "") die "CI hasn't run on master at $short: run release again once it has passed" ;;
+        completed*) die "CI failed on master at $short ($ci): gh run list --repo $REPO --branch master. Ask the agent to look into it" ;;
+        *) die "CI is still running on master at $short: run release again once it has passed" ;;
     esac
 }
 
@@ -404,9 +404,9 @@ release() {
     remote=$(git remote -v | awk -v r="$REPO" '$2 ~ "github.com[:/]" r "(\\.git)?$" && $3 == "(push)" { print $1; exit }')
     [ -n "$remote" ] || die "no git remote points at $REPO"
     [ -z "$(git status --porcelain)" ] || die "the work tree has changes: git status"
-    [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || die "not on main: git checkout main && git pull"
-    git fetch -q "$remote" main
-    [ "$(git rev-parse HEAD)" = "$(git rev-parse "$remote/main")" ] || die "main isn't $remote/main: git pull"
+    [ "$(git rev-parse --abbrev-ref HEAD)" = master ] || die "not on master: git checkout master && git pull"
+    git fetch -q "$remote" master
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse "$remote/master")" ] || die "master isn't $remote/master: git pull"
     ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "$TAG exists here"
     [ -z "$(git ls-remote --tags "$remote" "$TAG")" ] || die "$TAG exists on $remote: publish.sh resume, if its run didn't finish"
     prepared

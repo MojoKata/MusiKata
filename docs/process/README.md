@@ -69,9 +69,9 @@ design reference for what isn't built yet.
 ## Commits, branches and pull requests
 
 - Every commit and tag is GPG-signed, by the identity git's configuration chooses.
-- Work is done on a branch, never on `main`; a branch takes `main` in with merge commits, never a
-  rebase, so review comments stay attached.
-- Pull requests are squash merged, so each lands on `main` as one commit with a message that says
+- Work is done on a branch, never on `master`; a branch takes `master` in with merge commits, never
+  a rebase, so review comments stay attached.
+- Pull requests are squash merged, so each lands on `master` as one commit with a message that says
   what changed and why.
 - Nothing is committed that holds a secret (signing keys, tokens, `.env`).
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The Pages site (docs/process/ci.md, "The Pages site"): the coverage report with its history,
 the hardening page (scripts/hardening.py) and the screenshots, published to the repository's GitHub
-Pages on each push to main.
+Pages on each push to master.
 
     coverage_site.py build [--coverage DIR] [--screenshots DIR] [--out DIR]
     coverage_site.py release-tours DIR
@@ -9,21 +9,21 @@ Pages on each push to main.
 builds the site into build/site/ (--out) from what `coverage_report.py report` wrote into
 build/coverage/ (--coverage: totals.json, files.json and the HTML report), the history the published
 site holds with this commit's totals added last, and the repository's issues. CI builds it on every
-run and keeps it as the `site` artifact; on a push to main the `pages` job publishes it. Built
+run and keeps it as the `site` artifact; on a push to master the `pages` job publishes it. Built
 anywhere else, it is a preview of what publishing this commit would show, and publishes nothing.
 
 The repository is GITHUB_REPOSITORY (owner/name), else MUSIKATA_REPO, else MojoKata/MusiKata; its
 site is https://<owner>.github.io/<name>/, or MUSIKATA_SITE.
 
-The history lives on the site alone: each push to main reads it back and adds its own entry. A site
-that answers with no history.json starts one only while there is no site at all; any other failure
-to read it fails the build in CI, so a bad moment never starts the history over. The screenshots are
-kept the same way: the published ones, under screenshots/<version>/ as screenshots/index.json lists
-them, are carried into each build, and --screenshots DIR adds or replaces the versions DIR holds
-(DIR/<version>/...). CI's site job puts its run's Linux tour in DIR/main/, and release-tours DIR
-puts there each published release's that the site doesn't hold yet, from its tag's run. Each build
-also writes screenshots/latest/, a copy of the newest release's tour, or main's while there is no
-release, an address that always shows the newest screens."""
+The history lives on the site alone: each push to master reads it back and adds its own entry. A
+site that answers with no history.json starts one only while there is no site at all; any other
+failure to read it fails the build in CI, so a bad moment never starts the history over. The
+screenshots are kept the same way: the published ones, under screenshots/<version>/ as
+screenshots/index.json lists them, are carried into each build, and --screenshots DIR adds or
+replaces the versions DIR holds (DIR/<version>/...). CI's site job puts its run's Linux tour in
+DIR/master/, and release-tours DIR puts there each published release's that the site doesn't hold
+yet, from its tag's run. Each build also writes screenshots/latest/, a copy of the newest release's
+tour, or master's while there is no release, an address that always shows the newest screens."""
 
 import argparse
 import html
@@ -549,8 +549,9 @@ details summary {{ cursor: pointer; font-weight: 600; margin: 32px 0 8px; }}
 href="screenshots/index.html">Screenshots</a></nav>
 <p>As of <a href="{commit_url}">{commit}</a>{pr}, {date}: {subject}</p>
 {banner}
-<p>What tier 1 reaches, measured by CI's <code>coverage</code> job on each push to <code>main</code>
-(<code>scripts/coverage_report.py</code>). Line by line: <a href="report/index.html">the report</a>.
+<p>What tier 1 reaches, measured by CI's <code>coverage</code> job on each push to
+<code>master</code> (<code>scripts/coverage_report.py</code>).
+Line by line: <a href="report/index.html">the report</a>.
 The history: <a href="history.json">history.json</a> ({pushes_count} pushes); each file's counts:
 <a href="files.json">files.json</a>. The sweep's steps, findings, gaps and questions:
 <a href="hardening.html">hardening</a>. The app's screens, by version: <a
@@ -766,10 +767,10 @@ def screenshots(base, nonce, dest, new=None, fetch=True):
     return dict(sorted(index.items(), key=lambda kv: _version_key(kv[0]), reverse=True))
 
 
-# The folder of the newest tour, main's, replaced by each push; a release's own is kept under its
+# The folder of the newest tour, master's, replaced by each push; a release's own is kept under its
 # version (release_tours). LATEST is a copy the site makes on each build, never carried: the newest
-# release's tour, or main's while there is no release (an address that always shows the newest).
-MAIN = "main"
+# release's tour, or master's while there is no release (an address that always shows the newest).
+MASTER = "master"
 LATEST = "latest"
 
 
@@ -814,7 +815,7 @@ def release_tours(dest):
     brought = []
     for tag in out.split():
         version = tag[1:] if tag.startswith("v") else tag
-        if version in held or version in (MAIN, LATEST) or not VERSION.match(version):
+        if version in held or version in (MASTER, LATEST) or not VERSION.match(version):
             continue
         run = gh(
             "run",
@@ -869,9 +870,9 @@ def release_tours(dest):
 
 def latest_of(index):
     """The version screenshots/latest/ copies: the newest release's (index is newest first), else
-    main's; None while the site holds no tour."""
-    releases = [v for v in index if v not in (MAIN, LATEST)]
-    return releases[0] if releases else (MAIN if MAIN in index else None)
+    master's; None while the site holds no tour."""
+    releases = [v for v in index if v not in (MASTER, LATEST)]
+    return releases[0] if releases else (MASTER if MASTER in index else None)
 
 
 def screenshots_page(index, latest=None):
@@ -886,8 +887,8 @@ def screenshots_page(index, latest=None):
             for n in images
         )
         what = (
-            f"The newest push to {MAIN}, replaced by each one: {len(images)} screens."
-            if version == MAIN
+            f"The newest push to {MASTER}, replaced by each one: {len(images)} screens."
+            if version == MASTER
             else f"Release {html.escape(version)}, from CI's run of its tag: {len(images)} screens."
         )
         out.append(
@@ -899,11 +900,11 @@ def screenshots_page(index, latest=None):
             0,
             f"<p><code>{LATEST}/</code> holds {html.escape(latest)}'s screens: the newest "
             "release's, or "
-            f"{MAIN}'s while there is none.</p>",
+            f"{MASTER}'s while there is none.</p>",
         )
     body = "\n".join(out) or (
-        "<p class='none'>None are published. CI's Linux tour publishes main's under "
-        f"<code>screenshots/{MAIN}/</code>, and each release's under "
+        "<p class='none'>None are published. CI's Linux tour publishes master's under "
+        f"<code>screenshots/{MASTER}/</code>, and each release's under "
         "<code>screenshots/&lt;version&gt;/</code>.</p>"
     )
     return f"""<!doctype html>

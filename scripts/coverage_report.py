@@ -11,7 +11,7 @@ It runs on a Python with coverage.py: the one scripts/python-standalone.sh makes
 `report` combines the data files in DIR (build/coverage/ by default: each tier 1 part's, and each
 process's in a part), prints the table by area and the lines changed since the base (in CI the
 commit before: a pull request's merge commit's first parent is its base; otherwise the merge base
-with main), and writes into build/coverage/ the HTML report (html/), summary.md, totals.json and
+with master), and writes into build/coverage/ the HTML report (html/), summary.md, totals.json and
 files.json. In GitHub Actions it also writes the job summary and annotations: the headline, and the
 largest stretches of changed lines no test reaches, on those lines in the pull request. `--check`
 fails when an area falls below its floor.
@@ -177,14 +177,14 @@ def file_rows(files):
 
 def base_ref():
     """What the changed lines are counted from: MUSIKATA_COVERAGE_BASE; in CI the commit before (a
-    pull request's merge commit's first parent is its base, and main's squash commit's is the main
-    before it); otherwise the merge base with main."""
+    pull request's merge commit's first parent is its base, and master's squash commit's is the
+    master before it); otherwise the merge base with master."""
     if os.environ.get("MUSIKATA_COVERAGE_BASE"):
         return os.environ["MUSIKATA_COVERAGE_BASE"]
     if os.environ.get("GITHUB_ACTIONS") == "true":
         return "HEAD^1"
-    for main in ("upstream/main", "origin/main", "main"):
-        r = git("merge-base", "HEAD", main)
+    for branch in ("upstream/master", "origin/master", "master"):
+        r = git("merge-base", "HEAD", branch)
         if r.returncode == 0:
             return r.stdout.strip()
     return None

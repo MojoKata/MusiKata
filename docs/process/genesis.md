@@ -5,7 +5,7 @@ order, with how to check it is still in place. When something breaks, walk it ag
 
 Two scripts hold the settings as code, and read them back:
 
-- `scripts/repo-admin.sh apply` makes steps 3 to 6 (merging, the `main` ruleset, Actions,
+- `scripts/repo-admin.sh apply` makes steps 3 to 6 (merging, the `master` ruleset, Actions,
   security), as each MojoKata repository's own `repo-admin.sh` does, and then runs
   `scripts/publish.sh setup` for step 8. `repo-admin.sh check` reads both back. A second `apply`
   changes nothing.
@@ -27,7 +27,7 @@ gpg --version | head -1        # gpg (GnuPG) 2.2 or newer
 gh auth status                 # your account, its token's scopes including 'repo'
 ```
 
-Work in a clone of the repository, on `main`; every command below runs from its top folder:
+Work in a clone of the repository, on `master`; every command below runs from its top folder:
 
 ```sh
 git clone git@github.com:MojoKata/MusiKata.git
@@ -37,7 +37,7 @@ cd MusiKata
 ## 1. The organization and the repositories
 
 - The **MojoKata** organization, on GitHub's Free plan. Its repository **MojoKata/MusiKata** is
-  public, licensed GPL-3.0-or-later ([`LICENSE`](../../LICENSE)), with `main` as its default
+  public, licensed GPL-3.0-or-later ([`LICENSE`](../../LICENSE)), with `master` as its default
   branch.
 - `MUSIKATA_REPO` in `src/musikata_core/__init__.py` names it. MusiKata's update check asks this
   repository's releases (R1.9), so **publishing a release offers it to every MusiKata that checks**.
@@ -46,7 +46,7 @@ cd MusiKata
   ([`release.md`](release.md), 7).
 
 Check: `gh api repos/MojoKata/MusiKata --jq '"\(.visibility) \(.default_branch)"'` prints
-`public main`, and `gh api repos/MojoKata/homebrew-musikata --jq .visibility` prints `public`.
+`public master`, and `gh api repos/MojoKata/homebrew-musikata --jq .visibility` prints `public`.
 
 ## 2. Who does what
 
@@ -64,9 +64,9 @@ and a pull request's branch deleted once it's merged.
 
 Check: `publish.sh check`, "merge methods".
 
-## 4. The `main` ruleset
+## 4. The `master` ruleset
 
-Settings → Rules → Rulesets → `main`, active, on the default branch:
+Settings → Rules → Rulesets → `master`, active, on the default branch:
 
 - Restrict deletions; block force pushes.
 - Require a pull request before merging: 0 approvals; squash the only merge method.
@@ -75,7 +75,7 @@ Settings → Rules → Rulesets → `main`, active, on the default branch:
   `publish.sh setup` adds it then.
 - Bypass list: repository admins.
 
-Check: `publish.sh check`, the "main ruleset" lines.
+Check: `publish.sh check`, the "master ruleset" lines.
 
 ## 5. Actions
 
@@ -174,7 +174,7 @@ setting already in place prints `there` (or `on`, `required`) and asks nothing:
 - **Immutable releases** (Settings → General → Releases): a published release's files and tag can't
   be changed, and GitHub adds a release attestation (`gh release verify`).
 - **Actions pinned by SHA** required (step 5).
-- **`ci` required** in the `main` ruleset (step 4), once it has passed.
+- **`ci` required** in the `master` ruleset (step 4), once it has passed.
 - **The `field-test` label**, on a release's field-test issues (`publish.sh field-test`,
   [`release.md`](release.md), 4).
 
