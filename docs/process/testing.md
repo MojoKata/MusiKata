@@ -31,11 +31,16 @@ environment leaves this list, and R1.1, together.
   ancestors; the mosaic chosen for trees of every shape (1 to 5 subfolders, nested mosaics, no art
   anywhere); a selection of folders resolving to the songs beneath them.
 - **The change history** (R4.9): every kind of save undone and redone.
+- **Online lookups** (R16, R17.4, A7): each service against recorded answers, errors and
+  `Retry-After` included; release matching on albums with missing, extra and reordered songs;
+  nothing requested while lookups are off; lyrics read from and written to `.lrc` files and every
+  kind of tag (R17.1).
 - **The analysis** (A5): peaks and bands of generated tones land where they should.
 - **QML**: the models with a 50,000-row library; the views load with no QML warnings.
 
 Tests never need the network or a sound card: playback tests use Qt's null audio output and check
-positions and signals.
+positions and signals, and online lookups use recorded answers (A7.8). Only
+`scripts/check-services.py`, run by hand and weekly in CI, talks to the real services.
 
 ## Environments
 
@@ -49,7 +54,8 @@ positions and signals.
 
 ## CI
 
-GitHub Actions, each action pinned by commit SHA: tier 1 on every pull request and push to
-`main`; the tour, with its screenshots kept as the run's artifact; the three builds, unsigned,
-each with its `.sha256`. A `v*` tag builds without caches and, once approved, signs the builds and
+GitHub Actions, each action pinned by commit SHA: tier 1 on every pull request and push to `main`;
+the tour, with its screenshots kept as the run's artifact; the three builds, unsigned, each with its
+`.sha256`; once a week, `scripts/check-services.py` against the real services (A7.8), failing the
+run when one has changed. A `v*` tag builds without caches and, once approved, signs the builds and
 drafts a release ([`build-and-release.md`](build-and-release.md)).

@@ -7,11 +7,6 @@ and a proposal. An answered question's answer goes into its section and the ques
 Apple silicon only, as a signed and notarized `.dmg`. Intel Macs would double the builds and the
 testing for a shrinking share of machines.
 
-**Q2. Online lookups.** (R2, R5) Should MusiKata ever ask an online service (MusicBrainz, the
-Cover Art Archive) for tags or covers? Proposal: not in the first release, which keeps
-Principle 4 (offline and private) without exceptions; a later, opt-in lookup is a separate
-section if wanted.
-
 **Q3. More than one music root?** (R2.1) Proposal: one root. A second drive or a NAS share is
 added later, if wanted, as more roots under the same rules, each with its own `Playlists` folder.
 

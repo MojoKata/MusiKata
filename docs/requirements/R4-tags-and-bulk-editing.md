@@ -15,8 +15,8 @@ R4.1. **The fields.** MusiKata reads and writes these, under the same names for 
 | Cover | R5 |
 | ReplayGain | Read only; used by R7.5 |
 
-R4.1.1. Fields MusiKata doesn't show (lyrics, MusicBrainz ids, encoder settings, private
-frames) are kept untouched when a file is written.
+R4.1.1. Fields the panel doesn't show (lyrics, which R17 handles; MusicBrainz ids, which only
+R16.5 writes; encoder settings; private frames) are kept untouched when a file is written.
 
 R4.2. **The Edit tags panel.** **Edit tags** (on an album, a song or a selection, or Ctrl+E /
 ⌘E; on folders, R2.9.6, it edits every song beneath them) opens a panel docked on the right

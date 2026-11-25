@@ -71,9 +71,11 @@ Each kind is a group, and each entry has the action that fixes it:
   path**.
 - An album whose songs differ in album, album artist, year, genre or cover: **Edit tags** or
   **Album art**.
-- No cover, or a cover smaller than 500 × 500 (R5.6): **Album art**.
+- No cover, or a cover smaller than 500 × 500 (R5.6): **Album art**, or **Find covers online**
+  for all of them at once (R16.4.1).
 - Names that differ only in case or spacing (artists, albums, genres, R9.5): **Merge**.
 - Playlist entries whose file is missing (R8.7): **Find**.
+- Files whose tags and path say nothing of what they are: **Identify by sound** (R16.6).
 - Files that couldn't be read: **Show in folder**, and the error.
 
 An entry the user dismisses (**Ignore**) stays dismissed until the file changes.

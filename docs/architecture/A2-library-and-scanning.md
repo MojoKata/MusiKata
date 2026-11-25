@@ -14,6 +14,7 @@ A2.1. **The database** is `musikata.db` (R1.5), SQLite in WAL mode. Its tables, 
 | `change` / `change_file` | The change history (R4.9): one entry per save, each file's old values |
 | `waveform` | Song, the audio's hash, the peaks as a blob (A5.1) |
 | `ignored` | Needs attention entries the user dismissed, with the file's modification time (R2.8) |
+| `lookup` | Answers from the online services, by request, with when they were fetched (A7.7) |
 | `song_fts` | FTS5 over title, artist, album, album artist, genre and file name (R2.7) |
 
 The schema has a version number; migrations are numbered Python functions run in order at start,

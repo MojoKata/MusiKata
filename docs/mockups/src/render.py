@@ -202,6 +202,15 @@ def icon(p, name, cx, cy, size=18, color="muted", sw=1.7):
             xx = 3 + i * 2.8
             p.drawLine(P(xx, 10 - hh / 2), P(xx, 10 + hh / 2))
         p.drawLine(P(3, 17), P(17, 3))
+    elif name == "globe":   # online lookups (R16)
+        p.drawEllipse(P(10, 10), 7, 7)
+        p.drawEllipse(P(10, 10), 3, 7)
+        p.drawLine(P(3, 10), P(17, 10))
+    elif name == "lyrics":   # a speech bubble with lines (R17)
+        d = QPainterPath(P(4.5, 3)); d.lineTo(15.5, 3); d.quadTo(17.5, 3, 17.5, 5); d.lineTo(17.5, 11.5)
+        d.quadTo(17.5, 13.5, 15.5, 13.5); d.lineTo(8, 13.5); d.lineTo(4.5, 17); d.lineTo(4.5, 13.5)
+        d.quadTo(2.5, 13.5, 2.5, 11.5); d.lineTo(2.5, 5); d.quadTo(2.5, 3, 4.5, 3); path(d)
+        p.drawLine(P(6, 6.8), P(14, 6.8)); p.drawLine(P(6, 9.8), P(11.5, 9.8))
     elif name == "expand":   # Now Playing, full view (R6.5)
         for ax, ay, dx, dy in ((3.5, 3.5, 1, 1), (16.5, 3.5, -1, 1), (3.5, 16.5, 1, -1), (16.5, 16.5, -1, -1)):
             p.drawPolyline(QPolygonF([P(ax, ay + 4.5 * dy), P(ax, ay), P(ax + 4.5 * dx, ay)]))
@@ -1296,7 +1305,10 @@ def t02_album_art(p):
     rect(p, cx, dy, dw, 64, 10, col("accent", 0.05), "borderStrong", 1.2, dash=[5, 4])
     icon(p, "image", cx + 28, dy + 32, 20, "muted")
     text(p, cx + 48, dy + 12, "Drop an image here, paste it, or", 12.5, "#c9cdd8", h=20)
-    text(p, cx + 48, dy + 32, "Choose file…", 12.5, "accentHi", 600, h=20)
+    fx = cx + 48 + text(p, cx + 48, dy + 32, "Choose file…", 12.5, "accentHi", 600, h=20)
+    fx += text(p, fx, dy + 32, "  or  ", 12.5, "#c9cdd8", h=20)
+    icon(p, "globe", fx + 8, dy + 42, 13, "accentHi")
+    text(p, fx + 20, dy + 32, "Find online…", 12.5, "accentHi", 600, h=20)
     # options
     oy = y + h - 132
     checkbox(p, ix, oy + 2, True); text(p, ix + 24, oy, "Embed in every song of the album", 12.5, "text", h=20)
@@ -1430,22 +1442,28 @@ def g01_genres(p):
 VIZ = (("Waveform", "wave"), ("3D analyzer", "cube"), ("No visualization", "nowave"))
 
 
-def np_top(p, on, menu=False):
-    """Now Playing's own top row: back to the library, and the visualization drop-down (R11.4)."""
+DD_W, LY_W = 236, 100
+DD_X = W / 2 - (DD_W + 10 + LY_W) / 2   # the picker and the Lyrics switch, centred as a pair
+
+
+def np_top(p, on, menu=False, lyrics=False):
+    """Now Playing's own top row: back to the library, the visualization picker and the Lyrics switch (R11.4)."""
     text(p, 28, 18, "‹  Library", 13, "muted", 500)
     lab, ic = VIZ[on]
-    dw = 236
-    dx = W / 2 - dw / 2
+    dx, dw = DD_X, DD_W
     rect(p, dx, 16, dw, 34, 10, "accentSoft" if menu else "surface", "accent" if menu else "border")
     icon(p, ic, dx + 22, 33, 15, "accentHi")
     text(p, dx + 40, 16, lab, 13, "text", 600, h=34, w=dw - 70)
     icon(p, "chev_down", dx + dw - 20, 33, 14, "muted")
+    lx = dx + dw + 10
+    rect(p, lx, 16, LY_W, 34, 10, "accentSoft" if lyrics else "surface", "accent" if lyrics else "border")
+    icon(p, "lyrics", lx + 22, 33, 15, "accentHi" if lyrics else "muted")
+    text(p, lx + 38, 16, "Lyrics", 13, "text" if lyrics else "muted", 600, h=34)
 
 
 def viz_menu(p, on):
     """The drop-down's menu, open; drawn last so it lies over the view."""
-    dw = 236
-    dx = W / 2 - dw / 2
+    dx, dw = DD_X, DD_W
     mh = 16 + 3 * 36
     shadow(p, dx, 56, dw, mh, 10, 14)
     rect(p, dx, 56, dw, mh, 10, "raised", "borderStrong")
@@ -1962,6 +1980,181 @@ def m02_mini_player_menu(p):
     text(p, tx + 12, ty, "Signal Fires — Lumen Drift", 12, "text", h=34, w=200)
 
 
+# ------------------------------------------------------------------ online lookups (R16) and lyrics (R17)
+def sends_line(p, x, y, w, what):
+    """The footer line every lookup dialog has: what it sends, and to whom (R16.3)."""
+    icon(p, "globe", x + 8, y + 18, 14, "faint")
+    text(p, x + 22, y, what, 11.5, "faint", h=36, w=w - 22)
+
+
+def t04_find_cover(p):
+    l07_folders_list(p)
+    w, h = 960, 586
+    x, y = dialog(p, w, h, "Album art · Kindling",
+                  "Mara Okafor · 10 songs. Nothing in the folder or the songs; these were found online.")
+    ix = x + 28
+    no_art(p, ix, y + 92, 220, 12)
+    text(p, ix, y + 322, "Current · none", 12, "muted", w=220)
+    chip(p, ix, y + 348, "No cover", "warn", "warnSoft", ic="image")
+    cx = ix + 250
+    cw = x + w - 28 - cx
+    text(p, cx, y + 92, "FOUND ONLINE · MUSICBRAINZ AND THE COVER ART ARCHIVE", 11, "faint", 700, w=cw)
+    cands = [(149, "Kindling", "2015 · GB · CD", "1200 × 1200", True, "Best match"),
+             (157, "Kindling", "2015 · US · Digital", "3000 × 3000", False, None),
+             (163, "Kindling (Deluxe)", "2016 · GB · CD", "1500 × 1500", False, "12 tracks"),
+             (167, "Kindling", "2015 · DE · Vinyl", "1000 × 1000", False, None)]
+    tw_ = (cw - 3 * 14) / 4
+    for i, (seed, name, rel, size, on, badge) in enumerate(cands):
+        tx = cx + i * (tw_ + 14)
+        ty = y + 116
+        if on:
+            rect(p, tx - 5, ty - 5, tw_ + 10, tw_ + 10, 13, None, "accent", 2)
+        art(p, tx, ty, tw_, seed, 10)
+        if badge:
+            chip(p, tx + 8, ty + 8, badge, "#ffffff", col("#000000", 0.6), 20, size=10.5)
+        radio(p, tx + tw_ - 26, ty + tw_ - 26, on)
+        text(p, tx, ty + tw_ + 10, name, 13, "text", 600, w=tw_)
+        text(p, tx, ty + tw_ + 30, rel, 11.5, "muted", w=tw_)
+        text(p, tx, ty + tw_ + 48, size, 11.5, "faint", w=tw_, mono=True)
+    dy = y + 116 + tw_ + 84
+    rect(p, cx, dy, cw, 52, 10, col("accent", 0.05), "borderStrong", 1.2, dash=[5, 4])
+    icon(p, "image", cx + 26, dy + 26, 18, "muted")
+    text(p, cx + 46, dy, "Drop an image here, paste it, or", 12.5, "#c9cdd8", h=52)
+    text(p, cx + 46 + tw("Drop an image here, paste it, or ", 12.5), dy, "Choose file…", 12.5, "accentHi", 600, h=52)
+    oy = y + h - 132
+    checkbox(p, ix, oy + 2, True); text(p, ix + 24, oy, "Embed in every song of the album", 12.5, "text", h=20)
+    checkbox(p, ix + 300, oy + 2, True); text(p, ix + 324, oy, "Save as cover.jpg in the folder", 12.5, "text", h=20)
+    checkbox(p, ix, oy + 30, True); text(p, ix + 24, oy + 28, "Shrink to 1200 × 1200 before embedding", 12.5, "text", h=20)
+    fy = y + h - 62
+    line(p, x, fy - 12, x + w, fy - 12, "border")
+    sends_line(p, ix, fy, 520, "Sent: the album artist and title to musicbrainz.org; the release's id to coverartarchive.org")
+    button(p, x + w - 28 - 150, fy, "Save cover", "primary", "check", w=150)
+    button(p, x + w - 28 - 260, fy, "Cancel", "ghost", w=100)
+
+
+def t05_look_up_tags(p):
+    l08_folder_songs(p)
+    w, h = 1040, 640
+    x, y = dialog(p, w, h, "Look up tags · Tide Tables",
+                  "Releases on MusicBrainz that fit the 9 songs of this album. Nothing is written until you save.")
+    ix, iw = x + 28, w - 56
+    text(p, ix, y + 86, "RELEASES", 11, "faint", 700)
+    rels = [("Tide Tables", "Lumen Drift · 2022 · Digital · Glasswork Records · 9 tracks", "9 of 9 songs · lengths within 2 s", "ok", True),
+            ("Tide Tables (Deluxe Edition)", "Lumen Drift · 2023 · Digital · Glasswork Records · 12 tracks", "9 of 12 tracks · 3 extra", "warn", False),
+            ("Tide Tables", "Lumen Drift · 2022 · GB · Vinyl · 9 tracks", "9 of 9 songs · 2 in another order", "warn", False)]
+    for i, (t, sub, fit, st, on) in enumerate(rels):
+        ry = y + 108 + i * 48
+        rect(p, ix, ry, iw, 44, 9, "accentSoft" if on else "raised", "accent" if on else "border", 1.4 if on else 1)
+        radio(p, ix + 14, ry + 14, on)
+        text(p, ix + 42, ry, t, 13, "text", 600, h=44, w=230)
+        text(p, ix + 280, ry, sub, 12, "muted", h=44, w=420)
+        chip(p, ix + iw - 16 - tw(fit, 11, 600) - 34, ry + 11, fit, st, st + "Soft", 22, ic="check" if st == "ok" else "attention", size=11)
+    oy = y + 262
+    radio(p, ix, oy + 2, False); text(p, ix + 24, oy, "Only fill empty tags", 12.5, "#c9cdd8", h=20)
+    radio(p, ix + 190, oy + 2, True); text(p, ix + 214, oy, "Correct tags that differ", 12.5, "text", 600, h=20)
+    checkbox(p, ix + 420, oy + 2, True); text(p, ix + 444, oy, "Keep my genres", 12.5, "text", h=20)
+    checkbox(p, ix + 590, oy + 2, True); text(p, ix + 614, oy, "Save MusicBrainz ids", 12.5, "text", h=20)
+    ty = y + 296
+    rect(p, ix, ty, iw, 268, 10, "input", "border")
+    cols = [("FILE", ix + 40, 200, "left"), ("#", ix + 250, 24, "right"), ("TITLE", ix + 290, 200, "left"),
+            ("ARTIST", ix + 500, 160, "left"), ("YEAR", ix + 670, 60, "left"), ("LENGTH · ON RELEASE", ix + 760, 180, "left")]
+    for lab, cx_, cw_, al in cols:
+        text(p, cx_, ty + 4, lab, 11, "faint", 700, w=cw_, h=28, align=al)
+    line(p, ix, ty + 32, ix + iw, ty + 32, "border")
+    rows = [("01 - Neap Tide.flac", "1", ("Neap Tide",), ("Lumen Drift",), ("2022",), "4:31 · 4:31", False),
+            ("03 - Slack Water.flac", "3", ("Slack Water",), ("Lumen Drift",), ("(empty)", "2022"), "5:02 · 5:01", True),
+            ("04 - Moonpull.flac", "4", ("Moonpull",), ("lumen drift", "Lumen Drift"), ("2022",), "4:44 · 4:44", True),
+            ("07 - Bore.flac", "7", ("Bore", "Tidal Bore"), ("Lumen Drift",), ("2022",), "3:49 · 3:50", True)]
+    for i, (fn, n, title, artist, year, length, on) in enumerate(rows):
+        ry = ty + 34 + i * 46
+        if i:
+            line(p, ix + 10, ry, ix + iw - 10, ry, "border")
+        checkbox(p, ix + 14, ry + 15, on)
+        text(p, ix + 40, ry, fn, 12.5, "text" if on else "muted", h=46, w=200)
+        text(p, ix + 250, ry, n, 12.5, "muted", h=46, w=24, align="right")
+        for vals, cx_, cw_ in ((title, ix + 290, 200), (artist, ix + 500, 160), (year, ix + 670, 80)):
+            if len(vals) == 1:
+                text(p, cx_, ry, vals[0], 12.5, "#c9cdd8", h=46, w=cw_)
+            else:
+                old, new = vals
+                ow = text(p, cx_, ry + 4, old, 11.5, "err" if old != "(empty)" else "faint", h=18, w=cw_)
+                if old != "(empty)":
+                    line(p, cx_, ry + 13.5, cx_ + ow, ry + 13.5, "err", 1.2)
+                text(p, cx_, ry + 22, new, 13, "ok", 600, h=20, w=cw_)
+        text(p, ix + 760, ry, length, 12, "faint", h=46, w=130, mono=True)
+    text(p, ix + 40, ty + 34 + 4 * 46 + 12, "+ 5 more songs, unchanged", 12, "faint", h=24)
+    fy = y + h - 62
+    line(p, x, fy - 12, x + w, fy - 12, "border")
+    sends_line(p, ix, fy, 420, "Sent: the album artist and title to musicbrainz.org")
+    text(p, ix + 440, fy, "3 files · 3 changes · Undo puts them back", 12.5, "muted", h=36)
+    button(p, x + w - 28 - 150, fy, "Save 3 files", "primary", "check", w=150)
+    button(p, x + w - 28 - 260, fy, "Cancel", "ghost", w=100)
+
+
+LYRICS = [  # made up for the mockup; "Signal Fires" by Lumen Drift isn't a real song
+    ("1:05", "Lanterns on the water line", -2),
+    ("1:11", "counting ships that never came", -2),
+    ("1:18", "every harbour keeps a light", -1),
+    ("1:24", "every light a different name", -1),
+    ("1:31", "We were signal fires, burning on the shore", 0),
+    ("1:38", "calling out to no one, calling out for more", 1),
+    ("1:45", "and the tide came in to take the words away", 1),
+    ("1:52", "still I kept the embers for another day", 1),
+    ("2:04", "Salt across the windows", 2),
+    ("2:10", "static on the line", 2),
+    ("2:16", "every wave a question", 2),
+]
+
+
+def n04_now_lyrics(p):
+    window(p)
+    g = QRadialGradient(270, 300, 760)
+    g.setColorAt(0, col("#0f3b57", 0.85)); g.setColorAt(0.6, col("#2b2450", 0.35)); g.setColorAt(1, col("bg", 0))
+    rect(p, 0, 0, W, H - BAR_H, 0, g)
+    window_buttons(p)
+    np_top(p, 2, lyrics=True)
+    cx, cy, sz = 80, 82, 340
+    shadow(p, cx, cy, sz, sz, 16, 30)
+    art(p, cx, cy, sz, 11, 16)
+    cover_spectrum(p, cx, cy, sz, 0.38)
+    text(p, cx, cy + sz + 22, "NOW PLAYING · TRACK 4 OF 10", 11, "#b9e6f2", 700)
+    text(p, cx, cy + sz + 40, "Signal Fires", 30, "text", 800, w=sz)
+    text(p, cx, cy + sz + 84, "Lumen Drift", 17, "text", 600, w=sz)
+    text(p, cx, cy + sz + 110, "Glass Harbor · 2019 · Electronic", 13, "muted", w=sz)
+    stars(p, cx, cy + sz + 150, 5, r=7, gap=19)
+    qx, qy = 480, 82
+    qw, qh = W - qx - 40, H - BAR_H - qy - 22
+    rect(p, qx, qy, qw, qh, 16, col("surface", 0.55), "border")
+    ix, iw = qx + 32, qw - 64
+    text(p, ix, qy + 18, "Lyrics", 18, "text", 700)
+    chip(p, ix, qy + 46, "Timed · from 04 - Signal Fires.lrc", "muted", "raised", 22, ic="check", size=11)
+    bx = qx + qw - 24
+    bx -= button(p, bx - 96, qy + 22, "Edit…", "ghost", w=96, h=32, size=12.5) + 8
+    button(p, bx - 140, qy + 22, "Find online…", "quiet", "globe", w=140, h=32, size=12.5)
+    p.save()
+    p.setClipRect(QRectF(qx, qy + 86, qw, qh - 96))
+    y = qy + 104
+    for t, words, rel in LYRICS:
+        if rel == 0:
+            y += 8
+            text(p, ix, y, words, 27, "text", 800, w=iw, h=40)
+            y += 52
+            continue
+        if words.startswith("Salt"):
+            y += 16
+        hover = words.startswith("and the tide")
+        if hover:
+            rect(p, ix - 12, y - 2, iw + 24, 34, 8, col("hover", 0.8))
+            text(p, ix + iw - 50, y, t, 11.5, "accentHi", 600, w=46, h=30, align="right", mono=True)
+        colr = "faint" if rel < 0 else ("#c9cdd8" if rel == 1 else "muted")
+        text(p, ix, y, words, 19, colr, 600 if rel == 1 else 500, w=iw - 60, h=30)
+        y += 38
+    p.restore()
+    fade = grad(0, qy + qh - 70, 0, qy + qh - 2, [(0, col("#14171e", 0.0)), (1, col("#14171e", 0.95))])
+    rect(p, qx + 1, qy + qh - 70, qw - 2, 68, 15, fade)
+    nowbar(p, np_open=True)
+
+
 def s01_settings(p):
     l01_albums(p)
     w, h = 900, 620
@@ -1970,7 +2163,7 @@ def s01_settings(p):
     nx = x + 16
     for i, (lab, ic) in enumerate((("Library", "folder"), ("Tags", "genre"), ("Path patterns", "wand"),
                                    ("Album art", "image"), ("Playlists", "playlist"), ("Playback", "play"),
-                                   ("Appearance", "gear"))):
+                                   ("Appearance", "gear"), ("Online", "globe"), ("Lyrics", "lyrics"))):
         yy = y + 70 + i * 38
         if i == 1:
             rect(p, nx, yy, 180, 34, 8, "accentSoft")
@@ -2063,11 +2256,14 @@ SCREENS = {
     "T01-infer-from-path": t01_infer,
     "T02-album-art": t02_album_art,
     "T03-organize-files": t03_organize,
+    "T04-find-cover-online": t04_find_cover,
+    "T05-look-up-tags": t05_look_up_tags,
     "P01-playlist-drag": p01_playlist_drag,
     "G01-genres": g01_genres,
     "N01-now-playing-waveform": n01_now_waveform,
     "N02-now-playing-3d-analyzer": n02_now_3d,
     "N03-now-playing-queue": n03_now_queue,
+    "N04-now-playing-lyrics": n04_now_lyrics,
     "S01-settings-tags": s01_settings,
     "M01-mini-players": m01_mini_players,
     "M02-mini-player-menu": m02_mini_player_menu,

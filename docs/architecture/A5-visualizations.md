@@ -8,11 +8,11 @@ retagging or moving a song keeps its waveform. Views draw as many bars as fit an
 largest peak of the slices under each bar.
 
 A5.2. **The spectrum** (R11.3). Each frame takes the newest 4,096 samples from the ring buffer of
-A4.3, mixes them to mono, applies a Hann window and runs NumPy's `rfft`. The magnitudes are
-gathered into bands spaced logarithmically from 32 Hz to 16 kHz (each band the largest magnitude
-in its range, which keeps the low bands, a few bins wide, from looking empty), converted to dB,
-and clamped to a 60 dB range. Each band rises at once and falls at a set rate, so the landscape
-doesn't flicker. A 4,096-point FFT is well under a millisecond in NumPy, a small part of a 16 ms frame.
+A4.3, mixes them to mono, applies a Hann window and runs NumPy's `rfft`. The magnitudes are gathered
+into bands spaced logarithmically from 32 Hz to 16 kHz (each band the largest magnitude in its
+range, which keeps the low bands, a few bins wide, from looking empty), converted to dB, and clamped
+to a 60 dB range. Each band rises at once and falls at a set rate, so the landscape doesn't flicker.
+A 4,096-point FFT is well under a millisecond in NumPy, a small part of a 16 ms frame.
 
 A5.3. **Drawing.** Both are custom Qt Quick items that build their geometry for the scene graph
 (`QSGGeometryNode`) instead of painting with `QPainter`, so drawing is done on the GPU and 60
@@ -31,9 +31,9 @@ modules to every download (A6.3), their look would need much undoing to match R6
 landscape's "3D" is a projection of 2D lines that the scene graph draws directly. The mockup
 `N02-now-playing-3d-analyzer` is drawn with the same projection.
 
-A5.5. **When nothing is shown** (R11.3.2), neither the analyzer nor the cover's spectrum (A5.6)
-on screen, in Now Playing or the mini player (R15.5), they stop requesting frames and the ring buffer stops being read; the audio tap stays
-attached, as detaching it would interrupt playback.
+A5.5. **When nothing is shown** (R11.3.2), neither the analyzer nor the cover's spectrum (A5.6) on
+screen, in Now Playing or the mini player (R15.5), they stop requesting frames and the ring buffer
+stops being read; the audio tap stays attached, as detaching it would interrupt playback.
 
 A5.6. **The cover's spectrum** (R11.4.3) is the spectrum of A5.2 gathered into 32 bands, drawn as
 one translucent geometry node over the cover image and updated at 30 frames a second, which is

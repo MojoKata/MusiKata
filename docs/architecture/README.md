@@ -39,3 +39,8 @@ Qt Quick scene graph.
 
 [A6](A6-packaging-and-platforms.md): the AppImage, the Windows installer and the macOS app, the
 pinned inputs, and the licenses carried.
+
+# 7. Online lookups
+
+[A7](A7-online-lookups.md): the HTTP client and its certificates, keeping to each service's pace,
+fingerprints, matching a release, covers, lyrics, the cache, and testing without a network.

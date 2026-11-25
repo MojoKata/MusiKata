@@ -7,7 +7,8 @@ each build is in [A6](../architecture/A6-packaging-and-platforms.md).
 
 Everything a build takes from outside is pinned in `packaging/versions.env`: the Python (a
 python-build-standalone build, by version and SHA-256 per platform), PySide6 (Essentials and
-Addons, one version), Mutagen, NumPy, the platform modules of A4.5, pytest and its dependencies,
+Addons, one version), Mutagen, NumPy, the platform modules of A4.5, `truststore`, Chromaprint's
+`fpcalc` (by version and SHA-256 per platform), pytest and its dependencies,
 appimagetool and its runtime, and each container image by digest.
 
 - A pin moves only to a release at least 14 days old (the cooldown), so a bad release has time to

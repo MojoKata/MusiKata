@@ -49,8 +49,9 @@ These hold everywhere, and a section that seems to break one is wrong.
 3. **Simple first.** The common case takes one action: drop a folder in, press **Infer from
    path**, press **Save**. Options exist, but their defaults are right for a tidy
    `Artist/Album/01 - Title` library.
-4. **Offline and private.** MusiKata sends nothing anywhere and needs no account; it works
-   without a network.
+4. **Private, and offline unless asked.** MusiKata works fully without a network and needs no
+   account. It goes online only when the user asks for a lookup (R16), sends only what that
+   lookup needs, and says what it sends and to whom.
 5. **Never lose a file.** MusiKata never deletes a music file on its own; removing one moves it to
    the system's trash, and only when the user asks.
 
@@ -73,3 +74,5 @@ These hold everywhere, and a section that seems to break one is wrong.
 | **R13** | [Settings](R13-settings.md) | The Settings dialog and its groups |
 | **R14** | [App log](R14-app-log.md) | MusiKata's own log files |
 | **R15** | [Mini player](R15-mini-player.md) | The small separate window, its seven layouts, its controls |
+| **R16** | [Online lookups](R16-online-lookups.md) | Covers, tags and identifying songs by sound from free online services, when asked; what is sent |
+| **R17** | [Lyrics](R17-lyrics.md) | Where lyrics come from, showing them in step with the song, finding, editing and saving them |

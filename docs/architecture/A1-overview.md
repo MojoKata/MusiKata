@@ -68,5 +68,6 @@ A1.7.2. **Files first.** Keeping ratings and playlists in the files (Principle 1
 every star clicked and a parser for M3U. It buys a library that survives MusiKata, works with
 other players, and needs no backup of its own.
 
-A1.7.3. **No plugin system, no online services.** Both widen what has to be tested and trusted for
-features nobody has asked for yet (Q2).
+A1.7.3. **No plugin system; online services only when asked.** Plugins would widen what has to be
+tested and trusted for features nobody has asked for. The online services of R16 are four, named,
+free and open, each used only when the user asks (A7), so MusiKata stays whole without them.

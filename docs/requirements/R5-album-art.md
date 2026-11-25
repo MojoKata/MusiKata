@@ -7,6 +7,7 @@ R5.1. **Where art is found.** For each album MusiKata looks, in this order, at:
 2. Images in the album's folder named `cover`, `folder`, `front` or `album`, any case, `.jpg`,
    `.jpeg`, `.png` or `.webp`.
 3. Any other image in the album's folder, largest first.
+4. Online, only when the user asks (R16.4).
 
 The album's cover in the views is the first one found. Thumbnails are made once and kept in the
 cache folder (R1.5).
@@ -17,8 +18,8 @@ and where it is ("Embedded in 10 of 10"), and beside it every candidate found (R
 a thumbnail, where it is, its size and a note ("same as embedded", "lower resolution", "named as
 a back cover"). One is chosen with its radio button.
 
-R5.2.1. An image can also be dropped onto the dialog, pasted (Ctrl+V / ⌘V), or chosen with
-**Choose file…**.
+R5.2.1. An image can also be dropped onto the dialog, pasted (Ctrl+V / ⌘V), chosen with
+**Choose file…**, or found with **Find online…** (R16.4).
 
 R5.3. **What saving does,** each a checkbox:
 

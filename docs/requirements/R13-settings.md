@@ -35,3 +35,10 @@ mini player opens** (on) (R15.1).
 
 R13.9. Settings are kept in the database's folder as `settings.json`, readable and hand-editable;
 an unknown or broken value is reported in the log and its default used.
+
+R13.10. **Online**: **Allow online lookups** (off) (R16.2), and under it each service with its
+own switch and what it is used for; **Save MusicBrainz ids in tags** (on) (R16.9); **Clear lookup
+cache**, with its size.
+
+R13.11. **Lyrics**: where saved lyrics go: **Beside the song as .lrc** (the default), **In the
+song's tags**, or **Both** (R17.4).

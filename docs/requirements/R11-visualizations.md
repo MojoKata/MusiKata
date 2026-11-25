@@ -33,7 +33,8 @@ or playback is paused (the last landscape stays).
 R11.4. **Now Playing** opens from the **Now Playing** button at the right end of the now-playing
 bar (R6.5), or by clicking the bar's cover. It takes over everything above the now-playing bar,
 the sidebar and the view's header included; its own top row has **‹ Library** on the left, the
-visualization picker (R11.4.5) in the middle and the window buttons on the right.
+visualization picker (R11.4.5) and the **Lyrics** switch (R17.3) in the middle, and the window
+buttons on the right.
 
 R11.4.1. With **Waveform** (`N01-now-playing-waveform`): the cover large on the left, then "Now
 playing · Track 4 of 10", the title, artist, album, year and genre, the rating, and chips for the
