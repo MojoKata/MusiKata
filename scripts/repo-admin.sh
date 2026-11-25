@@ -20,7 +20,8 @@
 # - private vulnerability reporting on.
 # --- this repository ----------------------------------------------------------------------------
 REPO=MojoKata/MusiKata
-CHECKS="ci"                     # the status checks the branch ruleset requires ("": no CI)
+CHECKS=""                       # the status checks the branch ruleset requires ("": no CI):
+                                # "ci" once CI exists and has passed once (genesis.md, 4)
 RELEASE=scripts/publish.sh      # the release's own settings, set and checked by that script ("": none):
                                 # the tags ruleset, the release environment, immutable releases and
                                 # the field-test label (docs/process/genesis.md)
