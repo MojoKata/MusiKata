@@ -15,20 +15,23 @@ build. Qt Multimedia's FFmpeg plugin, which only `QMediaPlayer` needs, is left o
 FFmpeg that decodes (A4.1).
 
 A6.3. **Linux: AppImage.** Built on Ubuntu 22.04 for its glibc, as AppKata's is, with the same
-appimagetool and runtime pins. It carries Python, Qt, PyAV and its FFmpeg libraries, and the
-xcb libraries Qt needs; from the system it takes only what every desktop of R1.1 has (glibc,
-OpenGL, PulseAudio or PipeWire's Pulse server, D-Bus, fonts). It installs itself into the app menu
-on first start and, when asked (R1.9), updates itself from the project's releases.
+appimagetool and runtime pins. It carries Python, Qt, PyAV and its FFmpeg libraries, and the xcb
+libraries Qt needs; from the system it takes only what every desktop of R1.1 has (glibc, OpenGL,
+PulseAudio or PipeWire's Pulse server, D-Bus, fonts). It installs itself into the app menu on first
+start, with a `.desktop` file whose MIME types list the file kinds of R1.7 (so MusiKata is offered
+in "Open with" and never set as the default), and, when asked (R1.9), updates itself from the
+project's releases.
 
 A6.4. **Windows: Inno Setup,** per user by default, built under Wine in a container as AppKata's
 is, with PyInstaller freezing the app. It registers the file kinds of R1.7 for "Open with" only.
 
-A6.5. **macOS: two app bundles, each in a `.dmg`** (R1.4), one for Apple silicon (arm64) and one
-for Intel (x86_64), not one universal bundle: NumPy, PyAV and others publish a separate wheel per
-chip, which a universal bundle would have to merge. Both are built with PyInstaller on an Apple
-silicon macOS runner, the Intel one with the x86_64 Python and wheels under Rosetta, since
-GitHub's Intel runners are going away. The window uses the system's title-bar buttons over a
-full-size content view (R6.4), and the bundle declares the document kinds of R1.7.
+A6.5. **macOS: two app bundles, each in a `.dmg`** (R1.4), one for Apple silicon (arm64) and one for
+Intel (x86_64), not one universal bundle: NumPy, PyAV and others publish a separate wheel per chip,
+which a universal bundle would have to merge. Both are built with PyInstaller on an Apple silicon
+macOS runner, the Intel one with the x86_64 Python and wheels under Rosetta, since GitHub's Intel
+runners are going away. The window uses the system's title-bar buttons over a full-size content view
+(R6.4), and the bundle declares the document kinds of R1.7 with the `Alternate` handler rank, so
+macOS offers MusiKata without making it the default.
 
 A6.5.1. **Signing.** The bundles are ad-hoc signed (`codesign --sign -`), which Apple silicon
 requires of all code and which costs nothing; Gatekeeper still asks the user to allow the first

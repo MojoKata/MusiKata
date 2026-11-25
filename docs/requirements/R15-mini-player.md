@@ -35,8 +35,8 @@ Strip and Remote also have the MusiKata icon (Show MusiKata) in a corner. In **C
 only under the pointer. The scroll wheel over it changes the volume; Space, ← / → and Ctrl+→ /
 Ctrl+← work as in the main window (R6.9) while it has focus. Its right-click menu
 (`M02-mini-player-menu`) lists the seven layouts by name and number, the current one checked, then
-**Stay on top**, **Show MusiKata** and **Close mini player**. Dropping songs onto it adds them to
-the queue (R7.2).
+**Sleep timer** (R7.10), **Stay on top**, **Show MusiKata** and **Close mini player**. Dropping
+songs onto it adds them to the queue (R7.2).
 
 R15.5. **Visuals.** Its spectrum and analyzer come from the same audio as Now Playing's (A5.2),
 and stop drawing when it is hidden, covered by a full-screen window, or playback is paused (as

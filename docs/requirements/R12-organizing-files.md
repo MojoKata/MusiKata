@@ -8,6 +8,9 @@ R12.1. **The layout** is a pattern like R3.2's, set in Settings (R13), by defaul
 
 - `{track:02}`: the number padded with zeros to two digits.
 - `{disc-}`: the disc number and `-`, only when the album has more than one disc.
+- `{artistsort}`, `{albumartistsort}`, `{albumsort}`: the sort names (R2.13): the sort tag, or
+  without one the name with its leading article moved to the end ("Beatles, The"). The default
+  layout doesn't use them.
 
 R12.1.1. Characters a file system refuses (`/ \ : * ? " < > |`, and control characters) are
 replaced with `_`, names are trimmed of spaces and dots at their ends, and each part of a path is

@@ -14,6 +14,7 @@ R13.3. **Tags**:
 - **Rating scale in files**: Windows Media (the default) or MusiKata (R10.4.1).
 - **Keep a history of tag changes** (on), and for how many days (90) (R4.9).
 - **Genre list**: **Edit list…** (R9.6).
+- **Articles skipped when sorting**: The, A, An, with **Add** and remove (R2.13).
 - **Leave file modification times alone** (off) (R4.7.1).
 
 R13.4. **Path patterns**: the user's patterns for R3, tried before the presets, with **Add**,

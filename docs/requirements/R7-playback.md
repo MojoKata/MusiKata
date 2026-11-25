@@ -43,3 +43,12 @@ R7.9. **Play counts.** A song counts as played once 50% of it, or 4 minutes, has
 counts and the last-played time are kept in the root's `.musikata/plays/`, a file per computer
 (R1.5); the count shown adds up the plays of every computer that plays the root, and the Songs
 view can sort by it.
+
+R7.10. **Sleep timer.** ⋮ › **Sleep timer** (R6.6) and the mini player's menu (R15.4) offer 15,
+30, 45 and 60 minutes, **Custom…**, **End of this song**, **End of this album** and **Off**.
+
+- While it runs, a moon and the time left show beside the volume in the now-playing bar (R6.5,
+  `N03-now-playing-queue`); clicking them opens the same choices, to change or cancel it.
+- Over its last 30 seconds the volume fades to nothing; then playback pauses and the volume is put
+  back where it was. Reduce motion (R18.5) doesn't change the fade, which is sound.
+- It is never saved: quitting MusiKata cancels it, and the next start has none.

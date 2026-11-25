@@ -43,16 +43,17 @@ the window buttons (minimize, maximize, close) sit at its right end; on macOS th
 sit at the left of the sidebar.
 
 R6.5. **Now-playing bar.** Left: the cover, title, artist and album, and the song's rating, which
-can be set there (R10.2). Centre: shuffle, previous, play/pause, next and repeat, and under them
-the song's waveform as its seek bar (R11.2) with the time played and the length. Right: the queue
-(R7.2), the volume, the pop-out button that opens the mini player in a window of its own (R15),
-and at the far end the **Now Playing** button (R11.4): it opens Now Playing over the whole window
-above the bar, is highlighted while it is open, and closes it again.
+can be set there (R10.2). Centre: shuffle, previous, play/pause, next and repeat, and under them the
+song's waveform as its seek bar (R11.2) with the time played and the length. Right: the sleep
+timer's moon and time left while one runs (R7.10), the queue (R7.2), the volume, the pop-out button
+that opens the mini player in a window of its own (R15), and at the far end the **Now Playing**
+button (R11.4): it opens Now Playing over the whole window above the bar, is highlighted while it is
+open, and closes it again.
 
 R6.6. **The ⋮ menu,** in this order: **Rescan library** (R2.3), **Change history** (R4.9), **Mini
-player** (R15), **Equalizer…** (R19), **Settings…** (R13), the theme (Match system, Dark, Light),
-**Show app log** (R14), **About MusiKata**, **Check for updates…** (R1.9), **Quit MusiKata** (Ctrl+Q
-/ ⌘Q).
+player** (R15), **Equalizer…** (R19), **Sleep timer** (R7.10), **Settings…** (R13), the theme (Match
+system, Dark, Light), **Show app log** (R14), **About MusiKata**, **Check for updates…** (R1.9),
+**Quit MusiKata** (Ctrl+Q / ⌘Q).
 
 R6.7. **Messages.** Finished actions and errors are shown in a short-lived message at the bottom of
 the view, above the now-playing bar; a message about a save carries **Undo** (R4.9).

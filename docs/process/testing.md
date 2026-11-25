@@ -40,6 +40,10 @@ environment leaves this list, and R1.1, together.
 - **The root's own files** (A2.8): two computers playing at once each write their own play file and
   the sums add up; `ignored.json` and `ratings.json` written at once lose nothing; a read-only
   `.musikata` keeps everything in the index.
+- **Sort names** (R2.13): sort tags win, articles are skipped without them, and the sort tokens of
+  R12.1 move the article to the end.
+- **Sleep timer** (R7.10): each choice stops at its time or at the end of its song or album, the
+  fade ends at silence, and the volume is back where it was.
 - **Encodings** (R4.10): tags in each candidate encoding detected and fixed, and real Latin-1
   (French, German) never flagged.
 - **Duplicates** (R2.12): exact and likely copies found, the best copy proposed, plays, ratings

@@ -326,6 +326,10 @@ def icon(p, name, cx, cy, size=18, color="muted", sw=1.7):
         d = QPainterPath(P(16, 3)); d.cubicTo(16, 10, 10, 9, 10, 17); path(d)
     elif name == "heart":
         d = QPainterPath(P(10, 16.5)); d.cubicTo(1, 10, 3, 2.5, 10, 6.5); d.cubicTo(17, 2.5, 19, 10, 10, 16.5); path(d)
+    elif name == "moon":   # the sleep timer (R7.10)
+        a = QPainterPath(); a.addEllipse(P(10, 10), 7, 7)
+        b = QPainterPath(); b.addEllipse(P(13.5, 6.5), 6, 6)
+        path(a.subtracted(b))
     elif name == "refresh":
         d = QPainterPath(); d.arcMoveTo(QRectF(3.5, 3.5, 13, 13), 60); d.arcTo(QRectF(3.5, 3.5, 13, 13), 60, 270); path(d)
         p.drawPolyline(QPolygonF([P(13.2, 2.5), P(13.4, 5.6), P(16.4, 5.2)]))
@@ -498,7 +502,7 @@ def sidebar(p, active="Albums", active_pl=None, drop_on=None, root_missing=False
 
 
 def nowbar(p, playing=True, pos=0.38, title="Signal Fires", artist="Lumen Drift — Glass Harbor", seed=11,
-           np_open=False):
+           np_open=False, sleep=None):
     y = H - BAR_H
     rect(p, 0, y, W, BAR_H, 0, "#0b0d11")
     line(p, 0, y + 0.5, W, y + 0.5, "border")
@@ -520,6 +524,11 @@ def nowbar(p, playing=True, pos=0.38, title="Signal Fires", artist="Lumen Drift 
     rect(p, wx + ww * pos - 1, y + 51, 2, 26, 1, "text")
     text(p, wx + ww + 8, y + 54, "4:18", 11, "muted", w=44, mono=True)
     # right side: the queue, the volume, the mini player and, at the end, Now Playing (R6.5)
+    if sleep:   # the sleep timer's moon and time left (R7.10)
+        sw = tw(sleep, 11.5, 600, mono=True) + 40
+        rect(p, W - 300 - sw, y + 27, sw, 28, 14, "accentSoft")
+        icon(p, "moon", W - 300 - sw + 17, y + 41, 14, "accentHi")
+        text(p, W - 300 - sw + 30, y + 27, sleep, 11.5, "accentHi", 600, h=28, mono=True)
     icon(p, "queue", W - 280, y + 41, 18, "muted")
     icon(p, "volume", W - 240, y + 41, 18, "muted")
     rect(p, W - 220, y + 39, 96, 4, 2, "borderStrong")
@@ -877,6 +886,10 @@ def l03_songs_bulk(p):
     text(p, px, y, "Rating", 11.5, "muted", 600)
     rect(p, px, y + 20, pw, 34, 8, "input", "border")
     text(p, px + 12, y + 20, "Mixed: keep each song's own", 13, "faint", h=34)
+    y += 70   # More fields, closed (R4.2): composer, comment and the sort names (R2.13)
+    icon(p, "chev_right", px + 6, y + 14, 13, "muted")
+    tx = px + 20 + text(p, px + 20, y, "More fields", 12.5, "text", 600, h=28)
+    text(p, tx + 10, y, "Composer, Comment, sort names", 11.5, "faint", h=28, w=pw - tx + px - 10)
     # changes summary and actions
     y = H - BAR_H - 92
     rect(p, px, y, pw, 30, 8, "accentSoft")
@@ -1638,7 +1651,15 @@ QUEUE = [
 ]
 
 
-def n03_now_queue(p):
+QUEUE_OUTSIDE = [
+    # files opened from the system, outside the music root (R1.7.1)
+    ("NOW PLAYING", "Harbor Lights", "Mara Okafor · Downloads", "4:52", 211),
+    ("NEXT · OPENED WITH IT", "Tidewater", "Mara Okafor · Downloads", "3:38", 211),
+    (None, "Low Beacon", "Mara Okafor · Downloads", "5:14", 211),
+]
+
+
+def n03_now_queue(p, outside=False):
     window(p)
     g = QRadialGradient(270, 300, 760)
     g.setColorAt(0, col("#0f3b57", 0.85)); g.setColorAt(0.6, col("#2b2450", 0.35)); g.setColorAt(1, col("bg", 0))
@@ -1648,31 +1669,40 @@ def n03_now_queue(p):
     # the song: its cover with the spectrum and the progress line
     cx, cy, sz = 80, 82, 340
     shadow(p, cx, cy, sz, sz, 16, 30)
-    art(p, cx, cy, sz, 11, 16)
+    art(p, cx, cy, sz, 211 if outside else 11, 16)
     cover_spectrum(p, cx, cy, sz, 0.38)
-    text(p, cx, cy + sz + 22, "NOW PLAYING · TRACK 4 OF 10", 11, "#b9e6f2", 700)
-    text(p, cx, cy + sz + 40, "Signal Fires", 30, "text", 800, w=sz)
-    text(p, cx, cy + sz + 84, "Lumen Drift", 17, "text", 600, w=sz)
-    text(p, cx, cy + sz + 110, "Glass Harbor · 2019 · Electronic", 13, "muted", w=sz)
-    stars(p, cx, cy + sz + 150, 5, r=7, gap=19)
-    chip(p, cx + 116, cy + sz + 139, "FLAC 16-bit / 44.1 kHz", "muted", "raised", 22, size=10.5)
+    if outside:   # a file opened from the system, outside the music root (R1.7.1)
+        chip(p, cx, cy + sz + 18, "Not in your library", "warn", "warnSoft", 22, ic="attention", size=11)
+        text(p, cx, cy + sz + 46, "Harbor Lights", 30, "text", 800, w=sz)
+        text(p, cx, cy + sz + 90, "Mara Okafor", 17, "text", 600, w=sz)
+        text(p, cx, cy + sz + 116, "~/Downloads/harbor-lights.flac", 12.5, "muted", w=sz, mono=True)
+        button(p, cx, cy + sz + 146, "Add to library…", "ghost", "plus", w=170, h=32, size=12.5)
+        chip(p, cx + 182, cy + sz + 151, "FLAC 24-bit / 48 kHz", "muted", "raised", 22, size=10.5)
+    else:
+        text(p, cx, cy + sz + 22, "NOW PLAYING · TRACK 4 OF 10", 11, "#b9e6f2", 700)
+        text(p, cx, cy + sz + 40, "Signal Fires", 30, "text", 800, w=sz)
+        text(p, cx, cy + sz + 84, "Lumen Drift", 17, "text", 600, w=sz)
+        text(p, cx, cy + sz + 110, "Glass Harbor · 2019 · Electronic", 13, "muted", w=sz)
+        stars(p, cx, cy + sz + 150, 5, r=7, gap=19)
+        chip(p, cx + 116, cy + sz + 139, "FLAC 16-bit / 44.1 kHz", "muted", "raised", 22, size=10.5)
     # the queue, full size (R7.2)
     qx, qy = 480, 82
     qw, qh = W - qx - 40, H - BAR_H - qy - 22
     rect(p, qx, qy, qw, qh, 16, col("surface", 0.72), "border")
     ix, iw = qx + 24, qw - 48
     text(p, ix, qy + 18, "Queue", 18, "text", 700)
-    text(p, ix, qy + 44, "Playing from Glass Harbor · 7 up next · 33 min", 12, "muted")
+    text(p, ix, qy + 44, "Opened from Downloads · 2 up next · 9 min" if outside
+         else "Playing from Glass Harbor · 7 up next · 33 min", 12, "muted")
     bx = qx + qw - 24
     bx -= button(p, bx - 74, qy + 22, "Clear", "quiet", w=74, h=32, size=12.5)
     button(p, bx - 168, qy + 22, "Save as playlist…", "ghost", "playlist", w=160, h=32, size=12.5)
     y = qy + 80
-    for i, (sec, title, sub, length, seed) in enumerate(QUEUE):
+    for i, (sec, title, sub, length, seed) in enumerate(QUEUE_OUTSIDE if outside else QUEUE):
         if sec:
             y += 6 if i else 0
             text(p, ix, y, sec, 10.5, "faint", 700, h=20)
             y += 22
-        now, played, hover = sec == "NOW PLAYING", sec == "PLAYED", title == "Lanternlight"
+        now, played, hover = sec == "NOW PLAYING", sec == "PLAYED", title == "Lanternlight" and not outside
         if now:
             rect(p, ix - 10, y, iw + 20, 44, 10, "accentSoft")
         if hover:
@@ -1691,7 +1721,14 @@ def n03_now_queue(p):
             icon(p, "close", ix + iw - 2, y + 22, 13, "muted")
         p.setOpacity(1.0)
         y += 46
-    nowbar(p, np_open=True)
+    if outside:
+        nowbar(p, np_open=True, title="Harbor Lights", artist="Mara Okafor — not in your library", seed=211, pos=0.38)
+    else:
+        nowbar(p, np_open=True, sleep="23:40")
+
+
+def n07_now_not_in_library(p):
+    n03_now_queue(p, outside=True)
 
 
 # ------------------------------------------------------------------ the mini player (R15)
@@ -1980,7 +2017,7 @@ def m02_mini_player_menu(p):
     mini_remote(p, rx, ry)
     mw = 236
     items = [("LAYOUT", None)] + [(n, n == "Remote") for n in MINI_LAYOUTS] + \
-        [("-", None), ("Stay on top", True), ("Show MusiKata", None), ("Close mini player", None)]
+        [("-", None), ("Sleep timer", None), ("Stay on top", True), ("Show MusiKata", None), ("Close mini player", None)]
     mh = 16 + sum(22 if a == "LAYOUT" else 9 if a == "-" else 30 for a, _ in items)
     mx, my = rx + 246 - mw - 6, ry - mh - 8
     shadow(p, mx, my, mw, mh, 10, 14)
@@ -2001,6 +2038,10 @@ def m02_mini_player_menu(p):
             text(p, mx + mw - 40, yy, str(n), 11, "faint", h=30, w=26, align="right", mono=True)
         if lab == "Show MusiKata":
             text(p, mx + mw - 110, yy, "Ctrl+Shift+M", 11, "faint", h=30, w=98, align="right")
+        if lab == "Sleep timer":   # R7.10: its time left, and its choices in a submenu
+            icon(p, "moon", mx + 22, yy + 15, 13, "accentHi")
+            text(p, mx + mw - 96, yy, "23:40", 11, "accentHi", 600, h=30, w=60, align="right", mono=True)
+            icon(p, "chev_right", mx + mw - 22, yy + 15, 12, "faint")
         yy += 30
     # the tooltip that names the song, since the Remote doesn't
     tx, ty = rx - 236, ry + 22
@@ -2592,6 +2633,7 @@ SCREENS = {
     "N04-now-playing-lyrics": n04_now_lyrics,
     "N05-equalizer": n05_equalizer,
     "N06-equalizer-graphic": n06_equalizer_graphic,
+    "N07-now-playing-not-in-library": n07_now_not_in_library,
     "S01-settings-tags": s01_settings,
     "M01-mini-players": m01_mini_players,
     "M02-mini-player-menu": m02_mini_player_menu,

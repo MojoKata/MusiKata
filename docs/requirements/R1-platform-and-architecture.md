@@ -71,9 +71,18 @@ plays or opens what it was handed. Started with another music root than the one 
 R2.1), it asks "Switch to /media/usb/Music?" and, on **Switch**, closes the library it has open and
 opens that one.
 
-R1.7. **Opening files.** MusiKata registers for the audio kinds of R2.2 and for `.m3u` and `.m3u8`,
-but never makes itself the default player on its own. A file opened from outside the music root
-plays without being added to the library.
+R1.7. **Opening files.** MusiKata registers for the audio kinds of R2.2 and for `.m3u` and `.m3u8`
+as a choice in the system's **Open with**, but never makes itself the default player; that is the
+user's to choose in the system's settings. A song opened with it (from the system, or as
+`musikata FILE …`) plays at once, as double-clicking it in the library does (R7.1): the queue
+becomes the rest of its album from that song on, or, for files from outside the music root, the
+other files opened with it. A playlist opened with it plays from its first song.
+
+R1.7.1. **Files from outside the root** play where they are and are not added to the library
+(`N07-now-playing-not-in-library`). Their tags are read and shown as usual; Now Playing marks
+such a song "Not in your library" and offers **Add to library…**, which is R12.5's Copy or Move.
+Their plays aren't counted (R7.9), as play counts belong to a root; a rating set on one is written
+into its file (R10.3).
 
 R1.8. **Closing.** Closing the main window quits MusiKata, the mini player (R15) with it; there is
 no tray icon. The queue, the position in the current song and the window's layout are saved and

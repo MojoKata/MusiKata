@@ -205,3 +205,13 @@ folder, plays and rating.
 - **Move the others to the trash** asks first (R2.11). The kept copy takes the removed ones'
   plays and their highest rating, and playlists naming a removed copy are pointed at it (R8),
   all in one undoable change for what can be undone (R4.9).
+
+R2.13. **Sort names.** Artists, album artists and albums are shown as tagged and sorted by their
+sort names, so "The Beatles" is listed under B:
+
+- A name's sort tag (Artist sort, Album artist sort, Album sort; R4.1) is used when it has one,
+  so "Bowie, David" can sort under B too.
+- Without one, a leading article is skipped: The, A and An, a list in Settings (R13.3) to which
+  others (Die, Le, La, Les, El) can be added.
+- Sorting ignores case and leading punctuation and reads numbers by value, as folder names do
+  (R2.9.2).

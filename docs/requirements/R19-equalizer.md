@@ -8,9 +8,9 @@ user's own, and a preset chosen by each song's genre. Mockups: `N05-equalizer` (
 R19.1. **The bands.** Each preset is one of two kinds:
 
 - **Parametric:** 1 to 10 bands. Each band has a type (bell, low shelf, high shelf, low cut or high
-  cut), a frequency from 20 Hz to 20 kHz, a gain from −12 to +12 dB (none for the cuts) and a Q
-  from 0.1 to 10. A new parametric preset starts with five: a low shelf, three bells and a high
-  shelf, all at 0 dB.
+  cut), a frequency from 20 Hz to 20 kHz, a gain from −12 to +12 dB (none for the cuts) and a Q from
+  0.1 to 10. A new parametric preset starts with Flat's five bands (R19.3.1): a low shelf, three
+  bells and a high shelf, all at 0 dB.
 - **Graphic:** ten sliders, one per octave: 31, 62, 125 and 250 Hz, 500 Hz, 1, 2, 4, 8 and 16 kHz,
   each from −12 to +12 dB. A graphic preset is ten bells at those frequencies, one octave wide, so
   it plays exactly as the same parametric preset would.
@@ -49,6 +49,22 @@ R19.3. **Presets.**
   into the custom preset chosen; **Rename…** and **Delete** (after asking) do what they say.
 - Changing a band while a preset is chosen shows it as changed ("Bass boost (changed)") until it
   is saved as new, updated, or another preset is chosen.
+
+R19.3.1. **The built-in presets' bands.** LS is a low shelf and HS a high shelf, both with Q 0.7.
+Each bell's Q is given. Each preamp keeps the loudest boost under full scale.
+
+| Preset | Bands | Preamp |
+|---|---|---|
+| Flat | LS 100 Hz 0 dB; bells 400 Hz, 1.5 kHz and 5 kHz, 0 dB, Q 1.0; HS 10 kHz 0 dB | 0 dB |
+| Bass boost | LS 100 Hz +6 dB | −6 dB |
+| Treble boost | HS 6 kHz +6 dB | −6 dB |
+| Vocal | LS 100 Hz −2 dB; bell 300 Hz −1.5 dB Q 1.0; bell 2.5 kHz +3 dB Q 1.0; bell 5 kHz +2 dB Q 1.4; HS 12 kHz −1 dB | −3.5 dB |
+| Rock | LS 80 Hz +4 dB; bell 400 Hz −2 dB Q 1.0; bell 2.5 kHz +2 dB Q 1.2; HS 8 kHz +3.5 dB | −4.5 dB |
+| Pop | LS 80 Hz +1.5 dB; bell 250 Hz −1 dB Q 1.0; bell 1.5 kHz +2 dB Q 0.8; bell 4 kHz +1.5 dB Q 1.0; HS 10 kHz +1 dB | −3 dB |
+| Jazz | LS 100 Hz +3 dB; bell 500 Hz −1.5 dB Q 1.0; bell 2 kHz +1 dB Q 1.0; HS 8 kHz +3 dB | −3.5 dB |
+| Classical | LS 100 Hz +2 dB; bell 1 kHz −1 dB Q 0.7; HS 8 kHz +3 dB | −3 dB |
+| Electronic | LS 80 Hz +5 dB; bell 250 Hz −1.5 dB Q 1.0; bell 1.2 kHz −1 dB Q 1.4; bell 4 kHz +2.5 dB Q 1.2; HS 9 kHz +3.5 dB | −5 dB |
+| Loudness | LS 60 Hz +6 dB; HS 10 kHz +4 dB | −6 dB |
 
 R19.4. **By genre.** A table matches genres to presets (Classical → Classical, Jazz → Jazz, and
 any the user adds; the built-in genres come matched to the built-in presets of the same name).

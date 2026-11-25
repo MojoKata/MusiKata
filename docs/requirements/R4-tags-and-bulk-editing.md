@@ -10,6 +10,7 @@ R4.1. **The fields.** MusiKata reads and writes these, under the same names for 
 | Year | Four digits; a full date is kept when the file has one |
 | Genre | One or more (R9.2) |
 | Composer, Comment | Text |
+| Artist sort, Album artist sort, Album sort | Text: the names as they sort (R2.13) |
 | Compilation | Yes or no (R2.5.3) |
 | Rating | R10 |
 | Cover | R5 |
@@ -21,7 +22,9 @@ R16.5 writes; encoder settings; private frames) are kept untouched when a file i
 R4.2. **The Edit tags panel.** **Edit tags** (on an album, a song or a selection, or Ctrl+E /
 ⌘E; on folders, R2.9.6, it edits every song beneath them) opens a panel docked on the right
 (`L03-songs-bulk-edit`). It shows the cover and what is being edited ("Tide Tables · Lumen Drift ·
-4 songs"), then a field for each tag. The list beside it stays usable: changing the selection
+4 songs"), then a field for each tag. Composer, Comment and the sort names are under **More
+fields**, closed until opened, and stay open once opened; an empty sort name means R2.13's
+article rule applies. The list beside it stays usable: changing the selection
 changes what the panel edits, after asking to save or discard unsaved changes.
 
 R4.3. **Many songs at once.** With several songs selected, a field whose value is the same on all
