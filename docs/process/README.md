@@ -7,8 +7,9 @@ written here so this repository stands on its own.
 | File | Covers |
 |---|---|
 | This file | The flow of a change, the documents' rules, decisions, reviews, commits and pull requests |
+| [`coding.md`](coding.md) | How code is written: built to be tested in isolation, layout and imports, style and types, errors, threads, QML, dependencies, comments |
 | [`development.md`](development.md) | The repository's layout, running from source, the demo library, the tour |
-| [`testing.md`](testing.md) | The test tiers, what each environment runs, and CI |
+| [`testing.md`](testing.md) | The testing principles, the test tiers, what each environment runs, and CI |
 | [`build-and-release.md`](build-and-release.md) | The three builds, pinned inputs, signing and a release's steps |
 
 ## The flow of a change
@@ -24,7 +25,8 @@ written here so this repository stands on its own.
    findings; design options) is settled one item at a time, each with its options lettered and a
    recommendation, and nothing is built until the whole batch is approved. The answers go into the
    requirements and the question issues are closed.
-5. **Build on a branch,** with its tests (see [`testing.md`](testing.md)), in a pull request.
+5. **Build on a branch,** written as [`coding.md`](coding.md) says and tested as
+   [`testing.md`](testing.md) says, in a pull request.
 6. **Review** before merging: the diff, against the requirements it claims, with findings fixed or
    filed.
 7. **Squash merge,** then confirm the merged code matches the branch, and clean up the branch, its

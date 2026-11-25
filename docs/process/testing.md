@@ -3,11 +3,43 @@
 What runs when, on which environment. R1.1 promises only what these environments test: an
 environment leaves this list, and R1.1, together.
 
+## Principles
+
+- **Most tests are unit tests** of the plain functions of [`coding.md`](coding.md) ("Built to be
+  tested in isolation"), on generated data, each in milliseconds. A unit test never starts the app,
+  a QML engine, a process or a device.
+- **Fewer integration tests:** the scanner over the demo library, the models with a 50,000-row
+  library, the worker pool, the audio chain into a null output. **The tour and tier 3** are for what
+  nothing smaller can show.
+- **Generated data, never real music** (A6.7), and no network, sound card or sleeping (below, and
+  `coding.md`).
+- **Speed.** A unit test runs in under 100 ms, or is marked `slow`. The rest, `pytest -m "not
+  slow"`, run in under 30 seconds, so they can run on every save; the whole of tier 1 runs in under
+  5 minutes. Every run lists its slowest tests.
+- **A bug fix starts with its test,** seen failing because of the bug, and both land in the same
+  commit. **New code comes with its tests** and its trace rows in the same change, written before or
+  after it as the piece suits.
+- **Test names say the behaviour,** as a sentence: `test_a_seek_lands_on_the_exact_sample`.
+- **The requirements trace.** `docs/requirements/trace.md` gives each sentence of a traced section a
+  row naming the tests that show it, `tier 3:` and the check when only a person can show it, or
+  `statement` when it promises nothing a test could show. A test fails when a sentence has no row, a
+  row no longer matches its sentence, or a named test doesn't exist. A section joins the trace when
+  its code is built, and every section of the first release (`DEVELOP.md`) is in it by that release.
+- **Coverage.** Tier 1 runs under coverage.py, lines and branches, the worker processes included
+  (`concurrency = ["thread", "multiprocessing"]`). Each area (each module of `musikata_core`, and
+  the app) has a floor in `tests/coverage-floor.json` that may only rise: a change that drops an
+  area below its floor fails tier 1, and one that raises it moves the floor up in the same commit.
+- **Mutation testing.** Once a first pass of the code is written, mutmut sweeps `musikata_core` for
+  code the tests run but don't check; each survivor is killed by a new test or noted with the reason
+  it isn't worth one. It isn't run as each piece is written; coverage is the measure until then.
+- **Gates.** ruff and mypy ([`coding.md`](coding.md)) run in tier 1 beside the tests and the
+  coverage floors.
+
 ## Tiers
 
 | Tier | When | What it's for |
 |---|---|---|
-| 1 | every change | the whole pytest suite in one container on the release's Python and PySide6, offscreen: the gate for every commit, run by CI on every pull request and push to `main` |
+| 1 | every change | ruff, mypy and the whole pytest suite with its coverage floors, in one container on the release's Python and PySide6, offscreen: the gate for every commit, run by CI on every pull request and push to `main` |
 | 2 | before pushing | the tour and its layout check at 100 % and 150 % text (R18.3), the size and speed targets of R1.11 on the demo library built at 50,000 songs, the AppImage built and started, the Windows suite in its VM |
 | 3 | before a release | each platform's build installed and used by hand: playback through real speakers, media keys, drag and drop with the platform's file manager, the mini player moved, resized and kept on top, the platform's screen reader through every view (R18.1), the music root's drive unplugged and plugged back (R2.10), an update from the previous release (R1.9) |
 

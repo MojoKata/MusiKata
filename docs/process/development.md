@@ -23,9 +23,12 @@ release carries, which a script fetches:
 ```sh
 "$(scripts/python-standalone.sh)" -m venv .venv
 (. packaging/versions.env && .venv/bin/pip install -e . \
-    "PySide6-Essentials==$PYSIDE" "PySide6-Addons==$PYSIDE" "shiboken6==$PYSIDE" $PYTEST)
+    "PySide6-Essentials==$PYSIDE" "PySide6-Addons==$PYSIDE" "shiboken6==$PYSIDE" \
+    $PYTEST $RUFF $MYPY)
 .venv/bin/musikata                     # or: .venv/bin/python -m musikata
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest -m "not slow"   # the fast set, under 30 seconds: on every save
+.venv/bin/ruff format && .venv/bin/ruff check && .venv/bin/mypy
+.venv/bin/python -m pytest             # all of tier 1's tests
 ```
 
 `MUSIKATA_DATA` points the database and caches at another folder, so a development copy never
