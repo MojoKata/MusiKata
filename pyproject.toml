@@ -52,6 +52,16 @@ module = ["musikata_core", "musikata_core.*"]
 strict = true
 
 [[tool.mypy.overrides]]
+module = ["mutagen", "mutagen.*", "av", "av.*"]
+ignore_missing_imports = true       # neither ships type information
+
+[[tool.mypy.overrides]]
+# the edges that hand Mutagen's objects on as plain data (docs/process/coding.md): Mutagen's own
+# methods carry no types, so calling them is allowed there, and nowhere else in the core
+module = ["musikata_core.tags.read"]
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
 module = ["musikata", "musikata.*"]
 disallow_untyped_defs = true       # the Qt bridge's looseness is allowed, and nothing else
 

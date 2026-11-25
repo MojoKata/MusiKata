@@ -481,7 +481,7 @@ def _tag_vorbis(path: str, song: Song) -> None:
 
 
 def _tag_mp4(path: str, song: Song) -> None:
-    from mutagen.mp4 import MP4, MP4Cover
+    from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 
     t = song.tags or {}
     audio = MP4(path)
@@ -500,6 +500,9 @@ def _tag_mp4(path: str, song: Song) -> None:
         audio["trkn"] = [(int(t["track"]), int(t.get("tracktotal") or 0))]  # type: ignore[call-overload]
     if t.get("compilation"):
         audio["cpil"] = True
+    if t.get("rating"):  # R10.4: 20 … 100
+        stars = int(t["rating"])  # type: ignore[call-overload]
+        audio["----:com.apple.iTunes:RATING"] = [MP4FreeForm(str(stars * 20).encode())]
     if song.cover:
         audio["covr"] = [MP4Cover(cover_jpeg(*song.cover), imageformat=MP4Cover.FORMAT_JPEG)]
     audio.save()
