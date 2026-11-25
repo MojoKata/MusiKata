@@ -69,8 +69,18 @@ rate, sample rate, size and the tags MusiKata keeps without showing (R4.1.1), re
 R4.9. **The change history and Undo.** Every save (from the panel, R3, R5, R9, R10, R12) is one
 entry in the change history, holding each file's old values. Ctrl+Z / ⌘Z, or **Undo** in the
 message that follows a save, puts back the most recent entry; ⋮ › **Change history** lists the
-entries by day, each with the files it touched, and undoes any of them file by file. Entries are
-kept for 90 days, a setting (R13).
+entries by day, each with the files it touched and the computer that saved it, and undoes any of
+them file by file. The history is kept in the root's `.musikata/history/` (R1.5), so a save made on
+one computer can be undone on another. Entries are kept for 90 days, a setting (R13).
 
 R4.9.1. Undoing a file that has changed since (by MusiKata or anything else) asks first, and
 shows what would be lost.
+
+R4.10. **Fixing text in the wrong encoding.** Old ID3v2.3 tags often hold text saved as Latin-1
+that is really another encoding, and show as gibberish (`Êèíî` for `Кино`). MusiKata notices
+such text (letters that rarely stand together in Latin-1) and lists it in Needs attention (R2.8).
+**Fix encoding…**, there and in the Edit tags panel (`T06-fix-encoding`), shows each such tag read
+the likely ways side by side, the most likely first: Cyrillic (Windows-1251), Japanese
+(Shift-JIS), Chinese (GBK, Big5), Greek (Windows-1253), Central European (Windows-1250), and as it
+is. The user picks the one that reads right, for one song or for every song of the album at once;
+the preview and saving are R3's (R3.7, R3.8), written as Unicode, and Undo puts the old bytes back.

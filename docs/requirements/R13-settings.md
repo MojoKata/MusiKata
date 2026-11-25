@@ -26,16 +26,19 @@ the JPEG quality (90) (R5.3), and the smallest size before Needs attention repor
 R13.6. **Playlists**: the playlists folder (R8.1); **Relative paths** (on); the encoding for new
 playlists (`.m3u8`, UTF-8; or `.m3u` in the system's encoding for old players).
 
-R13.7. **Playback**: the output device (R7.7); ReplayGain: Album, Track or Off (R7.5), and the
-pre-amp for songs without it; **Resume where I left off** (on) (R1.8).
+R13.7. **Playback**: the output device (R7.7); **Equalizer…** (R19); ReplayGain: Album, Track or Off
+(R7.5), and the pre-amp for songs without it; **Resume where I left off** (on) (R1.8).
 
 R13.8. **Appearance**: the theme (Match system, Dark, Light) (R6.2); the visualization's bands and
 speed (R11.3.1); **Tint views with the cover's colour** (on) (R6.2.2); **Minimize MusiKata when the
 mini player opens** (on) (R15.1); **Text size**, 90 % to 150 % (R18.3); **Reduce motion**: Match
 system (the default), On or Off (R18.5).
 
-R13.9. Settings are kept in the database's folder as `settings.json`, readable and hand-editable;
-an unknown or broken value is reported in the log and its default used.
+R13.9. Settings are kept as `settings.json` in two places (R1.5): the root's own `.musikata/` for
+the settings that belong to the root, and the shared settings folder for those every root shares;
+which settings are which is [Q#13](https://github.com/MojoKata/MusiKata/issues/13). Settings shows
+which a row is. Both files are readable and hand-editable; an unknown or broken value is reported in
+the log and its default used.
 
 R13.10. **Online**: **Allow online lookups** (off) (R16.2), and under it each service with its
 own switch and what it is used for; **Save MusicBrainz ids in tags** (on) (R16.9); **Clear lookup

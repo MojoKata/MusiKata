@@ -211,6 +211,14 @@ def icon(p, name, cx, cy, size=18, color="muted", sw=1.7):
         d.quadTo(17.5, 13.5, 15.5, 13.5); d.lineTo(8, 13.5); d.lineTo(4.5, 17); d.lineTo(4.5, 13.5)
         d.quadTo(2.5, 13.5, 2.5, 11.5); d.lineTo(2.5, 5); d.quadTo(2.5, 3, 4.5, 3); path(d)
         p.drawLine(P(6, 6.8), P(14, 6.8)); p.drawLine(P(6, 9.8), P(11.5, 9.8))
+    elif name == "eq":   # the equalizer (R19): three sliders
+        for xx, yy in ((5, 7), (10, 12.5), (15, 5.5)):
+            p.drawLine(P(xx, 3), P(xx, 17))
+            p.setBrush(col("bg")); p.drawEllipse(P(xx, yy), 1.9, 1.9); p.setBrush(Qt.NoBrush)
+    elif name == "trash":
+        p.drawLine(P(3.5, 5.5), P(16.5, 5.5)); p.drawPolyline(QPolygonF([P(8, 5.5), P(8.5, 3), P(11.5, 3), P(12, 5.5)]))
+        poly([(5, 5.5), (15, 5.5), (14, 17), (6, 17)])
+        p.drawLine(P(8.5, 8.5), P(8.8, 14)); p.drawLine(P(11.5, 8.5), P(11.2, 14))
     elif name == "expand":   # Now Playing, full view (R6.5)
         for ax, ay, dx, dy in ((3.5, 3.5, 1, 1), (16.5, 3.5, -1, 1), (3.5, 16.5, 1, -1), (16.5, 16.5, -1, -1)):
             p.drawPolyline(QPolygonF([P(ax, ay + 4.5 * dy), P(ax, ay), P(ax + 4.5 * dx, ay)]))
@@ -1459,11 +1467,11 @@ def g01_genres(p):
 VIZ = (("Waveform", "wave"), ("3D analyzer", "cube"), ("No visualization", "nowave"))
 
 
-DD_W, LY_W = 236, 100
-DD_X = W / 2 - (DD_W + 10 + LY_W) / 2   # the picker and the Lyrics switch, centred as a pair
+DD_W, LY_W, EQ_W = 236, 100, 40
+DD_X = W / 2 - (DD_W + 10 + LY_W + 10 + EQ_W) / 2   # the picker, the Lyrics switch and Equalizer, centred together
 
 
-def np_top(p, on, menu=False, lyrics=False):
+def np_top(p, on, menu=False, lyrics=False, eq=False):
     """Now Playing's own top row: back to the library, the visualization picker and the Lyrics switch (R11.4)."""
     text(p, 28, 18, "‹  Library", 13, "muted", 500)
     lab, ic = VIZ[on]
@@ -1476,6 +1484,9 @@ def np_top(p, on, menu=False, lyrics=False):
     rect(p, lx, 16, LY_W, 34, 10, "accentSoft" if lyrics else "surface", "accent" if lyrics else "border")
     icon(p, "lyrics", lx + 22, 33, 15, "accentHi" if lyrics else "muted")
     text(p, lx + 38, 16, "Lyrics", 13, "text" if lyrics else "muted", 600, h=34)
+    ex = lx + LY_W + 10   # the Equalizer button (R19.2)
+    rect(p, ex, 16, EQ_W, 34, 10, "accentSoft" if eq else "surface", "accent" if eq else "border")
+    icon(p, "eq", ex + EQ_W / 2, 33, 16, "accentHi" if eq else "muted")
 
 
 def viz_menu(p, on):
@@ -2172,6 +2183,174 @@ def n04_now_lyrics(p):
     nowbar(p, np_open=True)
 
 
+# ------------------------------------------------------------------ the equalizer (R19), Needs attention (R2.8), encodings (R4.10)
+EQ_BANDS = ("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+EQ_ELECTRONIC = (5.5, 4.5, 2.0, 0.0, -1.5, -0.5, 1.0, 2.5, 3.5, 4.0)
+
+
+def n05_equalizer(p):
+    n01_now_waveform(p)
+    rect(p, 0, 0, W, H - BAR_H, 0, col("scrim", 0.45))
+    np_top(p, 0, eq=True)
+    pw, ph = 760, 456
+    px, py = (W - pw) / 2, 64
+    shadow(p, px, py, pw, ph, 16, 28)
+    rect(p, px, py, pw, ph, 16, "surface", "borderStrong")
+    ix = px + 28
+    text(p, ix, py + 20, "Equalizer", 18, "text", 700)
+    toggle(p, ix + 112, py + 24, True)
+    icon(p, "close", px + pw - 28, py + 33, 14, "muted")
+    # the preset picker and its actions
+    rect(p, ix, py + 62, 300, 36, 10, "input", "border")
+    icon(p, "eq", ix + 20, py + 80, 15, "accentHi")
+    text(p, ix + 38, py + 62, "Electronic", 13, "text", 600, h=36)
+    chip(p, ix + 38 + tw("Electronic", 13, 600) + 10, py + 69, "chosen by genre", "accentHi", "accentSoft", 22, size=10.5)
+    icon(p, "chev_down", ix + 284, py + 80, 14, "muted")
+    bx = ix + 316
+    bx += button(p, bx, py + 63, "Duplicate", "ghost", w=104, h=34, size=12.5) + 8
+    bx += button(p, bx, py + 63, "Save as new…", "ghost", "plus", w=140, h=34, size=12.5) + 8
+    text(p, bx + 6, py + 63, "Built in: can't be changed", 11.5, "faint", h=34, w=px + pw - 24 - bx)
+    # the sliders: preamp, then ten bands, the curve across them
+    top, bot = py + 140, py + 352
+    mid = (top + bot) / 2
+    def yv(db):
+        return mid - db / 12 * (bot - top) / 2
+    for db, lab in ((12, "+12"), (0, "0 dB"), (-12, "−12")):
+        text(p, ix - 4, yv(db) - 9, lab, 10.5, "faint", w=40, h=18, mono=True)
+    line(p, ix + 92, top - 10, ix + 92, bot + 34, "border")
+    def slider(x, db, lab, val, hi=False):
+        rect(p, x - 2, top, 4, bot - top, 2, "borderStrong")
+        y0, y1 = sorted((yv(0), yv(db)))
+        rect(p, x - 2, y0, 4, max(2, y1 - y0), 2, "accent")
+        rect(p, x - 9, yv(db) - 9, 18, 18, 9, "text", "accentHi" if hi else None, 2)
+        text(p, x - 30, bot + 12, lab, 11.5, "muted", 600, w=60, align="center")
+        text(p, x - 30, top - 30, val, 11, "accentHi" if hi else "faint", 600, w=60, align="center", mono=True)
+    slider(ix + 60, -2.0, "Preamp", "−2.0")
+    xs = [ix + 132 + i * ((pw - 56 - 150) / 9) for i in range(10)]
+    pts = [QPointF(x, yv(v)) for x, v in zip(xs, EQ_ELECTRONIC)]
+    path_ = QPainterPath(pts[0])
+    for a, b in zip(pts, pts[1:]):
+        mx = (a.x() + b.x()) / 2
+        path_.cubicTo(QPointF(mx, a.y()), QPointF(mx, b.y()), b)
+    fill = QPainterPath(path_); fill.lineTo(xs[-1], yv(0)); fill.lineTo(xs[0], yv(0)); fill.closeSubpath()
+    p.setPen(Qt.NoPen); p.setBrush(col("accent", 0.10)); p.drawPath(fill)
+    for x, v, lab in zip(xs, EQ_ELECTRONIC, EQ_BANDS):
+        slider(x, v, lab, f"{v:+.1f}".replace("-", "−"), hi=lab == "8k")
+    p.setPen(QPen(grad(xs[0], 0, xs[-1], 0, [(0, "cyan"), (0.5, "accent"), (1, "pink")]), 2.4)); p.setBrush(Qt.NoBrush)
+    p.drawPath(path_)
+    # by genre
+    fy = py + ph - 58
+    line(p, px, fy - 10, px + pw, fy - 10, "border")
+    toggle(p, ix, fy + 8, True)
+    text(p, ix + 46, fy, "Choose by genre", 13, "text", 600, h=36)
+    text(p, ix + 46 + tw("Choose by genre", 13, 600) + 12, fy, "Signal Fires is Electronic, so it plays with Electronic", 12, "muted", h=36, w=380)
+    button(p, px + pw - 28 - 120, fy, "Genres…", "ghost", "genre", w=120, h=34, size=12.5)
+
+
+def l09_needs_attention(p):
+    window(p)
+    sidebar(p, "Needs attention")
+    header(p, "Needs attention", "23 to look at", toggles=False, sort=None, search="Search these")
+    window_buttons(p)
+    x0 = SIDE_W + 28
+    wt = W - x0 - 28
+    cx = x0
+    for i, (lab, n) in enumerate((("All", 23), ("Tags differ from path", 6), ("Same song twice", 3), ("Covers", 4),
+                                  ("Names", 2), ("Wrong encoding", 2), ("Album in one file", 1), ("Other", 5))):
+        on = i == 2
+        lab2 = f"{lab}  {n}"
+        cx += chip(p, cx, 74, lab2, "text" if on else "muted", "accentSoft" if on else "surface", 28,
+                   border=None if on else "border", size=12, weight=600 if on else 500) + 8
+    text(p, x0, 118, "SAME SONG MORE THAN ONCE", 11, "faint", 700)
+    text(p, x0 + 220, 118, "The kept copy takes the others' plays and highest rating, and their place in playlists.",
+         11.5, "muted", w=wt - 220)
+    groups = [
+        ("Signal Fires", "Lumen Drift · 4:18", ("ok", "Exact copies"), [
+            (True, False, "FLAC · 16-bit / 44.1 kHz", "Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.flac", "52", 5, "Keep: lossless"),
+            (False, True, "MP3 · 320 kbps", "_Incoming/new rips/Signal Fires.mp3", "3", 4, None)]),
+        ("Moonpull", "Lumen Drift · 4:44 and 4:45", ("warn", "Likely"), [
+            (True, False, "FLAC · 16-bit / 44.1 kHz", "Lumen Drift/Tide Tables/04 - Moonpull.flac", "18", 4, "Keep: lossless"),
+            (False, False, "AAC · 256 kbps", "_Incoming/From Phone/Moonpull (radio).m4a", "6", 0, None)]),
+    ]
+    y = 144
+    for title, sub, (st, stl), copies in groups:
+        gh = 44 + len(copies) * 46 + 10
+        rect(p, x0, y, wt, gh, 12, "surface", "border")
+        art(p, x0 + 16, y + 10, 26, 11 if title == "Signal Fires" else 131, 5)
+        tx = x0 + 52 + text(p, x0 + 52, y + 10, title, 14, "text", 700, h=26)
+        tx += text(p, tx + 10, y + 10, sub, 12, "muted", h=26) + 22
+        chip(p, tx, y + 12, stl, st, st + "Soft", 22, ic="check" if st == "ok" else "attention", size=11)
+        for k, (keep, trash, fmt, path, plays, rating, why) in enumerate(copies):
+            ry = y + 44 + k * 46
+            line(p, x0 + 12, ry, x0 + wt - 12, ry, "border")
+            radio(p, x0 + 18, ry + 15, keep)
+            text(p, x0 + 42, ry, "Keep" if keep else "", 12, "accentHi", 600, h=46)
+            if not keep:
+                checkbox(p, x0 + 92, ry + 15, trash)
+                text(p, x0 + 116, ry, "Trash", 12, "err" if trash else "muted", 600, h=46)
+            text(p, x0 + 180, ry, fmt, 12.5, "text", 600 if keep else 400, h=46, w=200)
+            text(p, x0 + 390, ry, path, 12, "muted", h=46, w=330, mono=True)
+            text(p, x0 + 730, ry, plays + " plays", 12, "muted", h=46, w=70, align="right")
+            stars(p, x0 + 818, ry + 23, rating, r=4.4, gap=11.5)
+            if why:
+                text(p, x0 + 890, ry, why, 11.5, "ok", 600, h=46, w=wt - 900)
+        y += gh + 12
+    for lab, n, act in (("Wrong encoding", "2 songs · Северный Ветер, Тихая Гавань", "Fix encoding…"),
+                        ("Album in one file", "1 album · Live at the Lantern (Mara Okafor), with a .cue", "Show in folder")):
+        rect(p, x0, y, wt, 48, 12, "surface", "border")
+        icon(p, "chev_right", x0 + 22, y + 24, 14, "muted")
+        tx = x0 + 40 + text(p, x0 + 40, y, lab, 13, "text", 600, h=48)
+        text(p, tx + 12, y, n, 12, "muted", h=48, w=520)
+        button(p, x0 + wt - 16 - 150, y + 8, act, "ghost", w=150, h=32, size=12.5)
+        y += 58
+    by = H - BAR_H - 58
+    selection_bar(p, x0 + wt / 2, by, "1 copy to the trash", "plays and rating go to the kept copy",
+                  [("Move 1 to the trash", "trash")])
+    nowbar(p)
+
+
+def t06_fix_encoding(p):
+    l09_needs_attention(p)
+    w, h = 980, 560
+    x, y = dialog(p, w, h, "Fix encoding · 08 - Ìàÿê.mp3",
+                  "These tags were saved as Latin-1 but read better another way. Choose the reading that is right.")
+    ix, iw = x + 28, w - 56
+    cols = [("READ AS", ix + 44, 230, "left"), ("ARTIST", ix + 290, 220, "left"), ("ALBUM", ix + 520, 210, "left"),
+            ("TITLE", ix + 740, 160, "left")]
+    ty = y + 92
+    for lab, cx_, cw_, al in cols:
+        text(p, cx_, ty, lab, 11, "faint", 700, w=cw_, h=24)
+    rows = [
+        ("Cyrillic (Windows-1251)", "Most likely", ("Северный Ветер", "Тихая Гавань", "Маяк"), True),
+        ("As it is (Latin-1)", None, ("Ñåâåðíûé Âåòåð", "Òèõàÿ Ãàâàíü", "Ìàÿê"), False),
+        ("Central European (Windows-1250)", None, ("Ńĺâĺđíűé Âĺňĺđ", "Ňčőŕ˙ Ăŕâŕíü", "Ěŕ˙ę"), False),
+        ("Greek (Windows-1253)", None, None, False),
+        ("Japanese (Shift-JIS)", None, None, False),
+        ("Chinese (GBK, Big5)", None, None, False),
+    ]
+    for i, (enc, badge, vals, on) in enumerate(rows):
+        ry = ty + 28 + i * 50
+        rect(p, ix, ry, iw, 44, 9, "accentSoft" if on else "raised", "accent" if on else "border", 1.4 if on else 1)
+        radio(p, ix + 14, ry + 14, on)
+        text(p, ix + 44, ry + (4 if badge else 0), enc, 13, "text", 600 if on else 400, h=22 if badge else 44, w=236)
+        if badge:
+            text(p, ix + 44, ry + 22, badge, 11, "ok", 600, h=18)
+        if vals:
+            for v, (lab, cx_, cw_, al) in zip(vals, cols[1:]):
+                text(p, cx_, ry, v, 13.5, "text" if on else "muted", 600 if on else 400, h=44, w=cw_)
+        else:
+            text(p, ix + 290, ry, "Can't be read this way", 12.5, "faint", h=44)
+    oy = ty + 28 + 6 * 50 + 6
+    checkbox(p, ix, oy + 2, True)
+    text(p, ix + 24, oy, "The same for every song of the album (9 songs)", 12.5, "text", h=20)
+    fy = y + h - 62
+    line(p, x, fy - 12, x + w, fy - 12, "border")
+    text(p, ix, fy, "9 files · artist, album and title · written as Unicode; Undo puts the old bytes back", 12.5,
+         "muted", h=36, w=560)
+    button(p, x + w - 28 - 150, fy, "Save 9 files", "primary", "check", w=150)
+    button(p, x + w - 28 - 260, fy, "Cancel", "ghost", w=100)
+
+
 def s01_settings(p):
     l01_albums(p)
     w, h = 900, 620
@@ -2271,17 +2450,20 @@ SCREENS = {
     "L06-folders-cards": l06_folders_cards,
     "L07-folders-list": l07_folders_list,
     "L08-folder-songs": l08_folder_songs,
+    "L09-needs-attention": l09_needs_attention,
     "T01-infer-from-path": t01_infer,
     "T02-album-art": t02_album_art,
     "T03-organize-files": t03_organize,
     "T04-find-cover-online": t04_find_cover,
     "T05-look-up-tags": t05_look_up_tags,
+    "T06-fix-encoding": t06_fix_encoding,
     "P01-playlist-drag": p01_playlist_drag,
     "G01-genres": g01_genres,
     "N01-now-playing-waveform": n01_now_waveform,
     "N02-now-playing-3d-analyzer": n02_now_3d,
     "N03-now-playing-queue": n03_now_queue,
     "N04-now-playing-lyrics": n04_now_lyrics,
+    "N05-equalizer": n05_equalizer,
     "S01-settings-tags": s01_settings,
     "M01-mini-players": m01_mini_players,
     "M02-mini-player-menu": m02_mini_player_menu,

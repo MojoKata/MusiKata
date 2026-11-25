@@ -1,23 +1,53 @@
 # A4. Playback
 
-A4.1. **Qt Multimedia.** `QMediaPlayer` with a `QAudioOutput` plays every kind of R2.2 through
-the FFmpeg back end Qt carries on Linux, Windows and macOS, so MusiKata needs no codec of its own
-and the system's codecs don't matter. It is in PySide6's Addons wheel, not Essentials, so MusiKata
-depends on both (A6.2).
+MusiKata plays the audio itself: it decodes each song, applies the gain and the equalizer, and
+hands one continuous stream to the sound device. That is what makes gapless playback (R7.6) and
+the equalizer (R19) possible (A1.7.4).
 
-A4.2. **The queue** lives in `musikata` as a list of song ids with a cursor and a shuffle order;
-`Player` owns one `QMediaPlayer` for the current song and opens the next one in a second player
-shortly before the end (R7.6). Handing over between the two players leaves a short gap: true
-gapless playback needs the audio of both files in one stream, which Qt Multimedia doesn't offer
-(Q5).
+A4.1. **The pipeline.**
 
-A4.3. **Taking the audio for the analyzer.** `QAudioBufferOutput` (Qt 6.8 and later) attached to
-the player delivers the decoded PCM as it plays, in step with what is heard. Its buffers go to a
-ring buffer of the last few seconds, which the analyzer reads each frame (A5.2). Nothing is
-decoded twice for the analyzer.
+```
+ file ──PyAV decode──▶ trim encoder padding ──▶ resample to the device's rate ──┐
+                                                                                ▼
+ sound device ◀── QAudioSink ◀── ring buffer (≈2 s) ◀── volume ◀── equalizer ◀── ReplayGain
+                                       │
+                                       └──▶ the analyzer's ring buffer (A4.3)
+```
 
-A4.4. **ReplayGain** is applied by setting `QAudioOutput.volume` to the user's volume times
-`10^(gain/20)`, clamped so it never clips by more than the track peak allows.
+- **Decoding** is PyAV, the Python binding of FFmpeg, whose wheels carry FFmpeg's decoders for
+  every kind of R2.2. Qt's own `QAudioDecoder` can't seek and doesn't report encoder padding, and
+  `QMediaPlayer` plays files one at a time with a gap between them.
+- **Output** is Qt Multimedia's `QAudioSink` in pull mode, reading float samples from a ring
+  buffer at the device's own sample rate.
+- The playback thread (A1.3) decodes and processes blocks of about 20 ms until the ring buffer
+  holds two seconds; the device pulls from it on its own schedule, so a busy GUI or a slow disk
+  doesn't stop the sound.
+
+A4.2. **The queue and the joins between songs.** The queue lives in `musikata` as a list of song
+ids with a cursor and a shuffle order (R7.2, R7.3). Ten seconds before a song ends, the next one is
+opened and its first blocks decoded, and its samples follow the last samples of the current one
+in the same stream, so there is no gap:
+
+- Everything is resampled to the one rate the device runs at, so songs of different sample rates
+  and channels join exactly.
+- The silence encoders add is trimmed: an MP3's start delay and end padding from its LAME or Xing
+  header, an AAC file's from its `iTunSMPB` tag, an Opus file's pre-skip. Tests check each on
+  generated files with a known number of samples.
+- A change of ReplayGain or equalizer preset at the join (R7.6.1) is ramped over 50 ms.
+
+A4.3. **The analyzer's audio.** Each block handed to the ring buffer is also copied, with its
+position, into the analyzer's ring buffer of the last few seconds (A5.2). The analyzer reads it
+delayed by the device's reported latency, so what is drawn is what is heard.
+
+A4.4. **Gain and the equalizer.**
+
+- **ReplayGain** (R7.5) is a multiplication by `10^(gain/20)`, limited by the track's peak so it
+  never clips.
+- **The equalizer** (R19): the ten band gains are turned into one filter, about 2,000 samples
+  long, rebuilt when a slider moves, and applied block by block with NumPy's FFT (overlap-add). No
+  SciPy is needed, and it costs a few percent of one core.
+- **Never clipping:** after the preamp, a peak limiter holds the stream under full scale.
+- **Volume** is applied last, so the equalizer works at full resolution.
 
 A4.5. **The system's media controls** (R7.8):
 
@@ -31,5 +61,9 @@ Each is a small module behind one interface (`now_playing(song)`, `state(playing
 the commands), so the rest of the app doesn't know which is in use, and a platform without one
 still plays.
 
-A4.6. **Output devices** are listed by `QMediaDevices`, whose `audioOutputsChanged` signal is how a
-vanished device is noticed (R7.7).
+A4.6. **Seeking and devices.** A seek (R7.4) asks PyAV for the nearest keyframe before the
+position, decodes forward to the exact sample, and replaces what is in the ring buffer, so the
+sound moves within a block. Output devices are listed by `QMediaDevices`; when the device in use
+goes away (`audioOutputsChanged`), playback pauses, a new `QAudioSink` is opened on the default
+device at its rate, and the stream resumes from the same sample when the user presses play
+(R7.7).

@@ -21,12 +21,12 @@ A7.2. **Politeness.**
 - Lookups of many albums (R16.4.1) run one album after another, never in parallel, and stop at
   once when cancelled.
 
-A7.3. **Fingerprints** (R16.6) are made by Chromaprint's `fpcalc`, the command-line tool from
-Chromaprint's own releases (LGPL-2.1, FFmpeg built in), pinned by version and SHA-256 per platform
-and carried by each build (A6.1). It reads the first 120 seconds of a file and prints the
-fingerprint and length MusiKata sends to AcoustID. Its lookups use MusiKata's application key,
-kept in the source as AcoustID intends application keys to be; it identifies the application,
-not the user.
+A7.3. **Fingerprints** (R16.6, [#6](https://github.com/MojoKata/MusiKata/issues/6)) are made by
+Chromaprint's `fpcalc`, the command-line tool from Chromaprint's own releases (LGPL-2.1, FFmpeg
+built in), pinned by version and SHA-256 per platform and carried by each build (A6.1). It reads the
+first 120 seconds of a file and prints the fingerprint and length MusiKata sends to AcoustID. Its
+lookups use MusiKata's application key, kept in the source as AcoustID intends application keys to
+be; it identifies the application, not the user.
 
 A7.4. **Matching a release** (R16.5). MusicBrainz's search finds up to ten releases by the album
 artist and title. Each is fetched with its recordings, and scored against the album's songs: the
@@ -57,6 +57,6 @@ recorded answers, played back through the client of A7.1, including errors, slow
 CI, so a changed API is noticed before a user notices it.
 
 A7.9. **Terms.** MusicBrainz and AcoustID are free for non-commercial use, which MusiKata is (free
-software, given away; Q6). Selling it would need their commercial plans. MusicBrainz's data is
-CC0; covers and lyrics stay their owners', and MusiKata only writes them into the user's own files
-(R16.10).
+software, given away under GPL-3.0-or-later). Selling it would need their commercial plans.
+MusicBrainz's data is CC0; covers and lyrics stay their owners', and MusiKata only writes them into
+the user's own files (R16.10).

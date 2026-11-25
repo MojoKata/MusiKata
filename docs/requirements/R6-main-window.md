@@ -50,8 +50,9 @@ and at the far end the **Now Playing** button (R11.4): it opens Now Playing over
 above the bar, is highlighted while it is open, and closes it again.
 
 R6.6. **The ⋮ menu,** in this order: **Rescan library** (R2.3), **Change history** (R4.9), **Mini
-player** (R15), **Settings…** (R13), the theme (Match system, Dark, Light), **Show app log** (R14),
-**About MusiKata**, **Check for updates…** (R1.9), **Quit MusiKata** (Ctrl+Q / ⌘Q).
+player** (R15), **Equalizer…** (R19), **Settings…** (R13), the theme (Match system, Dark, Light),
+**Show app log** (R14), **About MusiKata**, **Check for updates…** (R1.9), **Quit MusiKata** (Ctrl+Q
+/ ⌘Q).
 
 R6.7. **Messages.** Finished actions and errors are shown in a short-lived message at the bottom of
 the view, above the now-playing bar; a message about a save carries **Undo** (R4.9).

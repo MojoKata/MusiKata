@@ -3,37 +3,41 @@
 Where the build stands, and what the first release holds. What MusiKata does is in the
 [requirements](docs/requirements/README.md), why it is built so in the
 [architecture](docs/architecture/README.md), and how the work is done (running from source, the
-demo library, the tour, tests, releases) in [`docs/process/`](docs/process/README.md).
+demo library, the tour, tests, releases) in [`docs/process/`](docs/process/README.md). MusiKata is
+free software under the GPL, version 3 or later ([`LICENSE`](LICENSE)).
 
 ## Status
 
 | Area | State |
 |---|---|
-| Requirements R1 to R18, architecture A1 to A7, process | Written; open questions in [`questions.md`](docs/requirements/questions.md) |
+| Requirements R1 to R19, architecture A1 to A7, process | Written; one open question, [Q#13](https://github.com/MojoKata/MusiKata/issues/13) |
 | Mockups of every screen of the first release | Drawn ([`docs/mockups/`](docs/mockups/README.md)) |
 | Code, tests, builds | Not started |
 
 ## The first release
 
-The first release is everything in the requirements except what is listed under **Later**.
-Requirements change by commits to `docs/requirements/`; this list changes with them.
+Everything in the requirements, except what is listed under **Later**. Requirements change by
+commits to `docs/requirements/`; this list changes with them.
 
-| | Requirements |
+| | |
 |---|---|
-| **In** | R1 to R15 and R18, whole, with gapless playback as Q5 decides |
-| **In** | R16 Online lookups: covers (R16.4, R16.4.1) and tags (R16.5), off until turned on |
-| **In** | R17 Lyrics: from `.lrc` files and tags (R17.1 to R17.3), found online (R17.4), edited as text (R17.5) |
-| **In** | R1.9 updates when asked; Q9's duplicates, if answered as proposed |
-| **Later** | R16.6 Identify by sound: it needs Chromaprint's `fpcalc` built and signed for three platforms (A7.3) |
-| **Later** | R17.5's **Set time**, timing plain lyrics by tapping along |
-| **Later** | The light theme's mockups and its own check of R18.4 (dark is the design target, R6.2) |
-| **Later** | Translations other than English (R1.10 makes them a file added) |
-| **Later** | Q10 computing loudness, Q11 CUE sheets as songs |
-| **Out** | What Q12 lists, if answered as proposed |
+| **Platforms** | Linux (AppImage), Windows 10 22H2 and 11 x64 (installer), macOS 14 and newer as two apps, Apple silicon and Intel, ad-hoc signed, from MusiKata's Homebrew tap and as `.dmg`s (R1) |
+| **In** | R1 to R15, R18 and R19 whole: gapless playback through MusiKata's own audio pipeline, the equalizer with presets and presets by genre, duplicates, **Fix encoding…**, updates when asked, a root per run |
+| **In** | R16 Online lookups: covers and tags, off until turned on |
+| **In** | R17 Lyrics: from `.lrc` files and tags, found online, edited as text |
 
-## Waiting on decisions
+## Later
 
-The first release can't be finished before these are answered: Q1 (macOS versions), Q3 (one
-music root), Q4 (ratings in Vorbis and MP4), Q5 (gapless playback), Q6 (the license), Q7 (Windows
-versions), Q8 (mis-encoded tags), Q9 to Q12. Each has a proposal in
-[`questions.md`](docs/requirements/questions.md).
+| Issue | What |
+|---|---|
+| [#2](https://github.com/MojoKata/MusiKata/issues/2) | Computing loudness (ReplayGain 2.0) |
+| [#3](https://github.com/MojoKata/MusiKata/issues/3) | Splitting albums kept as one file with a CUE sheet into tracks |
+| [#4](https://github.com/MojoKata/MusiKata/issues/4) | Crossfade |
+| [#5](https://github.com/MojoKata/MusiKata/issues/5) | Converting between formats |
+| [#6](https://github.com/MojoKata/MusiKata/issues/6) | Identify by sound (R16.6) |
+| [#7](https://github.com/MojoKata/MusiKata/issues/7) | Timing plain lyrics by tapping along (R17.5's **Set time**) |
+| [#8](https://github.com/MojoKata/MusiKata/issues/8) | The light theme |
+| | Translations other than English (R1.10) |
+
+Signing and notarizing the Mac apps, and moving them to Homebrew's own casks, follow a Developer ID
+(A6.5.1). What MusiKata won't do is listed in the requirements' README.

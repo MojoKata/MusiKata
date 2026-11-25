@@ -1,9 +1,14 @@
 # R2. The music root and the library
 
-R2.1. **The music root.** MusiKata's library is one folder and everything under it (Q3). On the
-first start (mockup `X01-first-run`) the user drops a folder onto the window, chooses one, or
-takes the platform's music folder (`~/Music`, `%USERPROFILE%\Music`). It can be changed in
-Settings (R13); changing it rescans and keeps nothing of the old root but the change history.
+R2.1. **The music root.** MusiKata's library is one folder and everything under it. On the first
+start (mockup `X01-first-run`) the user drops a folder onto the window, chooses one, or takes the
+platform's music folder (`~/Music`, `%USERPROFILE%\Music`). That folder is the configured root,
+changed in Settings (R13.2); changing it opens the other root's library, with its own `.musikata`
+folder (R1.5), and scans it.
+
+R2.1.2. **A root for one run.** `musikata --root PATH` makes PATH the music root for that run
+only, and leaves the setting as it is. The window's title then names the root ("MusiKata —
+/media/usb/Music"), so a library that isn't the usual one is never mistaken for it.
 
 R2.1.1. The root's card at the bottom of the sidebar shows its path, the number of songs and
 albums, the space they take and a dot: green when the library is up to date, turning while a
@@ -19,7 +24,12 @@ a scan of an unchanged library of 10,000 songs takes seconds. A first scan shows
 the root's card and fills the views as it goes.
 
 R2.3.1. Hidden files and folders (a leading `.` on Linux and macOS, the hidden attribute on
-Windows) are skipped, and so is any folder holding a file named `.musikataignore`.
+Windows) are skipped, and so is any folder holding a file named `.musikataignore`. The root's
+`.musikata` folder is never part of the library.
+
+R2.3.2. **Links.** Symbolic links (Linux, macOS) and junctions (Windows) inside the root are
+followed like folders, so a folder on another drive joins the library by a link. A link leading
+back to a folder already walked is skipped, and the log says so.
 
 R2.4. **Watching.** While MusiKata runs, files added, changed, moved or removed under the root, by
 MusiKata or anything else, appear in the library within seconds. When the platform can't watch
@@ -75,6 +85,10 @@ Each kind is a group, and each entry has the action that fixes it:
   for all of them at once (R16.4.1).
 - Names that differ only in case or spacing (artists, albums, genres, R9.5): **Merge**.
 - Playlist entries whose file is missing (R8.7): **Find**.
+- The same song more than once (R2.12): **Review…**.
+- An album kept as one file with a `.cue` sheet: "Album in one file", which plays as one song
+  (splitting it into tracks is [#3](https://github.com/MojoKata/MusiKata/issues/3)).
+- Tags in the wrong text encoding (R4.10): **Fix encoding…**.
 - Files whose tags and path say nothing of what they are: **Identify by sound** (R16.6).
 - Files that couldn't be read: **Show in folder**, and the error.
 
@@ -160,6 +174,9 @@ keeps the library as it was and never takes its songs for removed (`X02-root-una
   every change to files are unavailable, each saying why; the song playing stops at its end;
 - when the root comes back, MusiKata rescans it and the banner goes.
 
+A folder joined by a link (R2.3.2) that can't be reached makes only its own songs unavailable, and
+the banner names it.
+
 R2.10.1. A scan that finds the root but more than a quarter of its songs gone asks before
 taking them out of the library ("12,040 songs are missing from ~/Music. Remove them from the
 library?", **Keep them** / **Remove**), since a folder renamed or a share half mounted looks the
@@ -176,3 +193,15 @@ so.
 R2.11.1. A folder under the root can be kept out of the library without removing anything:
 ⋯ › **Ignore this folder** writes the `.musikataignore` of R2.3.1, and Settings lists the folders
 ignored (R13.2).
+
+R2.12. **The same song more than once.** Needs attention's group "Same song more than once" lists
+exact copies (the same audio, by its hash, A2.3) and likely ones (the same artist and title,
+lengths within 2 seconds, in different files), each group with its copies' format, bit rate,
+folder, plays and rating.
+
+- MusiKata proposes the copy to keep: lossless over lossy, then the higher bit rate, then the one
+  whose path matches its tags (R3.9). Exact copies come checked for removal; likely ones are
+  marked "Likely" and come unchecked.
+- **Move the others to the trash** asks first (R2.11). The kept copy takes the removed ones'
+  plays and their highest rating, and playlists naming a removed copy are pointed at it (R8),
+  all in one undoable change for what can be undone (R4.9).

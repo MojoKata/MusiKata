@@ -25,11 +25,10 @@ section's items are numbered within it: `R3.4` is item 4 of the tags-from-paths 
 3. **A statement, not a changelog.** The requirements say what MusiKata is and does, in the
    present tense, and carry no dates, versions or status of their own; git holds their history,
    and `DEVELOP.md` says where the build stands.
-4. **Questions, gaps and other issues.** Until the GitHub repository has issues, open questions
-   are kept in [`questions.md`](questions.md) as `Q1`, `Q2`, …, ids that are never reused; an
-   answered question's answer goes into its section and the question is removed. Once issues are
-   in use, they are cited by number and linked: `[Q#n]` a question waiting on a decision, `[G#n]`
-   a gap (a part not yet specified or built), `[#n]` any other issue.
+4. **Questions, gaps and other issues** are the repository's GitHub issues, cited by number and
+   linked: `[Q#n]` a question waiting on a decision, `[G#n]` a gap (a part not yet specified or
+   built), `[#n]` any other issue. An answered question's answer goes into its section, and the
+   issue is closed.
 5. **Mockups in step.** A change here that touches what a user sees or does (a screen, field,
    button, dialog, setting, state or message) updates the mockups in the same change
    ([process](../process/README.md#mockups-in-step-with-the-requirements)).
@@ -77,3 +76,13 @@ These hold everywhere, and a section that seems to break one is wrong.
 | **R16** | [Online lookups](R16-online-lookups.md) | Covers, tags and identifying songs by sound from free online services, when asked; what is sent |
 | **R17** | [Lyrics](R17-lyrics.md) | Where lyrics come from, showing them in step with the song, finding, editing and saving them |
 | **R18** | [Accessibility](R18-accessibility.md) | Screen readers, the keyboard, text size, contrast and colour, motion |
+| **R19** | [Equalizer](R19-equalizer.md) | Ten bands, presets built in and the user's own, presets chosen by genre |
+
+## Not in MusiKata
+
+Decided against, each closed as "no": syncing to phones and USB players
+([#9](https://github.com/MojoKata/MusiKata/issues/9)); importing ratings, play counts and playlists
+from other players ([#10](https://github.com/MojoKata/MusiKata/issues/10)); internet radio and
+podcasts ([#11](https://github.com/MojoKata/MusiKata/issues/11)); scrobbling to Last.fm or
+ListenBrainz ([#12](https://github.com/MojoKata/MusiKata/issues/12)). A feature on this list comes
+in only by a decision that gives it a section.

@@ -20,10 +20,10 @@ written here so this repository stands on its own.
    ([below](#mockups-in-step-with-the-requirements)).
 3. **Why, where it isn't obvious.** A choice between real alternatives, or one that a later reader
    would question, goes into [`../architecture/`](../architecture/README.md) with what was weighed.
-4. **Decisions in a walk thru.** A batch of open choices (the questions in
-   [`questions.md`](../requirements/questions.md), review findings, design options) is settled one
-   item at a time, each with its options lettered and a recommendation, and nothing is built until
-   the whole batch is approved. The answers go into the requirements and the questions are removed.
+4. **Decisions in a walk thru.** A batch of open choices (question issues, `[Q#n]`; review
+   findings; design options) is settled one item at a time, each with its options lettered and a
+   recommendation, and nothing is built until the whole batch is approved. The answers go into the
+   requirements and the question issues are closed.
 5. **Build on a branch,** with its tests (see [`testing.md`](testing.md)), in a pull request.
 6. **Review** before merging: the diff, against the requirements it claims, with findings fixed or
    filed.
@@ -32,12 +32,12 @@ written here so this repository stands on its own.
 
 ## The documents' rules
 
-- **Lasting ids.** R and A ids, and Q ids, are never renumbered or reused (requirements README,
-  rule 1).
+- **Lasting ids.** R and A ids are never renumbered or reused (requirements README, rule 1);
+  questions, gaps and other issues are GitHub issues, cited by number (rule 4).
 - **A statement, not a changelog.** Requirements and architecture say what is, in the present tense,
   with no dates, versions, "now", "no longer" or status. Status goes in the root `README.md` (the
   product and its releases) and `DEVELOP.md` (the build).
-- **References are ids,** never file names or line numbers: `R3.6.1`, `A3.4`, `Q5`.
+- **References are ids,** never file names or line numbers: `R3.6.1`, `A3.4`, `[Q#13]`.
 - **A file past 500 lines** becomes a folder with a file per first-level item.
 - **Free standing.** The documents describe MusiKata in its own terms; another project may be
   named as where a practice comes from, never as where MusiKata's behaviour is defined.

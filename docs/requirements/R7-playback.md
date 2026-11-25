@@ -18,11 +18,16 @@ seeks there (R11.2); ← and → seek 5 seconds.
 
 R7.5. **ReplayGain.** Track, Album (the default) or Off, a setting (R13). Album uses the album gain
 when the album is played in order and the track gain otherwise. Songs without ReplayGain tags play
-at a pre-amp of −6 dB so they aren't louder than those with them. MusiKata reads ReplayGain; it
-doesn't compute it.
+at a pre-amp of −6 dB so they aren't louder than those with them. MusiKata reads ReplayGain;
+computing it is [#2](https://github.com/MojoKata/MusiKata/issues/2).
 
-R7.6. **Between songs.** The next song is opened ahead of time so it starts at once. A short gap
-remains between files (Q5).
+R7.6. **Between songs.** Playback is gapless: one song runs into the next with no gap and no click,
+and the silence MP3 and AAC encoders add at a file's start and end is left out, so live albums,
+mixes and albums made to flow play as they were made. This holds across songs of different sample
+rates and kinds. Crossfading is [#4](https://github.com/MojoKata/MusiKata/issues/4).
+
+R7.6.1. The equalizer (R19) and ReplayGain (R7.5) apply to the same stream, and change at the
+join between two songs without a click.
 
 R7.7. **Output.** The output device is the system's default unless one is chosen in Settings
 (R13); when the device in use goes away, playback pauses and moves to the default.
@@ -35,5 +40,5 @@ next, previous and seek from the system:
 - macOS: Now Playing in Control Centre and the media keys.
 
 R7.9. **Play counts.** A song counts as played once 50% of it, or 4 minutes, has played. Play
-counts and the last-played time are kept in the database only, and the Songs view can sort by
-them.
+counts and the last-played time are kept in the root's `.musikata/plays.json` (R1.5), adding up
+the plays of every computer that plays the root, and the Songs view can sort by them.

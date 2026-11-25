@@ -8,7 +8,7 @@ src/musikata/        the app: QML (qml/), list models, Backend/Player/Library br
 tests/               pytest: unit tests per core module, QML tests, the tour's layout checks
 scripts/             build, test and demo scripts (shell and Python)
 packaging/           versions.env, qt-modules.txt, the Windows installer script, macOS bundle files, icons
-docs/requirements/   what MusiKata does (R1 …), questions.md
+docs/requirements/   what MusiKata does (R1 …)
 docs/architecture/   why it is built so (A1 …)
 docs/process/        how it is worked on (this folder)
 docs/mockups/        the design mockups, and src/render.py that draws them

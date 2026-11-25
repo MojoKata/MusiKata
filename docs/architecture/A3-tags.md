@@ -45,9 +45,17 @@ On Windows a file open in another program can't be replaced; that is reported (R
 removed. Leftover `.musikata-tmp` files from a crash are removed at the next scan.
 
 A3.5. **The change history** keeps, for each file written, its path and the old value of each
-field that changed (covers by hash, with the old image kept in the cache until the entry
-expires). Undo is another write of those values, through A3.4, and is itself recorded, so it can
-be redone. Entries past their age (R4.9) are deleted at start.
+field that changed. Each entry is one JSON file in `<root>/.musikata/history/`, named by its time
+and the computer that saved it, so entries from several computers never collide; old covers are
+kept beside them in `history/images/`, by hash, until the last entry naming them expires. The
+index (A2.1) lists the entries for the Change history view. Undo is another write of those values,
+through A3.4, and is itself an entry, so it can be redone. Entries past their age (R4.9) are
+removed by whichever computer starts first.
 
-A3.6. **Text encodings.** Tags are read as Mutagen decodes them; ID3v2.3 frames in Latin-1 that are
-really another encoding (common in old rips) are left as read (Q8).
+A3.6. **Text encodings.** Tags are read as Mutagen decodes them. An ID3v2.3 frame marked Latin-1
+is checked as it is read: its bytes are decoded under each candidate of R4.10 and scored by how
+much of the result is letters of one script, in the pairs that script uses; when another
+encoding reads far better than Latin-1 (accented Latin letters in runs, which real French or
+German doesn't make), the song is flagged for Needs attention. **Fix encoding…** shows the
+candidates in that order, and saving writes the chosen text as Unicode, in the ID3 version set in
+Settings (R13.3).

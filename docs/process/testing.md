@@ -30,7 +30,17 @@ environment leaves this list, and R1.1, together.
 - **Folders** (R2.9, R5.8, A2.7): folder rows after scans, moves and deletes, up through the
   ancestors; the mosaic chosen for trees of every shape (1 to 5 subfolders, nested mosaics, no art
   anywhere); a selection of folders resolving to the songs beneath them.
-- **The change history** (R4.9): every kind of save undone and redone.
+- **The change history** (R4.9): every kind of save undone and redone, on one computer and from
+  another.
+- **Playback** (R7.6, R19, A4): joins between generated songs of known length are sample-exact,
+  across sample rates and kinds, with MP3, AAC and Opus padding trimmed; seeking lands on the
+  sample; the equalizer's response at each band matches its slider; nothing clips.
+- **The root's own files** (A2.8): two computers writing `plays.json`, `ignored.json` and
+  `ratings.json` at once lose nothing; a read-only `.musikata` keeps everything in the index.
+- **Encodings** (R4.10): tags in each candidate encoding detected and fixed, and real Latin-1
+  (French, German) never flagged.
+- **Duplicates** (R2.12): exact and likely copies found, the best copy proposed, plays, ratings
+  and playlists moved to it.
 - **A missing music root** (R2.10): a root that vanishes, half vanishes or comes back, with the
   library kept and nothing removed without asking.
 - **Accessibility** (R18): every QML control has an accessible name and role; every text token
@@ -54,7 +64,8 @@ positions and signals, and online lookups use recorded answers (A7.8). Only
 | Ubuntu 22.04 container | 2 | the AppImage build, on the oldest glibc it supports |
 | Linux Mint 22.3, LMDE 7, Ubuntu 26.04 | 2, 3 | the AppImage started on X11 and Wayland, MPRIS seen by the desktop |
 | Windows 10 22H2 and Windows 11 VMs | 2, 3 | the installer, the suite on Windows, the tour, uninstall |
-| macOS 14 (CI runner, and a real Mac) | 2, 3 | the app bundle, the suite on macOS, notarization checked |
+| macOS 14 or newer, Apple silicon (CI runner, and a real Mac) | 2, 3 | the arm64 bundle, the suite on macOS |
+| macOS, Intel (the owner's Mac, on the newest macOS it runs) | 3 | the x86_64 bundle installed from the tap and used by hand |
 
 ## CI
 

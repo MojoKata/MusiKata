@@ -1,11 +1,11 @@
 # A5. Visualizations
 
-A5.1. **Waveforms** (R11.1). A worker decodes the song with `QAudioDecoder` to mono floats and
-reduces it to 2,000 peak pairs (the largest and smallest sample in each slice), whatever the
-song's length: enough for a 1920-pixel-wide view at two bars per pixel or fewer. The peaks are
-stored as a 16-bit blob (8 KB a song) in the `waveform` table, keyed by the audio hash (A2.3), so
-retagging or moving a song keeps its waveform. Views draw as many bars as fit and take the
-largest peak of the slices under each bar.
+A5.1. **Waveforms** (R11.1). A worker decodes the song with PyAV (A4.1) to mono floats and reduces
+it to 2,000 peak pairs (the largest and smallest sample in each slice), whatever the song's length:
+enough for a 1920-pixel-wide view at two bars per pixel or fewer. The peaks are stored as a 16-bit
+blob (8 KB a song) in the `waveform` table, keyed by the audio hash (A2.3), so retagging or moving a
+song keeps its waveform. Views draw as many bars as fit and take the largest peak of the slices
+under each bar.
 
 A5.2. **The spectrum** (R11.3). Each frame takes the newest 4,096 samples from the ring buffer of
 A4.3, mixes them to mono, applies a Hann window and runs NumPy's `rfft`. The magnitudes are gathered
