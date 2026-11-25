@@ -21,7 +21,8 @@
 # --- this repository ----------------------------------------------------------------------------
 REPO=MojoKata/MusiKata
 CHECKS=""                       # the status checks the branch ruleset requires ("": no CI):
-                                # "ci" once CI exists and has passed once (genesis.md, 4)
+                                # "ci" from the commit that adds CI: GitHub offers the check only
+                                # once it has passed, and publish.sh setup adds it then (genesis.md, 4)
 RELEASE=scripts/publish.sh      # the release's own settings, set and checked by that script ("": none):
                                 # the tags ruleset, the release environment, immutable releases and
                                 # the field-test label (docs/process/genesis.md)
