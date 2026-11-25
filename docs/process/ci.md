@@ -37,7 +37,7 @@ counts) and coverage.py's own `coverage.json`.
 ## The Pages site
 
 The repository's GitHub Pages site, https://mojokata.github.io/MusiKata/, is built by
-`scripts/coverage_site.py` and published on each push to `main`. It has three pages:
+`scripts/coverage_site.py` and published on each push to `master`. It has three pages:
 
 - **Coverage** (`index.html`, the site's front page): the `coverage` job's figures by area against
   their floors, each area's files linked to their line-by-line report (`report/`), and each area's
@@ -54,26 +54,27 @@ The repository's GitHub Pages site, https://mojokata.github.io/MusiKata/, is bui
   "baseline, changed since" when a module has changed since that record or isn't in it; and the open
   issues labelled `gap` or `question` that aren't findings. Only an issue's number, title, labels,
   state and severity reach the page; its body text doesn't.
-- **Screenshots** (`screenshots/index.html`): the Linux tour (A1.6), `main`'s under
-  `screenshots/main/`, replaced by each push, and each release's under `screenshots/<version>/`,
+- **Screenshots** (`screenshots/index.html`): the Linux tour (A1.6), `master`'s under
+  `screenshots/master/`, replaced by each push, and each release's under `screenshots/<version>/`,
   kept; all listed in `screenshots/index.json`. `screenshots/latest/` is a copy of the newest
-  release's tour, or `main`'s while there is no release, made afresh by each build.
+  release's tour, or `master`'s while there is no release, made afresh by each build.
 
 The `site` job builds it on every run, a pull request's included, after `coverage` and the tour: it
 downloads their artifacts, brings in each published release's tour the site doesn't hold yet
 (`coverage_site.py release-tours DIR`, from CI's passing run of its tag, while GitHub keeps that
 artifact, 90 days), reads the issues with the job's token, runs `scripts/public_text.py check` on
 the pages, and keeps the site as the `site` artifact, so a pull request's site can be downloaded and
-opened (`gh run download RUN -n site`). The `pages` job runs on a push to `main` only, after `ci`
+opened (`gh run download RUN -n site`). The `pages` job runs on a push to `master` only, after `ci`
 and `site`: it alone may deploy, to the `github-pages` environment, which takes deployments from
-`main` alone.
+`master` alone.
 
 A deployment replaces the whole site, so what the site keeps across pushes lives on the site itself:
 each build reads `history.json` and `screenshots/index.json` (and the files it lists) back from the
 published site and carries them into the new one, with this commit's point added last. A site that
 answers with neither file starts afresh only while there is no site at all; any other failure to
 read them, or the issues, fails the job, so a bad moment never starts the history over. A run on
-`main` never cancels another that is running, so each build reads what the one before it published.
+`master` never cancels another that is running, so each build reads what the one before it
+published.
 
 Built by hand, it is a preview of what publishing a commit would show, from a `coverage` artifact:
 

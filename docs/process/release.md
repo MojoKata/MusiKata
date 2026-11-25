@@ -14,7 +14,7 @@ fixed by a new version, never in place.
 ```
  1. You → agent   "Prepare release 0.2.0"       the release pull request: tests, pins, version,
                                                  state, notes, record      (release-agent.md, 1)
- 2. You           merge it; wait for CI on main
+ 2. You           merge it; wait for CI on master
  3. You           scripts/publish.sh release     tag → CI builds → you approve the signing →
                                                  the draft, checked → the field-test issues
  4. You           the field test, each environment: its sub-issue's checklist; close it
@@ -28,7 +28,7 @@ Each command checks that the step before it is done, and refuses otherwise, sayi
 
 | Command | Refuses until |
 |---|---|
-| `publish.sh release` | you're on `main`, up to date, with nothing changed; `v<version>` isn't tagged yet; the release pull request is merged: `docs/releases/<version>.md` has its notes and every step ticked, the state snapshot is there, and `DEVELOP.md`'s Status heading names the version; CI has passed on `main` at that commit |
+| `publish.sh release` | you're on `master`, up to date, with nothing changed; `v<version>` isn't tagged yet; the release pull request is merged: `docs/releases/<version>.md` has its notes and every step ticked, the state snapshot is there, and `DEVELOP.md`'s Status heading names the version; CI has passed on `master` at that commit |
 | `publish.sh publish` | the draft is there, and verifies; the release's field-test issues are there, and every one is closed |
 | `publish.sh cask` | the release is published, and the tap's clone has no changes of its own |
 
@@ -46,11 +46,11 @@ request's CI has passed.
 
 ## 2. Merge the release pull request
 
-Read the record in the pull request, then squash-merge it as usual. Merging starts CI on `main`;
+Read the record in the pull request, then squash-merge it as usual. Merging starts CI on `master`;
 `release` refuses until that run has passed. To see it:
 
 ```sh
-gh run list --repo MojoKata/MusiKata --branch main --limit 1      # "completed  success"
+gh run list --repo MojoKata/MusiKata --branch master --limit 1      # "completed  success"
 ```
 
 ## 3. Tag, build and sign: `publish.sh release`
@@ -60,7 +60,7 @@ You need, once: `git`, `gpg` 2.2 or newer, `python3`, and `gh` logged in as an a
 the release key: CI signs with its own copy of the signing subkey.
 
 ```sh
-git checkout main && git pull
+git checkout master && git pull
 scripts/publish.sh release
 ```
 
@@ -175,7 +175,7 @@ commands, `setup`, `check` and the `key-` ones, are in [`genesis.md`](genesis.md
 
 | Command | What it does |
 |---|---|
-| `release` | Checks what steps 1 and 2 leave (the table under "The flow"), tags `main`'s tip `v<version>` and pushes it, waits for CI's run of the tag, shows the SHA-256s of the four builds, approves the signing, waits for the draft release and verifies it, checks that the draft holds the builds whose SHA-256s you approved, and opens the field-test issues. It asks before the tag, the signing and the issues. |
+| `release` | Checks what steps 1 and 2 leave (the table under "The flow"), tags `master`'s tip `v<version>` and pushes it, waits for CI's run of the tag, shows the SHA-256s of the four builds, approves the signing, waits for the draft release and verifies it, checks that the draft holds the builds whose SHA-256s you approved, and opens the field-test issues. It asks before the tag, the signing and the issues. |
 | `resume [VERSION]` | The same from "waits for CI's run", for a tag already pushed: after an interruption, or after a failed run is run again. |
 | `verify [VERSION]` | Downloads the release, or its draft, into `build/publish/v<version>/` and checks it: exactly nine files (the four builds, a `.sha256` for each, the AppImage's `.asc`), each build against its `.sha256`, and the AppImage's signature by the release key (`packaging/musikata-release-key.asc`, matched by fingerprint). |
 | `field-test [VERSION]` | Opens the release's field-test issue and, under it, one for each environment with its checklist (`scripts/field_test.py`). `release` does this itself; on its own it's for when you answered `n` there. |
@@ -183,7 +183,7 @@ commands, `setup`, `check` and the `key-` ones, are in [`genesis.md`](genesis.md
 | `cask TAP [VERSION]` | In `TAP`, a clone of the tap, sets `Casks/musikata.rb`'s version and its two SHA-256s from the published release, and commits it on the branch `musikata-<version>` after asking, for the agent's pull request on the tap. |
 
 `.github/workflows/ci.yml` runs tier 1 and the four builds on every pull request and every push to
-`main`. On a `v*` tag it also signs the builds (after your approval, in the `release` environment)
+`master`. On a `v*` tag it also signs the builds (after your approval, in the `release` environment)
 and makes a draft release with the nine files and the record's notes. Its build jobs are named
 `appimage`, `windows`, `macos-arm64` and `macos-x86_64`, and each posts the SHA-256 of what it built
 as a notice titled `sha256`, which `release` shows before the signing. What it downloads is pinned

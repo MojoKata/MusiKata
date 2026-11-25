@@ -70,7 +70,8 @@ A claim may reproduce with:
 - the fast set: `.venv/bin/python -m pytest -m "not slow"` (under 30 seconds);
 - tier 1 in its container, the release's Python and PySide6: `scripts/test-tier1.sh -k <test name>`,
   which takes minutes, so an attended review asks first;
-- CI's artifacts of the latest `main` run: the coverage report, the tour and the mutation baseline.
+- CI's artifacts of the latest `master` run: the coverage report, the tour and the mutation
+  baseline.
 
 A review never starts the Windows or desktop VMs' runs, `scripts/test-clock.sh`,
 `scripts/test-mutate.sh` or `scripts/mutate.py`, the builds (`scripts/build-*.sh`),
@@ -97,7 +98,7 @@ ask for it, or a play count, rating or past save lost, is at least Med (Principl
 
 ## Branch and labels
 
-The target branch is `main`. The labels are the skills' defaults: `question` is a question issue,
+The target branch is `master`. The labels are the skills' defaults: `question` is a question issue,
 `refine` a finding that waits on the owner's decision, and `dismiss` a finding the work showed to be
 no defect. `review.json` sets no `labels` and no `kind_prefix`: an issue carries only the labels the
 skill gives it, and a finding's kind is in its body only.

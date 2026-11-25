@@ -12,8 +12,8 @@ with every step of its record ticked, so none of them can be skipped.
 
 The owner says: **"Prepare release `<version>`"**. `<last>` is the version released before it.
 
-1. **A branch** from `MojoKata/MusiKata`'s `main`, up to date: `prepare-<version>`. It is only the
-   pull request's branch, gone once it merges; `main` stays the only line.
+1. **A branch** from `MojoKata/MusiKata`'s `master`, up to date: `prepare-<version>`. It is only the
+   pull request's branch, gone once it merges; `master` stays the only line.
 2. **`tier1`:** `scripts/test-tier1.sh` passes, and `scripts/test-clock.sh` too (tier 1 at several
    times of day and time zones, [`testing.md`](testing.md)). CI runs tier 1 again on the pull
    request.
@@ -84,7 +84,7 @@ The owner says: **"Release `<version>` stopped"**, with what `publish.sh` printe
 3. If it is the code's, open an issue for it, with the log. Fix it in a pull request, then tell the
    owner it needs a new version (section 1 again). A tag isn't moved or deleted to fix a release:
    the tags ruleset leaves that to an admin, and the owner decides.
-4. If `release` refused before tagging, its message says why: CI failed on `main`, a step isn't
+4. If `release` refused before tagging, its message says why: CI failed on `master`, a step isn't
    ticked, the notes or the snapshot are missing. Fix that in a pull request.
 
 ## 3. Wrap up a release

@@ -141,7 +141,7 @@ def test_check_says_it_cant_read_what_github_refuses_and_goes_on(tmp_path):
         if name in (
             "release environment: deploys",
             "release environment: secrets",
-        ) or name.startswith(("main ruleset:", "tags ruleset:")):
+        ) or name.startswith(("master ruleset:", "tags ruleset:")):
             continue  # read only once the environment or the ruleset is there
         assert f"FAIL  {name}: (can't read) (want" in r.stderr, name
 
@@ -395,13 +395,13 @@ def test_resume_waits_for_the_run_to_show_and_then_to_finish(tmp_path, polls, ru
 
 
 GATE_GH = r"""#!/usr/bin/env python3
-# gh for publish.sh release's and publish's gates, without GitHub. FAKE_CI: CI's run on main at the
-# commit ("completed success", "in_progress ", "completed failure" or nothing); FAKE_FT_ALL and
-# FAKE_FT_OPEN: the release's field-test issues; anything about the tag's run fails, which ends
-# release.
+# gh for publish.sh release's and publish's gates, without GitHub. FAKE_CI: CI's run on master at
+# the commit ("completed success", "in_progress ", "completed failure" or nothing); FAKE_FT_ALL
+# and FAKE_FT_OPEN: the release's field-test issues; anything about the tag's run fails, which
+# ends release.
 import os, sys
 a = sys.argv[1:]
-if a[:2] == ["run", "list"] and "main" in a:
+if a[:2] == ["run", "list"] and "master" in a:
     print(os.environ.get("FAKE_CI", ""), end="")
 elif a[:2] == ["release", "view"]:
     print("true")
@@ -441,8 +441,8 @@ def _gate_repo(tmp_path, record=RECORD, state=True, status="0.9.9: Linux, Window
     gh = work / "bin" / "gh"
     gh.write_text(GATE_GH)
     gh.chmod(0o755)
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
-    _git("init", "-q", "-b", "main", cwd=work)
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "master", str(bare)], check=True)
+    _git("init", "-q", "-b", "master", cwd=work)
     for k, v in (
         ("user.name", "Test"),
         ("user.email", "test@example.org"),
@@ -453,7 +453,7 @@ def _gate_repo(tmp_path, record=RECORD, state=True, status="0.9.9: Linux, Window
     _git("add", "-A", cwd=work)
     _git("commit", "-q", "-m", "0.9.9", cwd=work)
     _git("remote", "add", "origin", str(bare), cwd=work)
-    _git("push", "-q", "origin", "main", cwd=work)
+    _git("push", "-q", "origin", "master", cwd=work)
     return work, bare
 
 
@@ -484,15 +484,15 @@ def _gate(work, *args, **env):
         ("no notes", "has no Notes section"),
         ("no state", "tests/data/state/0.9.9/ is missing"),
         ("DEVELOP", "DEVELOP.md's Status heading doesn't name 0.9.9"),
-        ("CI not run", "CI hasn't run on main"),
-        ("CI running", "CI is still running on main"),
-        ("CI failed", "CI failed on main"),
+        ("CI not run", "CI hasn't run on master"),
+        ("CI running", "CI is still running on master"),
+        ("CI failed", "CI failed on master"),
     ],
 )
 def test_release_tags_nothing_before_the_release_pull_request_is_merged_and_ci_passed_on_it(
     tmp_path, case, says
 ):
-    """release tags only main's tip once the release pull request is merged with every step of its
+    """release tags only master's tip once the release pull request is merged with every step of its
     record ticked, the notes written, the state frozen, DEVELOP.md naming the version, and CI
     passed."""
     repo = {
@@ -517,7 +517,7 @@ def test_release_tags_nothing_before_the_release_pull_request_is_merged_and_ci_p
 def test_release_tags_once_the_release_pull_request_is_merged_and_ci_passed_on_it(tmp_path):
     work, bare = _gate_repo(tmp_path)
     r = _gate(work, "release", FAKE_CI="completed success\n")
-    assert "CI passed on main at" in r.stderr, r.stderr
+    assert "CI passed on master at" in r.stderr, r.stderr
     tags = subprocess.run(["git", "tag"], cwd=bare, capture_output=True, text=True).stdout
     assert tags == "v0.9.9\n", r.stderr
 
