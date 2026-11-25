@@ -31,10 +31,11 @@ environment leaves this list, and R1.1, together.
   after it as the piece suits.
 - **Test names say the behaviour,** as a sentence: `test_a_seek_lands_on_the_exact_sample`.
 - **The requirements trace.** `docs/requirements/trace.md` gives each sentence of a traced section a
-  row naming the tests that show it, `tier 3:` and the check when only a person can show it, or
-  `statement` when it promises nothing a test could show. A test fails when a sentence has no row, a
-  row no longer matches its sentence, or a named test doesn't exist. A section joins the trace when
-  its code is built, and every section of the first release (`DEVELOP.md`) is in it by that release.
+  row naming the tests that show it, `tier 3:` and the check when only a person can show it, `later:
+  #n` when it waits on a `future` issue, or `statement` when it promises nothing a test could show.
+  A test fails when a sentence has no row, a row no longer matches its sentence, or a named test
+  doesn't exist. A section joins the trace when its code is built, and every section of the first
+  release (`DEVELOP.md`) is in it by that release.
 - **Coverage.** Tier 1 runs under coverage.py, lines and branches, the worker processes included
   (`concurrency = ["thread", "multiprocessing"]`). Each area of `scripts/areas.py` (the core's
   `library`, `tags`, `files`, `playback`, `analysis` and `online`, the `app`, the `scripts`) has a
