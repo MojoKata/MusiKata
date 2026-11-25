@@ -10,7 +10,7 @@ free software under the GPL, version 3 or later ([`LICENSE`](LICENSE)).
 
 | Area | State |
 |---|---|
-| Requirements R1 to R19, architecture A1 to A7, process | Written; one open question, [Q#13](https://github.com/MojoKata/MusiKata/issues/13) |
+| Requirements R1 to R19, architecture A1 to A7, process | Written; no open questions |
 | Mockups of every screen of the first release | Drawn ([`docs/mockups/`](docs/mockups/README.md)) |
 | Code, tests, builds | Not started |
 
@@ -22,7 +22,7 @@ commits to `docs/requirements/`; this list changes with them.
 | | |
 |---|---|
 | **Platforms** | Linux (AppImage), Windows 10 22H2 and 11 x64 (installer), macOS 14 and newer as two apps, Apple silicon and Intel, ad-hoc signed, from MusiKata's Homebrew tap and as `.dmg`s (R1) |
-| **In** | R1 to R15, R18 and R19 whole: gapless playback through MusiKata's own audio pipeline, the equalizer with presets and presets by genre, duplicates, **Fix encoding…**, updates when asked, a root per run |
+| **In** | R1 to R15, R18 and R19 whole: gapless playback through MusiKata's own audio pipeline, the parametric and graphic equalizer with presets, presets by genre and Equalizer APO import, duplicates, **Fix encoding…**, updates when asked, a root per run |
 | **In** | R16 Online lookups: covers and tags, off until turned on |
 | **In** | R17 Lyrics: from `.lrc` files and tags, found online, edited as text |
 

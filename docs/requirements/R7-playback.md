@@ -40,5 +40,6 @@ next, previous and seek from the system:
 - macOS: Now Playing in Control Centre and the media keys.
 
 R7.9. **Play counts.** A song counts as played once 50% of it, or 4 minutes, has played. Play
-counts and the last-played time are kept in the root's `.musikata/plays.json` (R1.5), adding up
-the plays of every computer that plays the root, and the Songs view can sort by them.
+counts and the last-played time are kept in the root's `.musikata/plays/`, a file per computer
+(R1.5); the count shown adds up the plays of every computer that plays the root, and the Songs
+view can sort by it.

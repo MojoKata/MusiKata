@@ -34,9 +34,12 @@ environment leaves this list, and R1.1, together.
   another.
 - **Playback** (R7.6, R19, A4): joins between generated songs of known length are sample-exact,
   across sample rates and kinds, with MP3, AAC and Opus padding trimmed; seeking lands on the
-  sample; the equalizer's response at each band matches its slider; nothing clips.
-- **The root's own files** (A2.8): two computers writing `plays.json`, `ignored.json` and
-  `ratings.json` at once lose nothing; a read-only `.musikata` keeps everything in the index.
+  sample; the equalizer's measured response matches each preset's curve, for every band type;
+  parametric to graphic and back gives the same bands; Equalizer APO files round-trip; nothing
+  clips.
+- **The root's own files** (A2.8): two computers playing at once each write their own play file and
+  the sums add up; `ignored.json` and `ratings.json` written at once lose nothing; a read-only
+  `.musikata` keeps everything in the index.
 - **Encodings** (R4.10): tags in each candidate encoding detected and fixed, and real Latin-1
   (French, German) never flagged.
 - **Duplicates** (R2.12): exact and likely copies found, the best copy proposed, plays, ratings

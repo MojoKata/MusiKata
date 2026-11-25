@@ -76,7 +76,7 @@ These hold everywhere, and a section that seems to break one is wrong.
 | **R16** | [Online lookups](R16-online-lookups.md) | Covers, tags and identifying songs by sound from free online services, when asked; what is sent |
 | **R17** | [Lyrics](R17-lyrics.md) | Where lyrics come from, showing them in step with the song, finding, editing and saving them |
 | **R18** | [Accessibility](R18-accessibility.md) | Screen readers, the keyboard, text size, contrast and colour, motion |
-| **R19** | [Equalizer](R19-equalizer.md) | Ten bands, presets built in and the user's own, presets chosen by genre |
+| **R19** | [Equalizer](R19-equalizer.md) | Parametric and graphic presets, built in and the user's own, chosen by genre; Equalizer APO import |
 
 ## Not in MusiKata
 

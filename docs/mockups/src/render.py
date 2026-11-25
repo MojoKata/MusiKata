@@ -2185,33 +2185,147 @@ def n04_now_lyrics(p):
 
 # ------------------------------------------------------------------ the equalizer (R19), Needs attention (R2.8), encodings (R4.10)
 EQ_BANDS = ("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
-EQ_ELECTRONIC = (5.5, 4.5, 2.0, 0.0, -1.5, -0.5, 1.0, 2.5, 3.5, 4.0)
+EQ_CAR = (4.0, 3.5, 1.5, 0.0, -1.0, 0.0, 1.0, 2.0, 2.5, 2.0)
+# The built-in Electronic preset, parametric (R19.3): type, frequency, gain, Q
+EQ_PARAM = (("Low shelf", 80, 5.0, 0.7), ("Bell", 250, -1.5, 1.0), ("Bell", 1200, -1.0, 1.4),
+            ("Bell", 4000, 2.5, 1.2), ("High shelf", 9000, 3.5, 0.7))
 
 
-def n05_equalizer(p):
+def biquad_db(kind, f0, gain, q, f, fs=48000.0):
+    """The band's response in dB at f (the Audio EQ Cookbook's biquads, as A4.4 builds them)."""
+    a = 10 ** (gain / 40)
+    w0 = 2 * math.pi * f0 / fs
+    cw, sw = math.cos(w0), math.sin(w0)
+    al = sw / (2 * q)
+    if kind == "Bell":
+        b, aa = (1 + al * a, -2 * cw, 1 - al * a), (1 + al / a, -2 * cw, 1 - al / a)
+    elif kind in ("Low shelf", "High shelf"):
+        sa = 2 * math.sqrt(a) * al
+        s = 1 if kind == "Low shelf" else -1
+        b = (a * ((a + 1) - s * (a - 1) * cw + sa), s * 2 * a * ((a - 1) - s * (a + 1) * cw),
+             a * ((a + 1) - s * (a - 1) * cw - sa))
+        aa = ((a + 1) + s * (a - 1) * cw + sa, -s * 2 * ((a - 1) + s * (a + 1) * cw), (a + 1) + s * (a - 1) * cw - sa)
+    w = 2 * math.pi * f / fs
+    z1, z2 = complex(math.cos(-w), math.sin(-w)), complex(math.cos(-2 * w), math.sin(-2 * w))
+    h = (b[0] + b[1] * z1 + b[2] * z2) / (aa[0] + aa[1] * z1 + aa[2] * z2)
+    return 20 * math.log10(max(abs(h), 1e-9))
+
+
+def seg_ctl(p, x, y, opts, on, h=34):
+    sw = sum(tw(o, 12, 600) + 24 for o in opts) + 6
+    rect(p, x, y, sw, h, 9, "input", "border")
+    xx = x + 3
+    for i, o in enumerate(opts):
+        ow = tw(o, 12, 600) + 24
+        if i == on:
+            rect(p, xx, y + 3, ow, h - 6, 7, "hover")
+        text(p, xx, y + 3, o, 12, "text" if i == on else "muted", 600, w=ow, h=h - 6, align="center")
+        xx += ow
+    return sw
+
+
+def eq_panel(p, pw, ph, preset, note, note_fg, kind, actions):
+    """The Equalizer panel's frame, preset row and Choose by genre (R19.2, R19.4); returns its box."""
     n01_now_waveform(p)
     rect(p, 0, 0, W, H - BAR_H, 0, col("scrim", 0.45))
     np_top(p, 0, eq=True)
-    pw, ph = 760, 456
-    px, py = (W - pw) / 2, 64
+    px, py = (W - pw) / 2, 56
     shadow(p, px, py, pw, ph, 16, 28)
     rect(p, px, py, pw, ph, 16, "surface", "borderStrong")
     ix = px + 28
     text(p, ix, py + 20, "Equalizer", 18, "text", 700)
     toggle(p, ix + 112, py + 24, True)
     icon(p, "close", px + pw - 28, py + 33, 14, "muted")
-    # the preset picker and its actions
-    rect(p, ix, py + 62, 300, 36, 10, "input", "border")
-    icon(p, "eq", ix + 20, py + 80, 15, "accentHi")
-    text(p, ix + 38, py + 62, "Electronic", 13, "text", 600, h=36)
-    chip(p, ix + 38 + tw("Electronic", 13, 600) + 10, py + 69, "chosen by genre", "accentHi", "accentSoft", 22, size=10.5)
-    icon(p, "chev_down", ix + 284, py + 80, 14, "muted")
-    bx = ix + 316
-    bx += button(p, bx, py + 63, "Duplicate", "ghost", w=104, h=34, size=12.5) + 8
-    bx += button(p, bx, py + 63, "Save as new…", "ghost", "plus", w=140, h=34, size=12.5) + 8
-    text(p, bx + 6, py + 63, "Built in: can't be changed", 11.5, "faint", h=34, w=px + pw - 24 - bx)
+    rect(p, ix, py + 62, 262, 34, 10, "input", "border")
+    icon(p, "eq", ix + 20, py + 79, 15, "accentHi")
+    text(p, ix + 38, py + 62, preset, 13, "text", 600, h=34)
+    chip(p, ix + 38 + tw(preset, 13, 600) + 8, py + 68, note, note_fg, "accentSoft", 22, size=10.5)
+    icon(p, "chev_down", ix + 246, py + 79, 14, "muted")
+    seg_ctl(p, ix + 274, py + 62, ["Parametric", "Graphic"], kind)
+    bx = px + pw - 28
+    for lab, w in reversed(actions):
+        bx -= w
+        button(p, bx, py + 62, lab, "ghost", w=w, h=34, size=12.5)
+        bx -= 6
+    fy = py + ph - 56
+    line(p, px, fy - 10, px + pw, fy - 10, "border")
+    toggle(p, ix, fy + 8, True)
+    text(p, ix + 46, fy, "Choose by genre", 13, "text", 600, h=36)
+    return px, py, ix, fy
+
+
+def n05_equalizer(p):
+    pw, ph = 820, 528
+    px, py, ix, fy = eq_panel(p, pw, ph, "Electronic", "chosen by genre", "accentHi", 0,
+                              [("Duplicate", 96), ("Import…", 88), ("Export…", 88)])
+    text(p, ix + 46 + tw("Choose by genre", 13, 600) + 12, fy, "Signal Fires is Electronic, so it plays with Electronic",
+         12, "muted", h=36, w=380)
+    button(p, px + pw - 28 - 120, fy, "Genres…", "ghost", "genre", w=120, h=34, size=12.5)
+    # the graph: 20 Hz to 20 kHz across, −12 to +12 dB up
+    gx, gy, gw, gh = ix + 40, py + 112, pw - 56 - 40, 212
+    rect(p, gx, gy, gw, gh, 10, "input", "border")
+    def xf(f):
+        return gx + 10 + (math.log10(f) - math.log10(20)) / 3 * (gw - 20)
+    def yd(db):
+        return gy + gh / 2 - db / 12 * (gh / 2 - 12)
+    for db in (12, 6, 0, -6, -12):
+        line(p, gx + 1, yd(db), gx + gw - 1, yd(db), "borderStrong" if db == 0 else "border")
+        lab = ("+" if db > 0 else "−" if db < 0 else "") + str(abs(db))
+        text(p, ix - 6, yd(db) - 9, lab, 10.5, "faint", w=40, h=18, align="right", mono=True)
+    for f, lab in ((20, "20 Hz"), (50, "50"), (100, "100"), (200, "200"), (500, "500"), (1000, "1k"), (2000, "2k"),
+                   (5000, "5k"), (10000, "10k"), (20000, "20k")):
+        if 20 < f < 20000:
+            line(p, xf(f), gy + 1, xf(f), gy + gh - 1, "border")
+        text(p, xf(f) - 24, gy + gh + 4, lab, 10.5, "faint", w=48, align="center", mono=True)
+    fs = [20 * 1000 ** (i / 240) for i in range(241)]
+    # the selected band's own shape, then the sum of all of them
+    sel = 3
+    kind, f0, g0, q0 = EQ_PARAM[sel]
+    own = QPainterPath(QPointF(xf(fs[0]), yd(biquad_db(kind, f0, g0, q0, fs[0]))))
+    for f in fs[1:]:
+        own.lineTo(xf(f), yd(biquad_db(kind, f0, g0, q0, f)))
+    p.setPen(QPen(col("accentHi", 0.55), 1.3, Qt.DashLine)); p.setBrush(Qt.NoBrush); p.drawPath(own)
+    pts = [QPointF(xf(f), yd(sum(biquad_db(k, a, g, q, f) for k, a, g, q in EQ_PARAM))) for f in fs]
+    path_ = QPainterPath(pts[0])
+    for pt in pts[1:]:
+        path_.lineTo(pt)
+    fill = QPainterPath(path_); fill.lineTo(xf(fs[-1]), yd(0)); fill.lineTo(xf(fs[0]), yd(0)); fill.closeSubpath()
+    p.setPen(Qt.NoPen); p.setBrush(col("accent", 0.12)); p.drawPath(fill)
+    p.setPen(QPen(grad(gx, 0, gx + gw, 0, [(0, "cyan"), (0.5, "accent"), (1, "pink")]), 2.4)); p.setBrush(Qt.NoBrush)
+    p.drawPath(path_)
+    for i, (k, f, g, q) in enumerate(EQ_PARAM):
+        hx, hy = xf(f), yd(biquad_db(k, f, g, q, f))   # on the band's own curve: a shelf's is at half its gain
+        on = i == sel
+        if on:
+            rect(p, hx - 15, hy - 15, 30, 30, 15, col("accent", 0.25))
+        rect(p, hx - 10, hy - 10, 20, 20, 10, "accent" if on else "surface", "accentHi" if on else "text", 1.6)
+        text(p, hx - 10, hy - 10, str(i + 1), 11, "#ffffff" if on else "text", 700, w=20, h=20, align="center")
+    # the selected band's fields, and the preamp
+    fy0 = gy + gh + 30
+    fx = ix
+    text(p, fx, fy0 + 20, "Band 4", 13, "text", 700, h=34)
+    fx += 70
+    field(p, fx, fy0, 132, "Type", "Bell"); icon(p, "chev_down", fx + 116, fy0 + 37, 13, "muted"); fx += 144
+    field(p, fx, fy0, 112, "Frequency", "4.00 kHz", mono=True); fx += 124
+    field(p, fx, fy0, 100, "Gain", "+2.5 dB", mono=True); fx += 112
+    field(p, fx, fy0, 80, "Q", "1.20", mono=True); fx += 92
+    rect(p, fx, fy0 + 20, 34, 34, 8, "surface", "borderStrong")
+    icon(p, "trash", fx + 17, fy0 + 37, 15, "muted")
+    line(p, px + pw - 28 - 112 - 16, fy0 + 8, px + pw - 28 - 112 - 16, fy0 + 54, "border")
+    field(p, px + pw - 28 - 112, fy0, 112, "Preamp", "−5.0 dB", mono=True)
+    text(p, ix, fy0 + 62, "Drag a handle for frequency and gain, scroll for Q. Double-click empty space to add a band, "
+         "a handle for 0 dB.", 11.5, "faint", w=pw - 56)
+
+
+def n06_equalizer_graphic(p):
+    pw, ph = 820, 476
+    px, py, ix, fy = eq_panel(p, pw, ph, "Car", "for this song", "accentHi", 1,
+                              [("Update", 80), ("Rename…", 92), ("Delete", 76)])
+    text(p, ix + 46 + tw("Choose by genre", 13, 600) + 12, fy,
+         "Car was chosen for this song; the next song takes its genre's preset", 12, "muted", h=36, w=420)
+    button(p, px + pw - 28 - 120, fy, "Genres…", "ghost", "genre", w=120, h=34, size=12.5)
     # the sliders: preamp, then ten bands, the curve across them
-    top, bot = py + 140, py + 352
+    top, bot = py + 146, py + 338
     mid = (top + bot) / 2
     def yv(db):
         return mid - db / 12 * (bot - top) / 2
@@ -2227,24 +2341,19 @@ def n05_equalizer(p):
         text(p, x - 30, top - 30, val, 11, "accentHi" if hi else "faint", 600, w=60, align="center", mono=True)
     slider(ix + 60, -2.0, "Preamp", "−2.0")
     xs = [ix + 132 + i * ((pw - 56 - 150) / 9) for i in range(10)]
-    pts = [QPointF(x, yv(v)) for x, v in zip(xs, EQ_ELECTRONIC)]
+    pts = [QPointF(x, yv(v)) for x, v in zip(xs, EQ_CAR)]
     path_ = QPainterPath(pts[0])
     for a, b in zip(pts, pts[1:]):
         mx = (a.x() + b.x()) / 2
         path_.cubicTo(QPointF(mx, a.y()), QPointF(mx, b.y()), b)
     fill = QPainterPath(path_); fill.lineTo(xs[-1], yv(0)); fill.lineTo(xs[0], yv(0)); fill.closeSubpath()
     p.setPen(Qt.NoPen); p.setBrush(col("accent", 0.10)); p.drawPath(fill)
-    for x, v, lab in zip(xs, EQ_ELECTRONIC, EQ_BANDS):
+    for x, v, lab in zip(xs, EQ_CAR, EQ_BANDS):
         slider(x, v, lab, f"{v:+.1f}".replace("-", "−"), hi=lab == "8k")
     p.setPen(QPen(grad(xs[0], 0, xs[-1], 0, [(0, "cyan"), (0.5, "accent"), (1, "pink")]), 2.4)); p.setBrush(Qt.NoBrush)
     p.drawPath(path_)
-    # by genre
-    fy = py + ph - 58
-    line(p, px, fy - 10, px + pw, fy - 10, "border")
-    toggle(p, ix, fy + 8, True)
-    text(p, ix + 46, fy, "Choose by genre", 13, "text", 600, h=36)
-    text(p, ix + 46 + tw("Choose by genre", 13, 600) + 12, fy, "Signal Fires is Electronic, so it plays with Electronic", 12, "muted", h=36, w=380)
-    button(p, px + pw - 28 - 120, fy, "Genres…", "ghost", "genre", w=120, h=34, size=12.5)
+    text(p, xs[0] - 30, bot + 28, "Hz", 10.5, "faint", w=60, align="center")
+    text(p, ix, bot + 52, "Double-click a slider to set it back to 0 dB.", 11.5, "faint", w=pw - 56)
 
 
 def l09_needs_attention(p):
@@ -2464,6 +2573,7 @@ SCREENS = {
     "N03-now-playing-queue": n03_now_queue,
     "N04-now-playing-lyrics": n04_now_lyrics,
     "N05-equalizer": n05_equalizer,
+    "N06-equalizer-graphic": n06_equalizer_graphic,
     "S01-settings-tags": s01_settings,
     "M01-mini-players": m01_mini_players,
     "M02-mini-player-menu": m02_mini_player_menu,

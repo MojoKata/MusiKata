@@ -12,7 +12,7 @@ folder (A2.8). Its tables, in outline:
 | `folder` | One row per folder under the root that has audio beneath it: path, parent, counts of subfolders and songs (direct and beneath), its own cover's source, the mosaic's sources, the worst path-match state beneath it (A2.7) |
 | `playlist` | One row per playlist file: path, modification time, smart rule (R8.9) |
 | `playlist_entry` | Playlist, position, the path as written, the song it resolves to (or none: missing, R8.7) |
-| `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/plays.json` (A2.8) |
+| `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/plays/`, a file per computer (A2.8) |
 | `change` / `change_file` | The change history (R4.9), indexed from `.musikata/history/` (A3.5) |
 | `waveform` | Song, the audio's hash, the peaks as a blob (A5.1) |
 | `ignored` | Needs attention entries the user dismissed, with the file's modification time (R2.8), from `.musikata/ignored.json` |
@@ -77,13 +77,15 @@ apart instead:
 
 - Each computer has an id, made on its first start and kept in the shared settings, with its name
   for display.
-- `plays.json` has a section per computer. Before writing, MusiKata reads the file again, replaces
-  only its own section, and writes it back; the play count shown is the sum of the sections. If
-  two computers write at the same moment and one section is lost, its computer writes it again
-  with its next play, since it keeps its own counts in the index.
-- `ignored.json` and `ratings.json` are merged the same way, entry by entry, the newest entry
-  winning.
+- Play counts are a file per computer, `plays/<computer id>.json`, written whole by that computer
+  alone from the counts it keeps in the index; the count shown is the sum of the files. No two
+  computers ever write the same file, so plays are never lost or counted twice, and a root kept in
+  sync by Dropbox, OneDrive or Syncthing gets no "conflicted copy" files from them.
+- `ignored.json` and `ratings.json` change seldom and are merged entry by entry: before writing,
+  MusiKata reads the file again, and the newest entry wins.
 - The change history is one file per entry (A3.5), never rewritten, so there is nothing to merge.
-- A move made by MusiKata (R12) rewrites the moved songs' paths in every section it reads.
+- A move made by MusiKata (R12) is an entry in the change history. Each computer rewrites the
+  moved songs' paths in its own files, and reads other computers' play files through the moves
+  they haven't caught up with yet.
 - When `.musikata` can't be written (R1.5.2), the same data is kept in the index only, and the
   root's settings are read and never written.

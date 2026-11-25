@@ -38,14 +38,14 @@ R1.4. Distribution:
 R1.5. **Local data,** in three places:
 
 - **The root's own folder,** `<root>/.musikata/`: what belongs to the library and goes with it to
-  any computer: the root's settings (`settings.json`), play counts (`plays.json`, R7.9), ratings
-  that can't go in a file (`ratings.json`, R10.3), Needs attention dismissals (`ignored.json`,
-  R2.8) and the change history (`history/`, R4.9). Plain files, each replaced whole when it
-  changes, so two computers sharing a root never hold a lock and neither loses the other's
+  any computer: the root's settings (`settings.json`), play counts (`plays/`, a file per computer,
+  R7.9), ratings that can't go in a file (`ratings.json`, R10.3), Needs attention dismissals
+  (`ignored.json`, R2.8) and the change history (`history/`, R4.9). Plain files, each replaced whole
+  when it changes, so two computers sharing a root never hold a lock and neither loses the other's
   changes (A2.8).
-- **The shared settings** (`settings.json`), the same for every root
-  ([Q#13](https://github.com/MojoKata/MusiKata/issues/13)): `~/.musikata/` on Linux,
-  `%USERPROFILE%\.musikata\` on Windows, `~/Library/Application Support/MusiKata/` on macOS.
+- **The shared settings** (`settings.json`), the same for every root (which settings are which:
+  R13.9): `~/.musikata/` on Linux, `%USERPROFILE%\.musikata\` on Windows, `~/Library/Application
+  Support/MusiKata/` on macOS.
 - **This computer's index and caches,** one set per root: the library index, a SQLite database
   (`musikata.db`) whose schema is versioned and migrated at start, and the caches (cover
   thumbnails, waveforms, lookup answers); and the App log (R14) in text files.

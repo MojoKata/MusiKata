@@ -34,11 +34,22 @@ speed (R11.3.1); **Tint views with the cover's colour** (on) (R6.2.2); **Minimiz
 mini player opens** (on) (R15.1); **Text size**, 90 % to 150 % (R18.3); **Reduce motion**: Match
 system (the default), On or Off (R18.5).
 
-R13.9. Settings are kept as `settings.json` in two places (R1.5): the root's own `.musikata/` for
-the settings that belong to the root, and the shared settings folder for those every root shares;
-which settings are which is [Q#13](https://github.com/MojoKata/MusiKata/issues/13). Settings shows
-which a row is. Both files are readable and hand-editable; an unknown or broken value is reported in
-the log and its default used.
+R13.9. Settings are kept as `settings.json` in two places (R1.5), and Settings shows which a row
+is in. Both files are readable and hand-editable; an unknown or broken value is reported in the log
+and its default used.
+
+- **The root's own,** in its `.musikata/`: the settings that decide what is written into the root's
+  files, so the root is written the same way on any computer and when opened with `--root`
+  (R2.1.2): Tags (R13.3), Path patterns and the Organize layout (R13.4), Album art (R13.5),
+  Playlists (R13.6), Lyrics (R13.11), and the folders to skip (R13.2).
+- **Shared,** in the shared settings folder: what belongs to this computer and this person: the
+  configured root and **Watch for changes** (R13.2), Playback and the equalizer (R13.7, R19),
+  Appearance (R13.8), Online (R13.10), and the mini player's layouts and places (R15).
+
+R13.9.1. A root opened for the first time, without a `settings.json` of its own, starts with a
+copy of the configured root's own settings, so a second root (a USB drive, say) is tagged and named
+the way the first one is; with no configured root, it starts with the defaults. The copy is
+written into its `.musikata/` when that can be written (R1.5.2).
 
 R13.10. **Online**: **Allow online lookups** (off) (R16.2), and under it each service with its
 own switch and what it is used for; **Save MusicBrainz ids in tags** (on) (R16.9); **Clear lookup

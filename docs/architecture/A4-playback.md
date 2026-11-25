@@ -43,9 +43,16 @@ A4.4. **Gain and the equalizer.**
 
 - **ReplayGain** (R7.5) is a multiplication by `10^(gain/20)`, limited by the track's peak so it
   never clips.
-- **The equalizer** (R19): the ten band gains are turned into one filter, about 2,000 samples
-  long, rebuilt when a slider moves, and applied block by block with NumPy's FFT (overlap-add). No
-  SciPy is needed, and it costs a few percent of one core.
+- **The equalizer** (R19): each band's response is the standard biquad's of its type (the Audio
+  EQ Cookbook's formulas), a graphic preset's ten sliders being ten one-octave bells. The bands'
+  responses are added on a fine frequency grid, and the sum is turned into one minimum-phase
+  filter (by its cepstrum, so it adds no delay), long enough that the lowest and narrowest band
+  is still right: 16,384 samples at 44.1 and 48 kHz, more at higher rates. It is rebuilt when a
+  band changes, crossfaded over 50 ms, and applied block by block with NumPy's FFT
+  (overlap-add). No SciPy is needed, and it costs a few percent of one core.
+- **Parametric to graphic** (R19.6): the ten slider gains are the least-squares fit of the ten
+  bells to the parametric curve, in dB, sampled every twelfth of an octave and held to ±12 dB; how
+  close they come is the largest difference between the two curves.
 - **Never clipping:** after the preamp, a peak limiter holds the stream under full scale.
 - **Volume** is applied last, so the equalizer works at full resolution.
 
