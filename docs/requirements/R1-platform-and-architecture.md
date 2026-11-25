@@ -12,8 +12,8 @@ AppImage, the Windows installer and the macOS app each carry one, of one version
 with one PySide6, both set in `packaging/versions.env`. Running from source is for development
 only, never a way to install MusiKata, and uses that same version.
 
-R1.2.1. The GUI uses PySide6 (Qt 6 with QML) and the `Basic` Qt Quick Controls style; its look is
-R6.2. Playback is MusiKata's own, so it can be gapless (R7.6) and equalized (R19): songs are
+R1.2.1. The GUI uses PySide6 (Qt 6 with QML) and the `Basic` Qt Quick Controls style, with the look
+of R6.2. Playback is MusiKata's own, so it can be gapless (R7.6) and equalized (R19): songs are
 decoded with PyAV, FFmpeg's Python binding, and played through Qt Multimedia's audio output (A4).
 
 R1.2.2. Tags are read and written with Mutagen (A3), and the visualizations' arithmetic uses NumPy

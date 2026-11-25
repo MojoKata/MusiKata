@@ -10,7 +10,12 @@ written here so this repository stands on its own.
 | [`coding.md`](coding.md) | How code is written: built to be tested in isolation, layout and imports, style and types, errors, threads, QML, dependencies, comments |
 | [`development.md`](development.md) | The repository's layout, running from source, the demo library, the tour |
 | [`testing.md`](testing.md) | The testing principles, the test tiers, what each environment runs, and CI |
-| [`build-and-release.md`](build-and-release.md) | The three builds, pinned inputs, signing and a release's steps |
+| [`ci.md`](ci.md) | CI's measures: coverage by area and its floors, the Pages site (coverage, hardening, screenshots), failure annotations, pin ages |
+| [`build-and-release.md`](build-and-release.md) | The builds, pinned inputs and signing |
+| [`release.md`](release.md) | A release, step by step: the release pull request, `publish.sh`, the field test, publishing, the Homebrew cask |
+| [`release-agent.md`](release-agent.md) | The agent's part of a release: prepare it, look into a stopped one, wrap it up |
+| [`genesis.md`](genesis.md) | The repository's one-time setup: its settings, the release key, CI's settings, and how to check them |
+| [`../REVIEW.md`](../REVIEW.md) | MusiKata's part of a code review: document groups, areas, sensitive code, commands, labels |
 
 ## The flow of a change
 

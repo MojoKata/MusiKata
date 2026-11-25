@@ -34,12 +34,15 @@ environment leaves this list, and R1.1, together.
   row no longer matches its sentence, or a named test doesn't exist. A section joins the trace when
   its code is built, and every section of the first release (`DEVELOP.md`) is in it by that release.
 - **Coverage.** Tier 1 runs under coverage.py, lines and branches, the worker processes included
-  (`concurrency = ["thread", "multiprocessing"]`). Each area (each module of `musikata_core`, and
-  the app) has a floor in `tests/coverage-floor.json` that may only rise: a change that drops an
-  area below its floor fails tier 1, and one that raises it moves the floor up in the same commit.
+  (`concurrency = ["thread", "multiprocessing"]`). Each area of `scripts/areas.py` (the core's
+  `library`, `tags`, `audio` and `online`, the `app`, the `scripts`) has a floor in
+  `tests/coverage-floor.json` that may only rise: a change that drops an area below its floor fails
+  tier 1, and one that raises it moves the floor up in the same change, squashed into one commit
+  ([`ci.md`](ci.md), "Coverage").
 - **Mutation testing.** Once a first pass of the code is written, mutmut sweeps `musikata_core` for
   code the tests run but don't check; each survivor is killed by a new test or noted with the reason
-  it isn't worth one. It isn't run as each piece is written; coverage is the measure until then.
+  it isn't worth one. It isn't run as each piece is written; coverage is the measure until then
+  ("Mutation testing", below).
 - **Gates.** ruff and mypy ([`coding.md`](coding.md)) run in tier 1 beside the tests and the
   coverage floors.
 
@@ -49,7 +52,19 @@ environment leaves this list, and R1.1, together.
 |---|---|---|
 | 1 | every change | ruff, mypy and the whole pytest suite with its coverage floors, in one container on the release's Python and PySide6, offscreen: the gate for every commit, run by CI on every pull request and push to `main` |
 | 2 | before pushing | the tour and its layout check at 100 % and 150 % text (R18.3), the size and speed targets of R1.11 on the demo library built at 50,000 songs, the AppImage built and started, the Windows suite in its VM |
-| 3 | before a release | each platform's build installed and used by hand: playback through real speakers, media keys, drag and drop with the platform's file manager, the mini player moved, resized and kept on top, the platform's screen reader through every view (R18.1), the music root's drive unplugged and plugged back (R2.10), an update from the previous release (R1.9) |
+| 3 | before a release | each platform's build installed and used by hand: playback through real speakers, media keys, drag and drop with the platform's file manager, the mini player moved, resized and kept on top, the platform's screen reader through every view (R18.1), the music root's drive unplugged and plugged back (R2.10), an update from the previous release (R1.9); the field test's checklist is `scripts/field_test.py`, run per environment before a release ([`release.md`](release.md), 4) |
+
+### What each run may skip
+
+Every pytest run a tier makes names its list of the tests it may skip, and why:
+`tests/skips/<name>.txt`, chosen by `MUSIKATA_SKIPS=<name>` (`tests/conftest.py`). A skip the list
+doesn't name is a failure, and so is a listed test that ran (take it off the list), so a run's
+summary line counts both. The lists: `tier1` (CI's too), `windows` (the suite in the Windows VMs)
+and `macos` (the suite on the Apple silicon runner). A test that exists for one platform, MPRIS on
+Linux or the media controls on Windows and macOS (A4.5), is listed as a skip on the others, so it
+can never skip unnoticed on its own. A run by hand, without `MUSIKATA_SKIPS`, checks nothing. A skip
+that comes and goes with the machine (a tool missing from an image) is a fault of the run, not an
+entry for the list.
 
 ## What tier 1 covers
 
@@ -105,6 +120,18 @@ Tests never need the network or a sound card: playback tests use Qt's null audio
 positions and signals, and online lookups use recorded answers (A7.8). Only
 `scripts/check-services.py`, run by hand and weekly in CI, talks to the real services.
 
+## The clock harness
+
+MusiKata's own code takes a clock ([`coding.md`](coding.md)), so its tests move a fake one.
+`scripts/test-clock.sh` finds the test, or the library call, that reads the real clock anyway: it
+runs tier 1 at the start, middle and end of the UTC day, at a year's end, in the zones furthest from
+UTC either way (UTC+14 and UTC−12) and in US Central with its daylight saving time, each by
+`scripts/test-tier1.sh` with `MUSIKATA_CLOCK` and `MUSIKATA_TZ`. libfaketime moves every process's
+clock by an offset, so the clock still runs and the processes a test starts share it. A test that
+passes at one hour and fails at another is a bug like any other: its fix starts with the run that
+shows it. The harness runs before a release, and whenever a change touches dates, times or their
+display ("last played", the 180-day cleanup of A2.9, the sleep timer).
+
 ## Environments
 
 | Environment | Tier | Runs |
@@ -119,7 +146,79 @@ positions and signals, and online lookups use recorded answers (A7.8). Only
 ## CI
 
 GitHub Actions, each action pinned by commit SHA: tier 1 on every pull request and push to `main`;
-the tour, with its screenshots kept as the run's artifact; the three builds, unsigned, each with its
-`.sha256`; once a week, `scripts/check-services.py` against the real services (A7.8), failing the
-run when one has changed. A `v*` tag builds without caches and, once approved, signs the builds and
-drafts a release ([`build-and-release.md`](build-and-release.md)).
+the tour, with its screenshots kept as the run's artifact; the four builds (`appimage`, `windows`,
+`macos-arm64`, `macos-x86_64`), unsigned, each with its `.sha256`; once a week,
+`scripts/check-services.py` against the real services (A7.8), failing the run when one has changed.
+A `v*` tag builds without caches and, once approved, signs the builds and drafts a release
+([`build-and-release.md`](build-and-release.md)). Beside tier 1, CI measures coverage by area and
+publishes the Pages site, and a failed step posts why ([`ci.md`](ci.md)).
+
+## Mutation testing
+
+[mutmut](https://github.com/boxed/mutmut) changes MusiKata's code one change at a time (a `<` for a
+`<=`, a string emptied, a call's argument dropped) and runs the tests on each change. A change some
+test fails on is **killed**; one every test passes with **survives**, and shows code the tests run
+but don't check. It complements coverage, which says only that a line ran. The sweep is
+`musikata_core`'s areas (`library`, `tags`, `audio`, `online`); mutmut can't change QML, and the
+app's bridge code is mostly Qt's to run. The first sweep comes once a first pass of the code is
+written, never as each piece is written.
+
+`scripts/mutate.py` holds the tools. mutmut changes the code it tests, so a run never touches the
+checkout: it works in a copy (`MUSIKATA_MUTATE_WORK`, `build/mutate` unless set) with `src/`,
+`scripts/` and `tests/` copied and the rest of the repository linked, so the tests read it as in
+tier 1. It runs in tier 1's container, on the release's Python and PySide6
+(`scripts/test-mutate.sh`, mutmut pinned as `MUTMUT` in `packaging/versions.env`), with all of tier
+1's tests but those `UNFIT` names, each with its reason. mutmut runs every test once first, noting
+the functions each one reaches, then runs each change against only the tests that reached its
+function. Code a test reaches only in a process it starts, a worker process included, is out of
+mutmut's sight: its changes count as **no tests**, so a worker's job is tested by calling it
+directly ([`coding.md`](coding.md)).
+
+mutmut stops at the first test that fails in that first pass, without naming it. A run then runs
+pytest over the copy and runs each test that fails there once more on the checkout. A test that
+fails on the checkout too is a real failure, and stops the run; the others are left out of the run,
+each named in its export with its traceback and the kind of failure it looks like, and settled
+before a baseline is kept: added to `UNFIT` with its real reason, or the test changed so it doesn't
+depend on the copy, never by weakening what it checks.
+
+### A run by hand
+
+```sh
+sh scripts/test-mutate.sh run src/musikata_core/audio/eq.py --workers 3
+sh scripts/test-mutate.sh summary            # the outcomes by file, the survivors by function
+sh scripts/test-mutate.sh check CHANGE tests/test_audio_eq.py   # one change against one test file
+```
+
+A run's container is capped at `MUSIKATA_MUTATE_MEMORY` (6 GB unless set), swap included. The run
+watches its own memory: past `--limit` GB it stops, and a change's worker past `--worker-limit` GB
+of its own is stopped, that change counted killed. `--only` runs named changes again, `--debug` puts
+each of mutmut's pytest runs in its log, and `--resume DIR` goes on from an earlier run's `export`
+folder.
+
+### The baseline
+
+The `mutate` workflow (`.github/workflows/mutate.yml`) runs the areas side by side on GitHub's
+runners, started by hand (Actions, `mutate`, Run workflow):
+
+- **`plan`** packs each area's modules (`scripts/areas.py`) into jobs of about `size` code lines
+  (1000), the largest first; a larger module is a job of its own. Jobs are named by area (`tags-1`,
+  `audio-2`), the same for the same tree, so `jobs` runs chosen ones again.
+- **Each job** is a `run` of its modules with 4 workers, stopped before the runner's six hours so
+  what finished is kept, and an `export`, kept as its `mutation-<job>` artifact for 90 days. At most
+  `parallel` (14) run at once, leaving room for pull requests' checks.
+- **`resume`**, an earlier run's id: each job runs only the changes its artifact there left without
+  an outcome, so a job out of time goes on where it stopped.
+
+`scripts/mutate.py gather RUN...` downloads a run's artifacts and writes each area's baseline and
+survivors to `docs/hardening/mutation/` ([`../hardening/README.md`](../hardening/README.md));
+`record --from DIR...` does the same from a local run's `export` folders. Runs gathered together
+must be of one commit, and a later run's outcome for a change replaces an earlier one's.
+`scripts/mutate.py stale` names each module whose content (its git blob) isn't what its area's
+latest record mutated, and each module an area holds that no record covers; the hardening page
+([`ci.md`](ci.md), "The Pages site") marks those areas "baseline, changed since".
+
+The baseline records the survivors; it doesn't settle them. Each area settles its own by the shared
+`mutation` skill (`agents/skills/mutation/SKILL.md`): a test that fails on the change, a change to
+the code, or `# pragma: no mutate` on the line with the reason it can't be caught (an equivalent
+change, say). An area with more than about 200 survivors is settled in a relay. A settled area runs
+again (`jobs`) and its baseline is gathered again.

@@ -14,6 +14,8 @@ digest.
 
 - A pin moves only to a release at least 14 days old (the cooldown), so a bad release has time to
   be found and pulled before MusiKata ships it.
+- `scripts/pins-newest.py` shows each pin's age and the newest release it may move to, and fails a
+  pin younger than 14 days unless the owner allowed it ([`ci.md`](ci.md), "Pins").
 - A pin moves only by a commit to `versions.env`, and a test fails on any input named by a tag or
   branch that can move.
 - Qt 6.12 is an LTS release and the last for Windows 10 (R1.1); moving past it is a decision, not an
@@ -43,20 +45,12 @@ and quits.
   until there is one; with it, the bundles are signed, notarized by Apple and stapled.
 
 Signing keys never enter the repository or CI's logs; the signing step runs only for an approved
-`v*` tag, in a job that needs the owner's approval.
+`v*` tag, in the `release` environment, whose approval is the owner's. The release key, and the
+copy of its signing subkey that CI holds, are made and kept as [`genesis.md`](genesis.md), 7, says.
 
-## A release, step by step
+## Releasing
 
-1. `main` is green in CI, and `DEVELOP.md`'s status is current.
-2. Tier 3 by hand on each platform ([`testing.md`](testing.md)): install, scan the demo library,
-   infer tags, set a cover, make a playlist by drag and drop, organize, undo, play with the media
-   keys, both visualizations, an album played gapless, the equalizer. The Intel Mac app is tried
-   on the owner's Intel Mac, the Apple silicon one on an Apple silicon Mac.
-3. The version is set in `musikata_core/__init__.py`, and release notes are written in
-   `docs/releases/<version>.md`: what a user sees, not the commits.
-4. A signed tag `v<version>` is pushed; CI builds without caches.
-5. The owner approves the signing job; CI signs the builds and drafts the GitHub release with them,
-   their `.sha256` files and the notes.
-6. The draft is checked (each download starts on its platform) and published.
-7. The cask in MusiKata's Homebrew tap (A6.5.2) is pointed at the two new `.dmg`s and their
-   SHA-256, by a commit to the tap.
+A release is walked out by [`release.md`](release.md): the release pull request the agent prepares
+([`release-agent.md`](release-agent.md)), then `scripts/publish.sh release` (the tag, CI's builds,
+the approved signing and the draft), the field test in each environment, `publish.sh publish`, and
+`publish.sh cask` for the Homebrew tap (A6.5.2).
