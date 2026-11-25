@@ -177,6 +177,10 @@ setting already in place prints `there` (or `on`, `required`) and asks nothing:
   be changed, and GitHub adds a release attestation (`gh release verify`).
 - **Actions pinned by SHA** required (step 5).
 - **`ci` required** in the `master` ruleset (step 4), once it has passed.
+- **The Pages site** (Settings → Pages → Source: **GitHub Actions**): the coverage, hardening and
+  screenshots pages ([`ci.md`](ci.md), "The Pages site"), which CI's `pages` job publishes from
+  `master`. Its `github-pages` environment takes deployments from `master` alone. This one is made
+  by hand, once: `gh api repos/MojoKata/MusiKata/pages --jq .build_type` then prints `workflow`.
 - **The `field-test` label**, on a release's field-test issues (`publish.sh field-test`,
   [`release.md`](release.md), 4).
 
