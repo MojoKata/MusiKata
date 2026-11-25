@@ -79,6 +79,9 @@ and mutation testing finds them only slowly.
   parameters and return are typed, and the looseness the Qt bridge needs (`@Property`, `@Slot`,
   `Signal`) is allowed there and nowhere else. A `# type: ignore` names its error code and says
   why.
+- **Scripts run on the system's `python3` too** (Ubuntu 24.04's is 3.12), so `scripts/` keeps to
+  3.12's syntax and its standard library; ruff holds it there (`per-file-target-version` in
+  `pyproject.toml`).
 - Both are pinned in `packaging/versions.env`, as every tool is
   ([`build-and-release.md`](build-and-release.md)).
 

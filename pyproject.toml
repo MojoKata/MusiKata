@@ -35,6 +35,9 @@ line-length = 100
 # the mockup renderer draws the design, it isn't MusiKata: written dense, before these rules;
 # the submodules are their own projects
 extend-exclude = ["docs/mockups/src", "agents", "coworker"]
+# the scripts run on the system's python3 as well as the release's (Ubuntu 24.04's is 3.12), so
+# ruff keeps their syntax to 3.12's: no unparenthesized `except A, B:`
+per-file-target-version = {"scripts/**/*.py" = "py312"}
 
 [tool.ruff.lint]
 # pyflakes, pycodestyle's errors, import order, bugbear, pyupgrade, simplify
