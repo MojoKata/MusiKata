@@ -1,0 +1,4 @@
+# The suite on macOS (the Apple silicon runner): the tests it may skip, and why
+# (tests/conftest.py; docs/process/testing.md, "What each run may skip"). A line per test,
+# "<file>::<test>  # why"; <test> without its [parameters] covers every case, and "<file>::*" a
+# whole file. A skip not listed fails the run, and so does a listed test that ran.
