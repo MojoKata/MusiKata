@@ -99,8 +99,26 @@ def _shown_well(tok: str, tests: set[str]) -> bool:
         tok == "statement"
         or (tok.startswith("test_") and tok in tests)
         or (tok.startswith("tier 3: ") and len(tok) > len("tier 3: "))
-        or re.fullmatch(r"later: #\d+", tok) is not None
+        or re.fullmatch(r"later: #[1-9]\d*", tok) is not None
     )
+
+
+def owed_by_done_slices(develop: str) -> set[int]:
+    """The issues of the slices a `later:` can no longer name (DEVELOP.md): the one its status
+    row says is underway, and each before it. A sentence a slice leaves for a later one names
+    that slice's issue, so the slice that finishes it can't be built past it unnoticed."""
+    issues = {
+        int(n): int(i)
+        for n, i in re.findall(
+            r"^\| \[(\d+)\]\(https://github\.com/[^)]*/issues/(\d+)\) \|", develop, re.M
+        )
+    }
+    status = re.search(
+        r"^\| Code and its tests, builds \|.*?slice (\d+)[^|]*underway", develop, re.M
+    )
+    if status is None:
+        return set()
+    return {i for n, i in issues.items() if n <= int(status.group(1))}
 
 
 def test_every_sentence_of_a_traced_section_has_a_row_and_every_row_its_sentence():
@@ -139,6 +157,33 @@ def test_every_row_names_tests_that_exist_or_says_why_not():
     assert not bad, "rows naming what isn't there:\n  " + "\n  ".join(bad)
 
 
+def test_no_row_waits_on_the_slice_being_built_or_one_before_it():
+    trace, done = _read(TRACE), owed_by_done_slices(_read("DEVELOP.md"))
+    assert done, "DEVELOP.md names no slice underway, or links no slice to its issue"
+    bad = [
+        f"{rid} {anchor[:40]!r}: {tok}"
+        for number in traced(trace)
+        for rid, anchor, shown in trace_rows(trace, number)
+        for tok in shown
+        if tok.startswith("later: #") and int(tok.removeprefix("later: #")) in done
+    ]
+    assert not bad, (
+        "rows waiting on a slice already built (build them, or name a later one):\n  "
+        + ("\n  ".join(bad))
+    )
+
+
+def test_the_slices_a_later_mark_cant_name_are_the_one_underway_and_those_before():
+    develop = (
+        "| Code and its tests, builds | Slice 1, tooling, done; slice 2, the skeleton, underway |\n"
+        "| [1](https://github.com/o/r/issues/18) | Tooling | x |\n"
+        "| [2](https://github.com/o/r/issues/19) | Skeleton | x |\n"
+        "| [3](https://github.com/o/r/issues/20) | The library | x |\n"
+    )
+    assert owed_by_done_slices(develop) == {18, 19}
+    assert owed_by_done_slices(develop.replace("underway", "next")) == set()
+
+
 def test_a_section_splits_into_its_sentences_and_table_rows():
     sec = (
         "# R9. Genres\n\nR9.1. **Several.** Each song has one genre or several. It shows each "
@@ -156,7 +201,7 @@ def test_a_rows_test_names_a_test_a_check_by_hand_or_a_later_issue():
     tests = {"test_a_song_has_genres"}
     for tok in ("test_a_song_has_genres", "statement", "tier 3: media keys", "later: #4"):
         assert _shown_well(tok, tests), tok
-    for tok in ("test_missing", "tier 3: ", "later: 4", "claim"):
+    for tok in ("test_missing", "tier 3: ", "later: 4", "later: #0", "claim"):
         assert not _shown_well(tok, tests), tok
 
 
