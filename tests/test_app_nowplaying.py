@@ -3,9 +3,9 @@ src/musikata/nowplaying.py; R7.1 to R7.3, R6.5): a double click queuing the rest
 song that ends starting the next, the bar's buttons, Play next and Add to queue, Up next's rows,
 reorder and ×, and what the bar says; then the bar and Up next in the window.
 
-The engine is a stand-in that plays nothing (`FakeEngine`): it says a song began when asked, and a
-test says when it ended, so every rule is shown without a device or a wait on real audio. The real
-engine playing into a null output is tests/test_app_player.py's.
+The engine is a stand-in that plays nothing (`FakeEngine`, tests/fakes.py): it says a song began
+when asked, and a test says when it ended, so every rule is shown without a device or a wait on
+real audio. The real engine playing into a null output is tests/test_app_player.py's.
 
 Why: what plays next is decided here every time a song ends; a queue that skips a song when Next
 and an end cross, a Previous that never goes back, or a bar that names another song than the one
@@ -16,8 +16,8 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fakes import FakeClock, fill
-from PySide6.QtCore import QCoreApplication, QObject, QPointF, Qt, Signal, Slot
+from fakes import FakeClock, FakeEngine, fill
+from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
@@ -36,100 +36,6 @@ SONGS = [
      "track": 3, "length": 60.0},
     {"path": "MO/Kindling.mp3", "title": "Kindling", "artist": None, "length": 90.0},
 ]  # fmt: skip
-
-
-class FakeEngine(QObject):
-    """The engine's signals and slots, playing nothing: a song begins as soon as it is asked
-    for, and ends, fails, moves or joins the song told to follow when a test says so (`join`).
-    `ticket` is the song playing's, `follower` the ticket and path told to follow it (`told`, each
-    in turn); `levels` each song's ReplayGain as asked, by file name, in order."""
-
-    began = Signal(int, str, float)
-    joined = Signal(int, str, float)
-    moved = Signal(float)
-    sought = Signal(int)
-    pausedChanged = Signal(bool)
-    ended = Signal(int)
-    stopped = Signal(int)
-    failed = Signal(int, str)
-
-    def __init__(self):
-        super().__init__()
-        self.asked = []  # what it was asked, in order: ("play", path), ("pause",), …
-        self.path = ""
-        self.ticket = 0
-        self.follower = (0, "")
-        self.told = []  # the songs told to follow, by file name ("" for nothing), in order
-        self.levels = []  # (file name, ReplayGain) of each song asked to play or follow
-        self.device = None  # the device chosen, as told
-        self.holding = False
-
-    @Slot()
-    def setup(self):
-        pass
-
-    @Slot(str)
-    def choose_device(self, chosen):
-        self.device = chosen
-
-    @Slot(str, int, float)
-    def play(self, path, ticket, level):
-        self.asked.append(("play", path))
-        self.levels.append((os.path.basename(path), round(level, 4)))
-        self.path, self.ticket, self.follower = path, ticket, (0, "")
-        self.began.emit(ticket, path, 42.0)
-
-    @Slot(int, int, str, float)
-    def follow(self, after, ticket, path, level):
-        self.told.append(os.path.basename(path))
-        if path:
-            self.levels.append((os.path.basename(path), round(level, 4)))
-        if after == self.ticket:
-            self.follower = (ticket, path)
-
-    def join(self):
-        """The device reaches the song told to follow."""
-        ticket, path = self.follower
-        self.path, self.ticket, self.follower = path, ticket, (0, "")
-        self.joined.emit(ticket, path, 42.0)
-
-    @Slot(int, float)
-    def seek(self, ticket, seconds):
-        """Says it is done at once, unless `holding`: then when the test says (`sought`)."""
-        self.asked.append(("seek", round(seconds, 3)))
-        if not self.holding:
-            self.sought.emit(ticket)
-
-    def seeks(self):
-        return [a[1] for a in self.asked if a[0] == "seek"]
-
-    @Slot()
-    def pause(self):
-        self.asked.append(("pause",))
-        self.pausedChanged.emit(True)
-
-    @Slot()
-    def resume(self):
-        self.asked.append(("resume",))
-        self.pausedChanged.emit(False)
-
-    @Slot()
-    def stop(self):
-        self.asked.append(("stop",))
-        if self.path:
-            self.path = ""
-            self.stopped.emit(self.ticket)
-
-    @Slot(float)
-    def set_volume(self, gain):
-        self.asked.append(("volume", round(gain, 3)))
-
-    @Slot()
-    def shutdown(self):
-        self.moveToThread(QCoreApplication.instance().thread())
-
-    def played(self):
-        return [os.path.basename(a[1]) for a in self.asked if a[0] == "play"]
 
 
 @pytest.fixture

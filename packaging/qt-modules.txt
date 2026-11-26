@@ -14,8 +14,8 @@
 # that uses it; Qt Multimedia's FFmpeg plugin and libraries never do, as PyAV carries the FFmpeg
 # that decodes (A4.1).
 
-# The modules the code imports (src/musikata: QtCore, QtGui, QtQml, QtQuick, QtMultimedia), and
-# those they and the QML modules below link
+# The modules the code imports (src/musikata: QtCore, QtGui, QtQml, QtQuick, QtMultimedia, and
+# QtDBus for MPRIS on Linux, A4.5), and those they and the QML modules below link
 module Concurrent
 module Core
 module Gui

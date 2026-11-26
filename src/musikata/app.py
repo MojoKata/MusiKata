@@ -28,6 +28,7 @@ from musikata_core import __version__, db, roots, settings, workers
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 
+from . import media
 from .bridges import Library, Player
 from .covers import Covers
 from .firstrun import FirstRun, music_folder
@@ -107,20 +108,23 @@ def open_index(root: str, env: Mapping[str, str], clock: Clock) -> db.Index:
 
 @dataclass
 class Shell:
-    """What a running MusiKata holds: the engine, its window and the bridges."""
+    """What a running MusiKata holds: the engine, its window, the bridges and the system's media
+    controls."""
 
     engine: QQmlApplicationEngine
     window: QQuickWindow
     library: Library
     player: Player
     index: db.Index
+    controls: media.MediaControls
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
-        playback thread, the watcher, the scan's thread and the worker processes, and the
-        index."""
+        system's media controls, the playback thread, the watcher, the scan's thread and the worker
+        processes, and the index."""
         self.window.close()
         Shiboken.delete(self.engine)
+        self.controls.close()
         self.player.close()
         self.library.close()
         self.index.close()
@@ -133,11 +137,13 @@ def load(
     pool: Callable[[], Executor] = workers.pool,
     playback: Callable[[], Engine] = Engine,
     given: bool = False,
+    controls: Callable[[Player, QQuickWindow, media.Art], media.MediaControls] = media.start,
 ) -> Shell:
     """The window over the root's index, not yet shown, the root watched once scanned (A2.4).
     `playback` makes the playback thread's engine (a test's plays generated audio on a device it
     chooses). `given`: the root is for this run only, and the window's title names it (R2.1.2).
-    A root that isn't there opens with its library as it was (R2.10)."""
+    A root that isn't there opens with its library as it was (R2.10). `controls` starts the
+    system's media controls over the player, the window and the cover cache (A4.5)."""
     index = open_index(root, env, clock)
     missing = not os.path.isdir(root)
     library = Library(
@@ -150,7 +156,8 @@ def load(
     player.nowPlaying.connect(library.show_playing)
     library.property("folders").play.connect(player.play_songs)
     engine = QQmlApplicationEngine()
-    engine.addImageProvider("covers", Covers(root, index.read, cache_of(index, env)))
+    covers = Covers(root, index.read, cache_of(index, env))
+    engine.addImageProvider("covers", covers)
     engine.setInitialProperties({"library": library, "player": player})
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
@@ -159,7 +166,7 @@ def load(
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
-    return Shell(engine, window, library, player, index)
+    return Shell(engine, window, library, player, index, controls(player, window, covers.file))
 
 
 @dataclass
@@ -210,10 +217,11 @@ class Session(QObject):
         given: bool = False,
         pool: Callable[[], Executor] = workers.pool,
         playback: Callable[[], Engine] = Engine,
+        controls: Callable[[Player, QQuickWindow, media.Art], media.MediaControls] = media.start,
     ) -> None:
         super().__init__()
         self._env, self._clock, self.given = env, clock, given
-        self._pool, self._playback = pool, playback
+        self._pool, self._playback, self._controls = pool, playback, controls
         self.shell: Shell | None = None
         self.first: FirstStart | None = None
 
@@ -239,7 +247,9 @@ class Session(QObject):
         self._open(root)
 
     def _open(self, root: str) -> Shell:
-        shell = load(root, self._env, self._clock, self._pool, self._playback, self.given)
+        shell = load(
+            root, self._env, self._clock, self._pool, self._playback, self.given, self._controls
+        )
         shell.library.rootChosen.connect(self.choose, Qt.ConnectionType.QueuedConnection)
         self.shell = shell
         shell.library.rescan()
@@ -253,6 +263,8 @@ class Session(QObject):
             settings.choose_root(path, home, root, platform.node() or "this computer")
         old_window = self.window
         old: Shell | FirstStart | None = self.shell or self.first
+        if self.shell is not None:  # the system's controls go to the new window, by MPRIS's name
+            self.shell.controls.close()
         self.first = None
         shell = self._open(root)
         place_like(shell.window, old_window)

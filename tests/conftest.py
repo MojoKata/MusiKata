@@ -183,9 +183,11 @@ def own_home(monkeypatch, tmp_path):
     MUSIKATA_DATA each name the place a home has for it, under tmp_path, so what the test, or a
     program or worker process it starts, writes to "~" lands in the folder pytest gives it. Nothing
     is made there until something writes. A test that needs the real home says so, by setting HOME
-    to conftest.REAL_HOME."""
+    to conftest.REAL_HOME. The session bus is one that isn't there, so MusiKata never shows itself
+    to the desktop running the tests (A4.5); a test of MPRIS starts a bus of its own."""
     for var, place in OWN.items():
         monkeypatch.setenv(var, os.path.normpath(os.path.join(str(tmp_path), place)))
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", f"unix:path={tmp_path}/no-session-bus")
 
 
 def _menu_entry(path):

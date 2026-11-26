@@ -11,7 +11,7 @@ import pytest
 from fakes import FakeClock
 from PySide6.QtCore import QUrl
 
-from musikata import app, tour
+from musikata import app, media, tour
 from musikata_core import settings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -146,9 +146,23 @@ def test_a_root_that_isnt_there_opens_the_index_that_last_opened_it_making_nothi
 # ---------- a run: the first start, and a root chosen (R2.1, R2.10) ----------
 
 
-def session(tmp_path, given=False):
+def session(tmp_path, given=False, controls=media.start):
     env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
-    return app.Session(env, FakeClock(), given, lambda: ThreadPoolExecutor(1)), env
+    s = app.Session(env, FakeClock(), given, lambda: ThreadPoolExecutor(1), controls=controls)
+    return s, env
+
+
+def recording(events):
+    """A start of the system's media controls that says when each window's start and close."""
+
+    def start(player, window, art):
+        controls, n = media.MediaControls(player, None, art, window), len(events)
+        close = controls.close
+        controls.close = lambda: (events.append(("closed", n)), close())
+        events.append(("started", n))
+        return controls
+
+    return start
 
 
 def test_the_first_start_asks_and_the_folder_chosen_becomes_the_configured_root(tmp_path, qtbot):
@@ -172,7 +186,8 @@ def test_the_first_start_asks_and_the_folder_chosen_becomes_the_configured_root(
 
 
 def test_choose_another_folder_opens_it_in_the_windows_place_and_keeps_it(tmp_path, qtbot):
-    s, env = session(tmp_path)
+    events = []
+    s, env = session(tmp_path, controls=recording(events))
     gone = tmp_path / "Music"
     s.start(str(gone))
     assert s.library.property("available") is False
@@ -183,6 +198,8 @@ def test_choose_another_folder_opens_it_in_the_windows_place_and_keeps_it(tmp_pa
         s.library.chooseRoot(str(other))
     assert s.shell is not old and s.library.property("root") == os.path.join("~", "Other")
     assert settings.load(settings.shared_path(env), str(tmp_path)).root == str(other)
+    # the system's controls let go before the new window's take them (MPRIS has one name)
+    assert events[:3] == [("started", 0), ("closed", 0), ("started", 2)]
     qtbot.waitUntil(lambda: not s.library.scanning, timeout=10_000)
     s.close()
 

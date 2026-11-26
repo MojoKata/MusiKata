@@ -143,6 +143,7 @@ def test_a_cache_that_cant_be_written_costs_only_time(qapp, tmp_path, index, cap
     blocked.write_text("a file where the cache's folder would be")
     image = provider(root, index, blocked).image("T", 256)
     assert image.width() == 256 and "couldn't be saved" in caplog.text
+    assert provider(root, index, blocked).file("T") is None  # no file to show the system
 
 
 def test_a_thumbnail_qt_cant_save_is_logged_and_not_left_behind(
@@ -162,6 +163,16 @@ def test_a_broken_cached_thumbnail_is_made_again(qapp, tmp_path, index):
     (cache / "T-256.jpg").write_bytes(b"cut short")
     image = provider(root, index, cache).image("T", 256)
     assert image.pixelColor(5, 5).red() > 200
+
+
+def test_a_thumbnails_file_is_found_or_made_for_the_systems_media_controls(qapp, tmp_path, index):
+    root, cache = tmp_path / "Music", tmp_path / "cache"
+    with_cover(index, str(root), "file", "A/cover.jpg", encoded(1000, 1000))
+    p = provider(root, index, cache)
+    made = p.file("T")
+    assert made == str(cache / "T-256.jpg") and os.path.exists(made)
+    assert p.file("T") == made and p.file("T", 512) == str(cache / "T-512.jpg")
+    assert p.file("no such cover") is None
 
 
 def test_the_scans_names_lead_to_the_covers_they_name(qapp, tmp_path, index):

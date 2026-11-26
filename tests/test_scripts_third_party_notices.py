@@ -20,6 +20,8 @@ ENV = """
 : "${PYSIDE:=6.12.0}"
 RUNTIME="mutagen==1.48.1 av==19.0.2"   # what runs
 PYINSTALLER="pyinstaller==6.22.3 altgraph==0.17.5"
+MEDIA_WINDOWS="winrt-runtime==4.1.0 winrt-Windows.Media==4!10.0.28000.2957"
+MEDIA_MACOS="pyobjc-core==13.0 pyobjc-framework-MediaPlayer==13.0"
 """
 
 
@@ -41,7 +43,7 @@ def dist(tmp_path, name, version, files, meta=""):
 
 
 def test_the_packages_carried_are_pysides_runtimes_and_pyinstaller_when_frozen():
-    assert tpn.carried(ENV) == {
+    assert tpn.carried(ENV, on="linux") == {
         "pyside6-essentials": "6.12.0",
         "pyside6-addons": "6.12.0",
         "shiboken6": "6.12.0",
@@ -51,6 +53,25 @@ def test_the_packages_carried_are_pysides_runtimes_and_pyinstaller_when_frozen()
     assert tpn.carried(ENV, frozen=True)["pyinstaller"] == "6.22.3"
     assert "altgraph" not in tpn.carried(ENV, frozen=True)  # it builds, isn't carried
     assert tpn.assigned(ENV, "MISSING") == ""
+
+
+def test_windows_and_macos_carry_their_media_controls_and_linux_none():
+    """A4.5: PyWinRT on Windows, PyObjC on macOS; MPRIS is PySide6's own QtDBus."""
+    assert tpn.carried(ENV, on="win32") == {
+        **tpn.carried(ENV, on="linux"),
+        "winrt-runtime": "4.1.0", "winrt-windows.media": "4!10.0.28000.2957",
+    }  # fmt: skip
+    assert tpn.carried(ENV, on="darwin") == {
+        **tpn.carried(ENV, on="linux"),
+        "pyobjc-core": "13.0", "pyobjc-framework-mediaplayer": "13.0",
+    }  # fmt: skip
+
+
+def test_pyobjc_without_its_license_in_its_wheel_gets_the_mit_text(tmp_path):
+    d = dist(tmp_path, "pyobjc-framework-MediaPlayer", "13.0", {}, "License: MIT\n")
+    text = tpn.package("pyobjc-framework-mediaplayer", d)
+    assert "License: MIT" in text and "--- PyObjC.txt ---" in text
+    assert "Permission is hereby granted" in text and "pyobjc (v13.0)" in text
 
 
 def test_the_libraries_a_wheel_bundles_are_named():

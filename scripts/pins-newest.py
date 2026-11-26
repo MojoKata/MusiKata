@@ -85,7 +85,8 @@ def inventory():
     env = _read("packaging/versions.env")
     for path in FILES:
         text = _read(path)
-        for name, version in re.findall(r"(?<![\w.-])([A-Za-z][\w.-]*)==([0-9][\w.]*)", text):
+        # a version may carry an epoch (PyWinRT's 4!10.0.28000.2957)
+        for name, version in re.findall(r"(?<![\w.-])([A-Za-z][\w.-]*)==([0-9][\w.!]*)", text):
             add("pypi", name, version, path)
         for var, names in PIP_VARS.items():
             v = _value(text, var)
@@ -126,8 +127,9 @@ def vkey(version):
 
 
 def final(version):
-    """A plain release: numbers and dots, maybe a leading v (no rc, beta, dev or post)."""
-    return re.fullmatch(r"v?\d+(\.\d+)*", version) is not None
+    """A plain release: numbers and dots, maybe a leading v or an epoch (4!), no rc, beta, dev or
+    post."""
+    return re.fullmatch(r"v?(\d+!)?\d+(\.\d+)*", version) is not None
 
 
 def newest(releases, cutoff=None, ceiling=None, plain=True):

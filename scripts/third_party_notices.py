@@ -8,14 +8,15 @@ license, the license's text and where its source is.
 Run with the Python the build carries, after it installed what it carries: the notices are made
 from that Python's own LICENSE.txt and from the packages installed beside it (their metadata,
 their license files and the libraries their wheels bundle), so they can't fall behind a pin. The
-packages are the ones packaging/versions.env pins for running MusiKata (PYSIDE's three, RUNTIME),
-and with --frozen PyInstaller, whose bootloader starts the Windows and macOS builds; each must be
+packages are the ones packaging/versions.env pins for running MusiKata (PYSIDE's three, RUNTIME, and
+the platform's media controls, MEDIA_WINDOWS or MEDIA_MACOS, A4.5), and with --frozen PyInstaller,
+whose bootloader starts the Windows and macOS builds; each must be
 installed at its pinned version, or nothing is written. --extra adds a part the build copies from
 elsewhere (the AppImage's xcb-util libraries), with its license text from FILE.
 
 A package whose wheel doesn't carry its license's text (PySide6 and shiboken6, whose wheels carry
-only a note for Qt's commercial licensees) gets it from packaging/licenses/, as does FFmpeg, which
-PyAV's wheels carry built.
+only a note for Qt's commercial licensees, and most of PyObjC's) gets it from packaging/licenses/,
+as does FFmpeg, which PyAV's wheels carry built.
 """
 
 from __future__ import annotations
@@ -33,6 +34,17 @@ ROOT = os.path.join(HERE, "..")
 LICENSES = os.path.join(ROOT, "packaging", "licenses")
 RULE = "=" * 78
 LICENSE_FILE = re.compile(r"(?i)^(licen[cs]e|copying|notice|authors)[^/]*$")
+
+# the PyObjC packages of MEDIA_MACOS whose wheels carry no license file
+PYOBJC_WITHOUT_LICENSE = (
+    "pyobjc-core",
+    "pyobjc-framework-avfoundation",
+    "pyobjc-framework-coreaudio",
+    "pyobjc-framework-coremedia",
+    "pyobjc-framework-mediaplayer",
+)
+# the platform's media controls (A4.5), by sys.platform
+MEDIA = {"win32": "MEDIA_WINDOWS", "darwin": "MEDIA_MACOS"}
 
 # what packaging/licenses/ adds to a package, and why: the license MusiKata takes it under, and
 # the texts of that license
@@ -54,6 +66,15 @@ ADDED = {
         "The runtime of PySide6's bindings, under the LGPL-3.0-only, as PySide6-Essentials above.",
         [],
     ),
+    **{
+        name: (
+            "PyObjC's wheels carry its license's text in some of them only: it is under the MIT "
+            "license (its text below, as pyobjc-framework-Cocoa's wheel has it). Source: "
+            "https://github.com/ronaldoussoren/pyobjc (v{version}).",
+            ["PyObjC.txt"],
+        )
+        for name in PYOBJC_WITHOUT_LICENSE
+    },
     "av": (
         "PyAV's wheel carries FFmpeg's libraries, built by PyAV ({ffmpeg}), with the codec "
         "libraries listed above; FFmpeg's source and its build: "
@@ -78,12 +99,15 @@ def assigned(text: str, var: str) -> str:
     return m.group(1).split(" #")[0].strip() if m else ""
 
 
-def carried(env: str, frozen: bool = False) -> dict[str, str]:
+def carried(env: str, frozen: bool = False, on: str = sys.platform) -> dict[str, str]:
     """The packages a build carries, by name (lower case, `-` for `_`), each with its pinned
-    version: PySide6's three at PYSIDE, the RUNTIME specs, and PyInstaller for a frozen build."""
+    version: PySide6's three at PYSIDE, the RUNTIME specs, the media controls of the platform `on`
+    (a sys.platform), and PyInstaller for a frozen build."""
     pyside = assigned(env, "PYSIDE")
     out = {n: pyside for n in ("pyside6-essentials", "pyside6-addons", "shiboken6")}
     specs = assigned(env, "RUNTIME").split()
+    if on in MEDIA:
+        specs += assigned(env, MEDIA[on]).split()
     if frozen:  # PyInstaller's own line, not the dependencies it builds with
         specs += [s for s in assigned(env, "PYINSTALLER").split() if s.startswith("pyinstaller==")]
     for spec in specs:

@@ -80,9 +80,10 @@ A4.5. **The system's media controls** (R7.8):
 | Windows | System Media Transport Controls, through `ISystemMediaTransportControlsInterop` for the window | `winrt-Windows.Media` (PyWinRT), Windows only |
 | macOS | `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter` | `pyobjc-framework-MediaPlayer`, macOS only |
 
-Each is a small module behind one interface (`now_playing(song)`, `state(playing)`, and signals for
-the commands), so the rest of the app doesn't know which is in use, and a platform without one
-still plays.
+Each is a small module behind one interface (`now_playing(song)`, `state(playing)`, `seeked(position)`
+for a song moved other than by playing on, which MPRIS's `Seeked` and the other platforms' timelines
+need, and signals for the commands), so the rest of the app doesn't know which is in use, and a
+platform without one still plays.
 
 A4.6. **Seeking and devices.** A seek (R7.4) asks PyAV for the nearest keyframe before the
 position, decodes forward to the exact sample, and replaces what is in the ring buffer, so the

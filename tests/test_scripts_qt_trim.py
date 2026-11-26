@@ -269,13 +269,17 @@ def test_the_list_keeps_every_module_the_code_and_the_views_import_on_every_plat
     py = [os.path.join(d, f) for d, _, fs in os.walk(src) for f in fs if f.endswith(".py")]
     qml_dir = os.path.join(src, "musikata", "qml")
     qml = [os.path.join(qml_dir, f) for f in os.listdir(qml_dir) if f.endswith(".qml")]
-    bindings = _imports(r"from PySide6\.Qt(\w+) import", py)
+    # a backend of the system's media controls is imported only on its platform (A4.5)
+    only = {os.path.join(src, "musikata", "media", "mpris.py"): "linux"}
     views = {m.replace(".", "/") for m in _imports(r"^import (Qt[\w.]+)", qml)}
-    assert bindings >= {"Core", "Gui", "Qml", "Quick", "Multimedia"}
     for platform in qt_trim.PLATFORMS:
+        here = [f for f in py if only.get(f, platform) == platform]
+        bindings = _imports(r"from PySide6\.Qt(\w+) import", here)
+        assert bindings >= {"Core", "Gui", "Qml", "Quick", "Multimedia"}
         allowed = qt_trim.parse(LIST, platform)
         assert bindings <= allowed.names("module"), platform
         assert views <= allowed.names("qml"), platform
+    assert "DBus" in qt_trim.parse(LIST, "linux").names("module")  # MPRIS
 
 
 def test_the_list_leaves_out_qt_multimedias_ffmpeg():

@@ -164,6 +164,21 @@ class Covers(QQuickImageProvider):
             self._keep(image, name, side)
         return image
 
+    def file(self, name: str, side: int = SIZES[0]) -> str | None:
+        """The file of the thumbnail `name` at `side` in the cache, made first when it isn't there
+        (the system's media controls show it, A4.5); None when the cover can't be shown. Called off
+        the GUI thread."""
+        if self.image(name, side).isNull():
+            return None
+        return self._cached_path(name, side)
+
+    def _cached_path(self, name: str, side: int) -> str | None:
+        for ext in (".jpg", ".png"):
+            path = os.path.join(self._cache, f"{name}-{side}{ext}")
+            if os.path.exists(path):
+                return path
+        return None
+
     def _cached(self, name: str, side: int) -> QImage | None:
         for ext in (".jpg", ".png"):
             path = os.path.join(self._cache, f"{name}-{side}{ext}")

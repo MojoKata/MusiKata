@@ -1,12 +1,13 @@
 #!/bin/sh
 # Builds build/release/MusiKata-<version>-<arch>.dmg and its .sha256 on a Mac (A6.5; build-and-
 # release.md, "The builds"), for arm64 (Apple silicon) or x86_64 (Intel): python-build-standalone
-# for that chip (PYTHON_BUILD, checked against PYTHON_MACOS_<ARCH>_SHA256), PySide6 and RUNTIME,
-# with Qt trimmed to packaging/qt-modules.txt (A6.2), frozen by PyInstaller (PYINSTALLER) into
-# MusiKata.app (packaging/musikata.spec), ad-hoc signed as PyInstaller signs it (A6.5.1), in a .dmg
-# beside a link to /Applications and the license files (A6.6). Both run on an Apple silicon Mac, the
-# x86_64 one under Rosetta (arch -x86_64), so its Python picks the x86_64 wheels. The Developer ID
-# signing of a release isn't here (build-and-release.md, "Signing"). scripts/test-macos.sh starts it.
+# for that chip (PYTHON_BUILD, checked against PYTHON_MACOS_<ARCH>_SHA256), PySide6, RUNTIME and
+# MEDIA_MACOS (A4.5), with Qt trimmed to packaging/qt-modules.txt (A6.2), frozen by PyInstaller
+# (PYINSTALLER) into MusiKata.app (packaging/musikata.spec), ad-hoc signed as PyInstaller signs it
+# (A6.5.1), in a .dmg beside a link to /Applications and the license files (A6.6). Both run on an
+# Apple silicon Mac, the x86_64 one under Rosetta (arch -x86_64), so its Python picks the x86_64
+# wheels. The Developer ID signing of a release isn't here (build-and-release.md, "Signing").
+# scripts/test-macos.sh starts it.
 #   scripts/build-macos.sh arm64|x86_64
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -41,9 +42,10 @@ tar -xzf "$TARBALL" -C "$W"          # -> python/
 PY="$W/python/bin/python3"
 SITE=$(run "$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
 echo "== Python $(run "$PY" -c 'import platform; print(platform.python_version(), platform.machine())')"
-# shellcheck disable=SC2086 # PYINSTALLER and RUNTIME are lists of pip specs
+# shellcheck disable=SC2086 # PYINSTALLER, RUNTIME and MEDIA_MACOS are lists of pip specs
 run "$PY" -m pip install -q --no-deps --disable-pip-version-check --cache-dir "$CACHE/pip" \
-    $PYINSTALLER "PySide6-Essentials==$PYSIDE" "PySide6-Addons==$PYSIDE" "shiboken6==$PYSIDE" $RUNTIME
+    $PYINSTALLER "PySide6-Essentials==$PYSIDE" "PySide6-Addons==$PYSIDE" "shiboken6==$PYSIDE" $RUNTIME \
+    $MEDIA_MACOS
 # the license files, from what was just installed (A6.6), the icon, and Qt trimmed (A6.2)
 run "$PY" "$HERE/scripts/third_party_notices.py" write "$W/licenses" --frozen
 run "$PY" "$HERE/scripts/app_icon.py" icns "$W/musikata.icns"

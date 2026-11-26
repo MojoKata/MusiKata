@@ -2,9 +2,9 @@
 # Builds build/release/MusiKata-<version>-setup.exe and its .sha256 (A6.4; build-and-release.md,
 # "The builds") on Linux, as AppKata's installer is built: PyInstaller under Wine (PYWINE_IMAGE,
 # whose Python is PYTHON_BUILD's version, R1.2) freezes MusiKata with PySide6 trimmed to
-# packaging/qt-modules.txt (A6.2) and RUNTIME, then Inno Setup under Wine (INNOSETUP_IMAGE) makes the
-# installer (packaging/windows/musikata.iss); every image and package as packaging/versions.env pins
-# it. scripts/test-windows.sh starts it once.
+# packaging/qt-modules.txt (A6.2), RUNTIME and MEDIA_WINDOWS (A4.5), then Inno Setup under Wine
+# (INNOSETUP_IMAGE) makes the installer (packaging/windows/musikata.iss); every image and package
+# as packaging/versions.env pins it. scripts/test-windows.sh starts it once.
 #   scripts/build-windows.sh
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,13 +32,13 @@ V=$(docker run --rm "$PYWINE_IMAGE" sh -c "wine python -c 'import platform; prin
 echo "== PyInstaller (Wine)"
 # Wine's own chatter (fixme, err) is left out of what's shown; the log keeps it
 LOG="$W/pyinstaller.log"
-# shellcheck disable=SC2086 # PYINSTALLER and RUNTIME are lists of pip specs
+# shellcheck disable=SC2086 # PYINSTALLER, RUNTIME and MEDIA_WINDOWS are lists of pip specs
 docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -e MUSIKATA_ICON='Z:\src\build\windows\musikata.ico' \
     -v "$HERE:/src" -v "$HERE/build/wine-cache:/cache" -w /src "$PYWINE_IMAGE" sh -c "
   set -e
   cp /cache/$ICU \$WINEPREFIX/drive_c/windows/system32/icuuc.dll
   wine python -m pip install -q --no-deps --disable-pip-version-check --cache-dir Z:/cache/pip \
-      $PYINSTALLER PySide6-Essentials==$PYSIDE PySide6-Addons==$PYSIDE shiboken6==$PYSIDE $RUNTIME
+      $PYINSTALLER PySide6-Essentials==$PYSIDE PySide6-Addons==$PYSIDE shiboken6==$PYSIDE $RUNTIME $MEDIA_WINDOWS
   wine python scripts/app_icon.py ico build/windows/musikata.ico
   wine python scripts/qt_trim.py apply windows C:/Python/Lib/site-packages/PySide6
   wine python -m PyInstaller --noconfirm --clean --log-level WARN --distpath Z:/src/build/windows/dist \

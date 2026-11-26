@@ -1571,6 +1571,10 @@ class Player(QObject):
     def stop(self) -> None:
         self._stop.emit()
 
+    def shown(self) -> SongInfo | None:
+        """The words of the song shown, when the index has it (the system's media controls)."""
+        return self._info
+
     def play_file(self, path: str) -> None:
         """Plays the file at `path`, a whole path, from its start, outside the queue (--play)."""
         self._info = None
