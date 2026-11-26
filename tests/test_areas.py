@@ -119,7 +119,9 @@ def test_every_module_in_src_is_one_a1_9_names():
         if parts[0] not in ("musikata_core", "musikata") or "schemas" in parts:
             continue
         for f in files:
-            if not f.endswith(".py") or f == "__init__.py" and len(parts) == 1:
+            # a package's own __init__, and the app's __main__ (python -m musikata), which only
+            # starts musikata.app: the package's, not modules of their own
+            if not f.endswith(".py") or f in ("__init__.py", "__main__.py") and len(parts) == 1:
                 continue
             if parts[0] == "musikata" and len(parts) > 1 and parts[1] == "qml":
                 continue

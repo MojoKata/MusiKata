@@ -134,4 +134,5 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.media` | app | `mpris`, `smtc`, `nowplaying_mac`: the system's media controls (A4.5) |
 | `musikata.tour` | app | The tour (A1.6) |
+| `musikata.layout` | app | The tour's layout check: each text against the box it is drawn in (A1.6) |
 | `musikata/qml/` | qml | The views and the mini player |

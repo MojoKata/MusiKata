@@ -77,10 +77,11 @@ with its test.
 
 | Module | Its shapes |
 |---|---|
-| `tags` (A3.2, R4) | ID3v1 only, ID3v2.2, 2.3 and 2.4, and v1 and v2 that disagree; frames repeated or empty; several genres as separate frames, as `;` or `/` in one, or as ID3v1 numbers `(17)`; track as `4`, `04` or `4/10`; years as `2003`, `2003-05-01` or `TYER` with `TDAT`; Vorbis keys in any case and repeated; MP4 freeform atoms; `POPM` from Windows Media Player, MusicBee and foobar2000; Picard's MusicBrainz ids; the text encodings of R4.10 |
+| `tags` (A3.2, R4) | ID3v1 only, ID3v2.2, 2.3 and 2.4, and v1 and v2 that disagree; frames repeated or empty; several genres as separate frames, as `;` or `/` in one, or as ID3v1 numbers `(17)`; track as `4`, `04` or `4/10`; years as `2003`, `2003-05-01` or `TYER` with `TDAT`; Vorbis keys in any case and repeated; MP4 freeform atoms, and atoms that are a bool (`cpil`, `pgap`) or numbers (`tmpo`); `POPM` from Windows Media Player, MusicBee and foobar2000; Picard's MusicBrainz ids; the text encodings of R4.10 |
 | `playlists` (R8.1.2) | absolute and relative paths, `\` and `/`, `file://` URLs; `#EXTINF` and without; a BOM, CRLF, `.m3u` in the system's encoding; comments and blank lines; files missing, outside the root, or listed twice |
 | `lyrics` (A7.6, R17) | times as `[mm:ss]`, `[mm:ss.xx]` and `[mm:ss.xxx]`, several on one line; `[ar:]`, `[ti:]` and `[offset:]`; lines out of order, blank, or untimed; word times `<mm:ss.xx>`; a BOM and CRLF |
 | `attention` (`.cue`) | `FILE` with and without quotes; the sheet in UTF-8 or the system's encoding; `REM` lines; `INDEX 00` and `01` |
+| `audio` (`decode`, A4.1) | every kind of R2.2; samples of 8, 16, 24 and 32 bits, float and double, packed and planar; mono, stereo, quad, 5.1 and 7.1, and a WAV that names no channels; rates from 8 to 192 kHz; a cover FFmpeg sees as a video stream; a damaged file, and damage FLAC's decoder hides; a file that ends early, and one cut before what it needs to open; an empty file, noise, a missing file and one with no audio |
 | `audio.eq` (R19.7) | with and without `Preamp:`; filters `ON` and `OFF`; `PK`, `LSC`, `HSC`, `LP`, `HP` and types it doesn't read; `Fc` with and without `Hz`; `Q` against `BW`; comments; more than ten bands |
 | `online` (A7) | fields missing, `null`, empty or added; dates as a year, a month or a day; several matching releases; answers `503` and `429`; slow answers; text in any script |
 | `rootfiles`, `settings` (A2.10) | each older format, and a newer one; unknown fields and groups; values broken or out of range (R13.9); two computers' entries for one song; a file cut short by a sync in progress; a sync tool's "conflicted copy" beside it |
@@ -156,8 +157,10 @@ entry for the list.
 - **The analysis** (A5): peaks and bands of generated tones land where they should.
 - **QML**: the models with a 50,000-row library; the views load with no QML warnings.
 
-Tests never need the network or a sound card: playback tests use Qt's null audio output and check
-positions and signals, and online lookups use recorded answers (A7.8). Only
+Tests never need the network or a sound card: playback tests play into a null output and check
+positions and signals, and online lookups use recorded answers (A7.8). Qt has no null output of its
+own, so tier 1's container runs PulseAudio with a null sink (`scripts/test-tier1.sh`); a run by hand
+without one skips the playback tests rather than play tones through the speakers. Only
 `scripts/check-services.py`, run by hand and weekly in CI, talks to the real services.
 
 ## The clock harness

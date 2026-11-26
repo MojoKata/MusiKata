@@ -9,8 +9,10 @@ Everything a build takes from outside is pinned in `packaging/versions.env`: the
 python-build-standalone build, by version and SHA-256 per platform), PySide6 (Essentials and Addons,
 one version), Mutagen, NumPy, PyAV, the platform modules of A4.5, `truststore`, Chromaprint's
 `fpcalc` (by version and SHA-256 per platform), pytest and its dependencies, ruff, mypy,
-coverage.py, mutmut, Hypothesis and jsonschema ([`coding.md`](coding.md)), appimagetool and its
-runtime, and each container image by digest.
+coverage.py, mutmut, Hypothesis and jsonschema ([`coding.md`](coding.md)), PyInstaller and its
+dependencies, appimagetool and its runtime, and each container image by digest (the Ubuntu images,
+the Wine image PyInstaller runs in, Inno Setup's, and the Debian one that compiles the `icuuc.dll`
+stand-in Qt needs under Wine).
 
 - A pin moves only to a release at least 14 days old (the cooldown), so a bad release has time to
   be found and pulled before MusiKata ships it.
@@ -30,9 +32,27 @@ runtime, and each container image by digest.
 | macOS, Apple silicon | `scripts/build-macos.sh arm64` | an Apple silicon macOS runner (PyInstaller) | `MusiKata-<version>-arm64.dmg` |
 | macOS, Intel | `scripts/build-macos.sh x86_64` | the same runner, under Rosetta (A6.5) | `MusiKata-<version>-x86_64.dmg` |
 
-Each build trims Qt to `packaging/qt-modules.txt` (A6.2), adds `LICENSE.txt` and
-`THIRD-PARTY-NOTICES.txt` (A6.6), and is started once by its test script, which plays a demo file
-and quits.
+Each build trims Qt to `packaging/qt-modules.txt` (`scripts/qt_trim.py`, A6.2), adds `LICENSE.txt`
+and `THIRD-PARTY-NOTICES.txt` made from the packages it installed (`scripts/third_party_notices.py`,
+A6.6), registers the file kinds of R1.7 for "Open with" only, and is started once by its test
+script, which makes a demo file and runs `musikata --play FILE`: MusiKata's window over a root
+holding the file, the root scanned, and the file played to its end, then it quits, 0 when all went
+well. Each writes `build/release/` with a `.sha256` beside the build; CI's jobs `appimage`, `windows`,
+`macos-arm64` and `macos-x86_64` build, start and keep each, and `ci` needs them.
+
+| Build | Started by | Where, and on what sound device |
+|---|---|---|
+| AppImage | `scripts/test-appimage.sh` | an Ubuntu 24.04 container with only what A6.3 takes from the system, on X11 (Xvfb), into PulseAudio's null sink |
+| Windows | `scripts/test-windows.sh` | Wine in its container: Setup run silently, the file kinds checked in the registry; Qt finds no sound device under Wine, so `--play` decodes the file to its end instead and ends with 3 |
+| macOS | `scripts/test-macos.sh arm64`, `x86_64` | the runner that built it (`macos-15`, Apple silicon; the Intel one under Rosetta), out of the mounted `.dmg`, on the runner's own sound device |
+
+Built by hand, each in its containers (Docker) or on a Mac:
+
+```sh
+scripts/build-appimage.sh && scripts/test-appimage.sh
+scripts/build-windows.sh && scripts/test-windows.sh
+scripts/build-macos.sh arm64 && scripts/test-macos.sh arm64      # on a Mac; x86_64 under Rosetta
+```
 
 ## Signing
 
@@ -40,9 +60,10 @@ and quits.
   published in the README; a `.sha256` beside it.
 - **Windows**: Authenticode, once a certificate is in hand; until then the README says so and
   points to the `.sha256`.
-- **macOS**: ad-hoc signatures (A6.5.1), with a `.sha256` beside each `.dmg`; users allow the
-  first start once with **Open Anyway**. The job has a step for a Developer ID that is skipped
-  until there is one; with it, the bundles are signed, notarized by Apple and stapled.
+- **macOS**: ad-hoc signatures (A6.5.1), which PyInstaller gives the bundle as it builds it, with a
+  `.sha256` beside each `.dmg`; users allow the first start once with **Open Anyway**. A step for a
+  Developer ID joins the release's signing once there is one; with it, the bundles are signed,
+  notarized by Apple and stapled.
 
 Signing keys never enter the repository or CI's logs; the signing step runs only for an approved
 `v*` tag, in the `release` environment, whose approval is the owner's. The release key, and the

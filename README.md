@@ -8,6 +8,11 @@ files, so the library works with any other player and survives MusiKata. It edit
 songs at once, plays gaplessly with a parametric equalizer, and shows the music as it plays, as a
 waveform or a 3D spectrum analyzer.
 
+![MusiKata's Songs list, on its made-up demo library](https://mojokata.github.io/MusiKata/screenshots/latest/L03-songs.png)
+
+The newest screens, taken by the tour of each push to `master`, are on the
+[screenshots](https://mojokata.github.io/MusiKata/screenshots/) page.
+
 MusiKata is being built, and has no release yet. Where the build stands is in
 [`DEVELOP.md`](DEVELOP.md).
 

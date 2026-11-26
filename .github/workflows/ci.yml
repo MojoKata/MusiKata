@@ -1,9 +1,11 @@
 # MusiKata's CI (docs/process/ci.md, docs/process/testing.md). Every pull request and push to
 # master: the checks of scripts/check.sh, tier 1 in its container measured by coverage.py, the
-# coverage report against the floors and the 80 % each module of src/ needs, and the Pages site,
-# which a push to master publishes. A v* tag: its version checked against __version__. The `ci` job
-# is the one check the master ruleset requires, once it has passed (docs/process/genesis.md, 4).
-# The builds and the tour join with the slices that make them (DEVELOP.md).
+# coverage report against the floors and the 80 % each module of src/ needs, the tour on the demo
+# library with its layout check, and the Pages site with the tour's screens, which a push to master
+# publishes. The builds (docs/process/build-and-release.md, "The builds"): the AppImage, the Windows
+# installer and the two .dmgs, each started once and kept with its .sha256, unsigned (signing is the
+# release's). A v* tag: its version checked against __version__. The `ci` job is the one check the
+# master ruleset requires, once it has passed (docs/process/genesis.md, 4).
 # Each action is pinned by its commit SHA, as the repository requires (genesis.md, 5).
 name: CI
 on:
@@ -45,10 +47,12 @@ jobs:
         run: |
           mkdir -p build
           py=$(sh scripts/python-standalone.sh)
+          # mypy reads the app's imports (PySide6, NumPy) from the packages tier 1 runs on
+          . scripts/lib-tier1.sh && tier1_setup "$PWD"
           {
             "$py" -m ruff format --check . &&
             "$py" -m ruff check . &&
-            "$py" -m mypy &&
+            PYTHONPATH="$SITE" "$py" -m mypy &&
             python3 scripts/doccheck.py --quiet &&
             git ls-files -z | xargs -0 sh -c 'for f; do [ -f "$f" ] && printf "%s\0" "$f"; done' sh |
               xargs -0 python3 scripts/public_text.py check
@@ -100,12 +104,50 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # the tour (A1.6; scripts/test-tour.sh) in tier 1's container, on the demo library (made by
+  # scripts/demo_library.py, cached by it and the pins): each screen of the mockups saved, and every
+  # screen's text checked against its box; kept as the `tour` artifact, failed or not, which `site`
+  # publishes as master's screens
+  tour:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: |
+            build/python-cache
+            build/site-packages-*
+          key: tour-${{ hashFiles('packaging/versions.env') }}
+      # the demo library, on tags too: it isn't a release input
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: build/demo
+          key: demo-${{ hashFiles('scripts/demo_library.py', 'packaging/versions.env') }}
+      - run: COWORKER_UNATTENDED=1 coworker/bin/coworker status --no-network   # the coworker protocol, unattended
+      - run: mkdir -p build && sh scripts/test-tour.sh 2>&1 | tee build/ci-tour.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-tour.log tour
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: tour
+          path: |
+            build/tour/*.png
+            build/tour/layout.txt
+          if-no-files-found: ignore
+          retention-days: 90     # a release's tour is read back from its tag's run (ci.md)
+
   # the Pages site (docs/process/ci.md, "The Pages site"), on every run: the coverage report, the
   # history the published site holds with this commit's point added, the hardening page from the
-  # repository's issues, and the screenshots, kept as the `site` artifact; `pages` publishes master's.
-  # The tour's screenshots join with the tour job (slice 2.3)
+  # repository's issues, and the screenshots (this run's tour as master's), kept as the `site`
+  # artifact; `pages` publishes master's
   site:
-    needs: [coverage]
+    needs: [coverage, tour]
     if: ${{ !github.event.repository.fork }}   # a fork's push builds no site: it would carry the fork's name
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -122,10 +164,15 @@ jobs:
         with:
           name: coverage
           path: build/coverage
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: tour
+          path: build/tour
       - env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p build/shots
+          mkdir -p build/shots/master
+          cp build/tour/*.png build/shots/master/
           python3 scripts/coverage_site.py release-tours build/shots 2>&1 | tee build/ci-site.log
           python3 scripts/coverage_site.py build --screenshots build/shots 2>&1 | tee -a build/ci-site.log
           python3 scripts/public_text.py check build/site/*.html build/site/*.json build/site/screenshots/index.* 2>&1 | tee -a build/ci-site.log
@@ -162,6 +209,117 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
 
+  # the AppImage (A6.3), built in its Ubuntu 22.04 container and started once in an Ubuntu 24.04 one:
+  # a demo file played to its end on X11 into PulseAudio's null sink (scripts/test-appimage.sh)
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/appimage-cache
+          key: appimage-${{ hashFiles('packaging/versions.env') }}
+      - run: COWORKER_UNATTENDED=1 coworker/bin/coworker status --no-network   # the coworker protocol, unattended
+      - run: |
+          mkdir -p build
+          { sh scripts/build-appimage.sh && sh scripts/test-appimage.sh; } 2>&1 | tee build/ci-appimage.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-appimage.log appimage
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-x86_64.AppImage.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: appimage
+          path: build/release/MusiKata-*-x86_64.AppImage*
+          if-no-files-found: error
+
+  # the Windows installer (A6.4), built under Wine in its containers and started once there: installed
+  # silently, its file kinds checked, and a demo file decoded to its end, as Qt finds no sound device
+  # under Wine (scripts/test-windows.sh)
+  windows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/wine-cache
+          key: windows-${{ hashFiles('packaging/versions.env', 'packaging/windows/icuuc-stub.c') }}
+      - run: COWORKER_UNATTENDED=1 coworker/bin/coworker status --no-network   # the coworker protocol, unattended
+      - run: |
+          mkdir -p build
+          { sh scripts/build-windows.sh && sh scripts/test-windows.sh; } 2>&1 | tee build/ci-windows.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-windows.log windows
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-setup.exe.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: windows
+          path: build/release/MusiKata-*-setup.exe*
+          if-no-files-found: error
+
+  # the two .dmgs (A6.5), each built with PyInstaller on an Apple silicon runner (macos-15, the
+  # oldest Apple silicon image GitHub has) and started once there: the Intel one under Rosetta
+  # (scripts/build-macos.sh, scripts/test-macos.sh)
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/macos-cache
+          key: macos-arm64-${{ hashFiles('packaging/versions.env') }}
+      - run: |
+          mkdir -p build
+          { sh scripts/build-macos.sh arm64 && sh scripts/test-macos.sh arm64; } 2>&1 | tee build/ci-macos.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-macos.log macos-arm64
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-arm64.dmg.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: macos-arm64
+          path: build/release/MusiKata-*-arm64.dmg*
+          if-no-files-found: error
+
+  macos-x86_64:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/macos-cache
+          key: macos-x86_64-${{ hashFiles('packaging/versions.env') }}
+      - run: arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license   # Rosetta, if the image lacks it
+      - run: |
+          mkdir -p build
+          { sh scripts/build-macos.sh x86_64 && sh scripts/test-macos.sh x86_64; } 2>&1 | tee build/ci-macos.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-macos.log macos-x86_64
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-x86_64.dmg.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: macos-x86_64
+          path: build/release/MusiKata-*-x86_64.dmg*
+          if-no-files-found: error
+
   # a v* tag: the tag is __version__ (docs/process/release.md)
   version:
     if: github.ref_type == 'tag'
@@ -178,13 +336,13 @@ jobs:
 
   # the one check the master ruleset requires: everything above passed
   ci:
-    needs: [tier1, coverage]
+    needs: [tier1, coverage, tour, appimage, windows, macos-arm64, macos-x86_64]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - env:
-          RESULTS: ${{ needs.tier1.result }} ${{ needs.coverage.result }}
+          RESULTS: ${{ needs.tier1.result }} ${{ needs.coverage.result }} ${{ needs.tour.result }} ${{ needs.appimage.result }} ${{ needs.windows.result }} ${{ needs.macos-arm64.result }} ${{ needs.macos-x86_64.result }}
         run: |
-          echo "tier1, coverage: $RESULTS"
-          test "$RESULTS" = "success success"
+          echo "tier1, coverage, tour, appimage, windows, macos-arm64, macos-x86_64: $RESULTS"
+          test "$RESULTS" = "success success success success success success success"

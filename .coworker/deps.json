@@ -119,6 +119,12 @@
       "platform": "rocky-10*",
       "min": "0.3.10",
       "why": "libxcb-render-util.so.0: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "pulseaudio-libs",
+      "platform": "rocky-10*",
+      "min": "17.0",
+      "why": "libpulse.so.0, which Qt Multimedia links: playback (QAudioSink, A4.1); Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
     }
   ],
   "network": [
@@ -187,12 +193,33 @@
       "host": "security.ubuntu.com",
       "port": 80,
       "why": "apt security updates in the Ubuntu-based containers (plain HTTP, as the images ship)"
+    },
+    {
+      "host": "deb.debian.org",
+      "port": 80,
+      "why": "apt in the Debian-based containers: the icuuc.dll stand-in's compiler, PulseAudio for the Windows build's start (plain HTTP, as the images ship)"
     }
   ],
   "container_images": [
     {
       "image": "ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
-      "why": "tier 1: the release's Python and PySide6 on Ubuntu 24.04 (packaging/versions.env)"
+      "why": "tier 1, the tour, and the AppImage's start (scripts/test-appimage.sh), on Ubuntu 24.04 (packaging/versions.env)"
+    },
+    {
+      "image": "ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
+      "why": "builds the AppImage on Ubuntu 22.04 (scripts/build-appimage.sh)"
+    },
+    {
+      "image": "debian:12@sha256:854dd8ab51d62866dbd8f5431d15ce77b12983a2a4a1e1fe43a2395dc7ef9f61",
+      "why": "compiles the icuuc.dll stand-in Qt needs under Wine (scripts/build-windows.sh)"
+    },
+    {
+      "image": "tobix/pywine:3.14@sha256:adbb25c76313f5e4d29a9874ddc4ffd963504ac63e794d55ae52279d77cc2009",
+      "why": "PyInstaller under Wine, and the Windows build's start (scripts/build-windows.sh, scripts/test-windows.sh)"
+    },
+    {
+      "image": "amake/innosetup@sha256:e003376ba818547275fe10c95e2a29be0f2d12d45e9eb8f205b6672dc5685bb1",
+      "why": "Inno Setup under Wine: the Windows installer (scripts/build-windows.sh)"
     }
   ]
 }
