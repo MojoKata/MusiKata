@@ -18,7 +18,7 @@ Item {
     readonly property real room: tools.x - 8 - (count.x + count.implicitWidth + 24)
     readonly property bool narrow: room < fieldMin
     readonly property bool overTitle: narrow && (open || field.activeFocus || header.library.search !== "")
-    // the tour waits on what is `loading`: here, a search's rows still to come
+    // the tour waits on what is `loading`: here, the rows of a search or a long list still to come
     readonly property bool loading: header.library.searching
     height: 64
 

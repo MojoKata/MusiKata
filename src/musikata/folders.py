@@ -252,9 +252,7 @@ class FolderModel(PagedModel):
         )
 
     def _read_page(self, p: int) -> list[dict[str, Any] | None]:
-        if self._ids is None:
-            return super()._read_page(p)
-        ids = self._ids[p * PAGE : (p + 1) * PAGE]
+        ids = (self._ids or [])[p * PAGE : (p + 1) * PAGE]
         c = self._read()
         rows: dict[int, dict[str, Any]] = {}
         for kind, table, cols in ((0, "folder", FOLDER_COLUMNS), (1, "song", FILE_COLUMNS)):

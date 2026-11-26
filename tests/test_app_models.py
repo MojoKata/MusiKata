@@ -377,6 +377,39 @@ def test_a_search_finds_its_rows_off_the_gui_thread_and_they_come_with_count_cha
     m.wait()
 
 
+def test_a_long_lists_rows_are_found_off_the_gui_thread_and_each_page_read_by_id(
+    index, qtbot, monkeypatch
+):
+    """A1.3, A1.5: sorting a long list (the Songs list of 50,000) is the search thread's, and a
+    page is a lookup by id at any depth, never a sort on the GUI thread; a short one is found at
+    once."""
+    monkeypatch.setattr(models, "PAGE", 2)
+    fill(index, [{"path": f"{n}.flac", "title": f"Song {n}"} for n in range(5)])
+    m = models.SongsModel(index.read, "title")
+    monkeypatch.setattr(models, "SHORT", 4, raising=False)
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.reload()
+        assert m.count == 0 and m.pending() and not m.searching()
+    assert m.count == m.total() == 5 and not m.pending() and not m.filtered()
+    asked = []
+    index.read().set_trace_callback(asked.append)
+    try:
+        assert [m.row(n)["title"] for n in (4, 0, 2)] == ["Song 4", "Song 0", "Song 2"]
+    finally:
+        index.read().set_trace_callback(None)
+    assert len(asked) == 3 and all(q.endswith(")") and "OFFSET" not in q for q in asked)
+    seen = _signals(m)
+    fill(index, [{"path": "a.flac", "title": "A first"}])
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.refresh()
+        assert m.count == 5 and m.row(0)["title"] == "Song 0"  # the rows shown stay till then
+    assert seen == [("inserted", 5, 5), ("changed", 0, 5)] and m.row(0)["title"] == "A first"
+    monkeypatch.setattr(models, "SHORT", 6, raising=False)
+    m.reload()  # short: at once
+    assert m.count == 6 and not m.pending()
+    m.wait()
+
+
 def test_a_newer_search_replaces_one_still_running_and_its_rows_win(index, qtbot):
     fill(index, LIBRARY)
     started, release = threading.Event(), threading.Event()

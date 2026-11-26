@@ -1,12 +1,12 @@
 """The list models the QML views bind to (A1.5): rows paged from the index as they scroll into
 view, so QML never holds the whole library; sorting and filtering are SQL, not proxy models.
 
-A search (R2.7) is worked out off the GUI thread (A1.3): a model given one sends its query to the
-search thread (`Searcher`), which finds the ids of the matching rows in the list's order, and the
-model takes them when they come back, by a signal queued to the GUI thread, dropping what a newer
-search or reload has made stale. Its pages are then read by id, each a lookup of 200 rows by
-their keys whatever the order, so typing never waits on a query and scrolling a long result never
-sorts it again.
+A list's rows are found off the GUI thread (A1.3): a model sends its query, with its search (R2.7)
+when one filters it, to the search thread (`Searcher`), which finds the ids of its rows in the
+list's order, and the model takes them when they come back, by a signal queued to the GUI thread,
+dropping what a newer search or reload has made stale. Its pages are then read by id, each a
+lookup of 200 rows by their keys whatever the order, so typing never waits on a query, and
+scrolling, however deep, never sorts the list again: a page is a few milliseconds at any depth.
 
 What a row shows is decided here, as text (`docs/process/coding.md`: QML only lays out and binds):
 the title, or the file's name when the song has none; the genres joined; the length as m:ss; an
@@ -40,6 +40,7 @@ from musikata_core import albums, folders, search
 log = logging.getLogger(__name__)
 
 PAGE = 200  # rows read at a time
+SHORT = 2000  # rows a list without a search may have to be found at once, not on the search thread
 KEEP = 16  # pages held; the one read longest ago goes first
 COVERS = "image://covers/"  # where the cover provider serves a thumbnail, by its name (covers.py)
 UNKNOWN_ARTIST = "Unknown artist"
@@ -292,8 +293,10 @@ class PagedModel(QAbstractListModel):
     row of those columns reads (`_row`), the roles, its table's key, and which of its rows a
     search's songs pick (`_narrow`).
 
-    While a search (R2.7) filters it, the ids of its matching rows, in its order, are found on the
-    search thread; `count` is how many match and `total` how many there are without it."""
+    The ids of its rows in its order, of those a search (R2.7) picks while one filters it, are
+    found on the search thread, so no query that sorts the whole list runs on the GUI thread, and
+    each page is read by them; `count` is how many it shows and `total` how many there are without
+    the search."""
 
     countChanged = Signal()
     roles: tuple[str, ...] = ()
@@ -313,7 +316,7 @@ class PagedModel(QAbstractListModel):
         self._searcher = searcher if searcher is not None else Searcher(self)
         self._search = ""
         self._query_of_search = search.Query()
-        self._ids: list[int] | None = None  # the rows a search found, in order; None: no search
+        self._ids: list[int] | None = None  # the rows found, in order; None: none yet
         self._generation = 0  # which reload a search's result belongs to
         self._shown = ""  # the search whose rows the list shows
         self._pending = False  # a search sent to the search thread, its rows still to come
@@ -337,53 +340,49 @@ class PagedModel(QAbstractListModel):
         self.reload()
 
     def reload(self) -> None:
-        """Reads the count afresh and drops the pages held: after a scan, or a new order. While a
-        search filters it, the search thread finds the rows, and they come with countChanged."""
+        """Reads the list afresh from its start: after a new order, a new search or another
+        selection. Its rows, in order, are found on the search thread, and come with
+        countChanged."""
         self._generation += 1
-        cols, table, where, params, order = self._query()
-        if not self._query_of_search:
-            self.beginResetModel()
-            self._pages.clear()
-            self._ids = None
-            source = f"{table} WHERE {where}" if where else table
-            self._count = self._total = int(
-                self._read().execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0]
-            )
-            self._shown, self._pending = "", False
-            self.endResetModel()
-            self.countChanged.emit()
-            return
         self._find(keep=False)
 
     def refresh(self) -> None:
-        """Reads the rows afresh where they are, after a scan: rows added or taken away at the
-        end and every row read again, never a reset, so a view keeps its scroll position (A2.4).
-        While a search filters it, the search thread finds its rows again, and they come the same
-        way."""
+        """Reads the rows afresh where they are, after a scan: once the search thread has found
+        them, rows added or taken away at the end and every row read again, never a reset, so a
+        view keeps its scroll position (A2.4). Until then the rows shown stay."""
         self._generation += 1
-        cols, table, where, params, order = self._query()
-        if self._query_of_search:
-            self._find(keep=True)
-            return
-        source = f"{table} WHERE {where}" if where else table
-        count = int(self._read().execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0])
-        self._resize(count, count, None, "")
+        self._find(keep=True)
 
     def _find(self, keep: bool) -> None:
-        """Sends the search to the search thread; its rows come with countChanged."""
+        """Finds the ids of the list's rows in its order: those its search picks, or every one
+        without a search. A search's, and those of a list longer than SHORT, are found on the
+        search thread and come with countChanged; a short list's, a matter of a millisecond or two,
+        at once, so an album's page or a small folder opens whole."""
         cols, table, where, params, order = self._query()
-        songs, song_params = search.condition(self._query_of_search)
-        narrow, narrow_params = self._narrow(songs, song_params)
-        found = f"({where}) AND {narrow}" if where else narrow
-        read, key, generation, text = self._read, self.key, self._generation, self._search
+        if self._query_of_search:
+            songs, song_params = search.condition(self._query_of_search)
+            narrow, narrow_params = self._narrow(songs, song_params)
+            found = f"({where}) AND {narrow}" if where else narrow
+            text = self._search
+        else:
+            found, narrow_params, text = where, (), ""
+        read, key, generation = self._read, self.key, self._generation
+        source = f"{table} WHERE {where}" if where else table
 
         def work() -> tuple[int, list[int]]:
             c = read()
-            source = f"{table} WHERE {where}" if where else table
+            sql = f"SELECT {key} FROM {table}{' WHERE ' + found if found else ''} ORDER BY {order}"
+            ids = [r[0] for r in c.execute(sql, (*params, *narrow_params))]
+            if not text:
+                return len(ids), ids
             total = int(c.execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0])
-            sql = f"SELECT {key} FROM {table} WHERE {found} ORDER BY {order}"
-            return total, [r[0] for r in c.execute(sql, (*params, *narrow_params))]
+            return total, ids
 
+        if not text:
+            count = int(read().execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0])
+            if count <= SHORT:
+                self._found(generation, text, work(), keep)
+                return
         self._pending = True
         self._searcher.submit(
             self, work, lambda result: self._found(generation, text, result, keep)
@@ -441,17 +440,14 @@ class PagedModel(QAbstractListModel):
         return page[i] if i < len(page) else None
 
     def _read_page(self, p: int) -> list[dict[str, Any] | None]:
-        cols, table, where, params, order = self._query()
-        c = self._read()
-        if self._ids is None:
-            source = f"{table} WHERE {where}" if where else table
-            sql = f"SELECT {cols} FROM {source} ORDER BY {order} LIMIT ? OFFSET ?"
-            return [self._row(r) for r in c.execute(sql, (*params, PAGE, p * PAGE))]
-        ids = self._ids[p * PAGE : (p + 1) * PAGE]
+        """Page p of the rows found (`_find`), each looked up by its key, whatever the order: a
+        few milliseconds at any depth."""
+        cols, table, _where, _params, _order = self._query()
+        ids = (self._ids or [])[p * PAGE : (p + 1) * PAGE]
         marks = ", ".join("?" * len(ids))
         sql = f"SELECT {self.key}, {cols} FROM {table} WHERE {self.key} IN ({marks})"
-        rows = {r[0]: self._row(r[1:]) for r in c.execute(sql, ids)}
-        return [rows.get(i) for i in ids]  # None for a row gone since the search
+        rows = {r[0]: self._row(r[1:]) for r in self._read().execute(sql, ids)}
+        return [rows.get(i) for i in ids]  # None for a row gone since they were found
 
     def _changed(self, role: str) -> None:
         if self._count:
@@ -491,14 +487,14 @@ class PagedModel(QAbstractListModel):
 
     def filtered(self) -> bool:
         """Whether the rows the list shows are a search's."""
-        return self._ids is not None
+        return bool(self._shown)
 
     def shown_search(self) -> str:
         """The search whose rows the list shows ("" when it shows them all)."""
         return self._shown
 
     def pending(self) -> bool:
-        """Whether a search's rows are still to come."""
+        """Whether the rows found are still to come (`_find`)."""
         return self._pending
 
     def wait(self) -> None:
