@@ -26,6 +26,22 @@ def test_where_each_platform_keeps_its_indexes_and_musikata_data_moves_them():
     assert roots.roots_dir({**env, "MUSIKATA_DATA": "/d"}, "linux") == "/d/roots"
 
 
+def test_where_each_platform_keeps_its_caches_and_musikata_data_moves_them():
+    env = {"HOME": "/h"}
+    assert roots.caches_dir(env, "linux") == os.path.join("/h", ".cache", "musikata")
+    assert roots.caches_dir({**env, "XDG_CACHE_HOME": "/x"}, "linux") == os.path.join(
+        "/x", "musikata"
+    )
+    assert roots.caches_dir(env, "darwin") == os.path.join("/h", "Library", "Caches", "MusiKata")
+    assert roots.caches_dir({"USERPROFILE": "/u"}, "win32") == os.path.join(
+        "/u", "AppData", "Local", "MusiKata", "Cache"
+    )
+    assert roots.caches_dir({"LOCALAPPDATA": "/l"}, "win32") == os.path.join(
+        "/l", "MusiKata", "Cache"
+    )
+    assert roots.caches_dir({**env, "MUSIKATA_DATA": "/d"}, "linux") == os.path.join("/d", "cache")
+
+
 def test_decide_a_root_seen_at_its_path_moved_or_copied():
     assert roots.decide(None, "/m", False) == "use"
     assert roots.decide("/m", "/m", True) == "use"
@@ -111,6 +127,21 @@ def test_indexes_not_opened_for_180_days_are_removed_and_the_log_says_so(tmp_pat
     assert roots.remove_stale(str(tmp_path / "none"), clock_) == []
 
 
+def test_a_stale_roots_caches_go_with_its_index(tmp_path):
+    """A2.9: the index and caches of a root not opened for 180 days; its cover thumbnails and
+    mosaics are under its index's key in the caches (R1.5)."""
+    base, caches, clock_ = str(tmp_path / "roots"), str(tmp_path / "cache"), FakeClock()
+    old = roots.find_index(_root(tmp_path, "Old"), base, clock_)
+    clock_.advance(days=181)
+    recent = roots.find_index(_root(tmp_path, "Recent"), base, clock_)
+    for key in (old.key, recent.key):
+        os.makedirs(os.path.join(caches, key, "covers"))
+        open(os.path.join(caches, key, "covers", "t-256.jpg"), "wb").close()
+    assert roots.remove_stale(base, clock_, keep=recent.key, caches=caches) == [old.key]
+    assert not os.path.exists(os.path.join(caches, old.key))
+    assert os.path.exists(os.path.join(caches, recent.key, "covers", "t-256.jpg"))
+
+
 def test_stale_is_strictly_past_180_days():
     now = datetime(2026, 11, 25, tzinfo=UTC)
     opened = {"a": now - timedelta(days=180), "b": now - timedelta(days=181)}
@@ -120,3 +151,31 @@ def test_stale_is_strictly_past_180_days():
 def test_the_system_clock_is_utc_and_monotonic():
     c = clock.SystemClock()
     assert c.now().tzinfo is not None and c.monotonic() <= c.monotonic()
+
+
+def test_a_root_that_isnt_there_finds_the_index_that_last_opened_it_touching_nothing(tmp_path):
+    base, music = str(tmp_path / "roots"), tmp_path / "Music"
+    music.mkdir()
+    first = roots.find_index(str(music), base, FakeClock())
+    later = FakeClock(datetime(2026, 11, 26, tzinfo=UTC))
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    other = roots.find_index(str(copy), base, later)  # another root, opened later
+    shutil.rmtree(music)  # its drive unplugged (R2.10)
+    found = roots.recorded(str(music), base)
+    assert found == roots.Found(first.folder, first.key, False) and found.key != other.key
+    assert not music.exists()  # nothing made where the root was
+    assert roots.recorded(str(tmp_path / "Never"), base) is None
+    assert roots.recorded(str(music), str(tmp_path / "no-roots")) is None
+
+
+def test_of_two_indexes_that_opened_one_path_the_last_opened_is_found(tmp_path):
+    base = tmp_path / "roots"
+    for name, when in (("old", "2026-01-01T00:00:00+00:00"), ("new", "2026-06-01T00:00:00+00:00"),
+                       ("odd", None)):  # fmt: skip
+        (base / name).mkdir(parents=True)
+        record = {"format": 1, "path": os.path.realpath(str(tmp_path / "Music"))}
+        if when:
+            record["opened"] = when
+        (base / name / "index.json").write_text(json.dumps(record))
+    assert roots.recorded(str(tmp_path / "Music"), str(base)).key == "new"

@@ -5,7 +5,10 @@ list scrolling.
 
 The schema has a version (PRAGMA user_version), and MIGRATIONS run in order at open, each in one
 transaction. A slice that needs a table adds a migration at the end; a migration is never changed
-once released (A2.10's state snapshots read every older index)."""
+once released (A2.10's state snapshots read every older index). So that what a migration does stays
+fixed in time, it is SQL of its own and calls no other module: rows only code can work out (sort
+keys, albums, folders) are left to the next scan, by marking every song to be read again (R1.5.1:
+the index is rebuilt from the files, losing only time)."""
 
 from __future__ import annotations
 
@@ -28,13 +31,15 @@ FIELDS = (
 
 
 def _v1(c: sqlite3.Connection) -> None:
-    """Songs and their genres (A2.1's song and song_genre)."""
+    """Songs and their genres (A2.1's song and song_genre), with R4.1's fields as they were then
+    (a field added to FIELDS later is a migration of its own)."""
     c.execute(
         "CREATE TABLE song (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
         " size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, kind TEXT, length REAL,"
-        " bitrate INTEGER, sample_rate INTEGER, channels INTEGER, audio_hash TEXT, error TEXT, "
-        + ", ".join(FIELDS)
-        + ")"
+        " bitrate INTEGER, sample_rate INTEGER, channels INTEGER, audio_hash TEXT, error TEXT,"
+        " title, artist, album, albumartist, track, tracktotal, disc, disctotal, year, date,"
+        " composer, comment, compilation, rating, artistsort, albumartistsort, albumsort,"
+        " rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, has_cover)"
     )
     c.execute("CREATE INDEX song_audio_hash ON song (audio_hash)")
     c.execute(
@@ -44,7 +49,81 @@ def _v1(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX song_genre_genre ON song_genre (genre)")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1]
+def _v2(c: sqlite3.Connection) -> None:
+    """Albums and artists (A2.1's album, R2.5) and the sort keys of R2.13 on each song. They are
+    worked out from the songs' tags by the scan (albums.py), so every song is read again by the
+    next one: its size and modification time no longer match its row."""
+    c.execute(
+        "CREATE TABLE artist (id INTEGER PRIMARY KEY, identity TEXT NOT NULL UNIQUE,"
+        " name TEXT NOT NULL, sort_key TEXT NOT NULL, albums INTEGER NOT NULL DEFAULT 0,"
+        " songs INTEGER NOT NULL DEFAULT 0)"
+    )
+    c.execute("CREATE INDEX artist_order ON artist (sort_key, id)")
+    c.execute(
+        "CREATE TABLE album (id INTEGER PRIMARY KEY, identity TEXT NOT NULL UNIQUE,"
+        " artist TEXT NOT NULL, title TEXT NOT NULL, artist_key TEXT NOT NULL,"
+        " title_key TEXT NOT NULL, artist_id INTEGER REFERENCES artist (id) ON DELETE SET NULL,"
+        " compilation INTEGER NOT NULL DEFAULT 0, year INTEGER, genre TEXT,"
+        " songs INTEGER NOT NULL DEFAULT 0, length REAL NOT NULL DEFAULT 0,"
+        " size INTEGER NOT NULL DEFAULT 0, embedded INTEGER NOT NULL DEFAULT 0,"
+        " folder TEXT NOT NULL, folder_image TEXT, folder_image_size INTEGER,"
+        " folder_image_mtime INTEGER, cover_kind TEXT, cover TEXT, thumb TEXT)"
+    )
+    c.execute("CREATE INDEX album_order ON album (artist_key, title_key, id)")
+    c.execute("CREATE INDEX album_artist ON album (artist_id)")
+    c.execute("CREATE INDEX album_thumb ON album (thumb)")
+    for column in (
+        "album_id INTEGER REFERENCES album (id) ON DELETE SET NULL",
+        "artist_id INTEGER REFERENCES artist (id) ON DELETE SET NULL",
+        "artist_key TEXT",
+        "album_key TEXT",
+    ):
+        c.execute(f"ALTER TABLE song ADD COLUMN {column}")
+    c.execute("CREATE INDEX song_album ON song (album_id, disc, track, path)")
+    c.execute("CREATE INDEX song_artist ON song (artist_id)")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
+def _v3(c: sqlite3.Connection) -> None:
+    """Search (A2.5, R2.7): song_fts, FTS5 over each song's title, artist, album, album artist,
+    genres, year and file name, its rowid the song's id, case and accents aside. It is filled
+    from the rows there, so no song needs reading again; the scan keeps it from then on
+    (search.py)."""
+    c.execute(
+        "CREATE VIRTUAL TABLE song_fts USING fts5(title, artist, album, albumartist, genre, year,"
+        " filename, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3')"
+    )
+    c.execute(
+        "INSERT INTO song_fts (rowid, title, artist, album, albumartist, genre, year, filename)"
+        " SELECT id, title, artist, album, albumartist,"
+        " (SELECT group_concat(genre, ' ') FROM song_genre WHERE song_id = song.id), year,"
+        " substr(path, length(rtrim(path, replace(path, '/', ''))) + 1) FROM song"
+    )
+
+
+def _v4(c: sqlite3.Connection) -> None:
+    """Folders (A2.7, R2.9): each song's folder and its file name's sort key (R2.9.2), and the
+    folder table. They are worked out by the scan (folders.py, sortnames.py), whose code may change
+    after this migration is released, so every song is read again by the next one, as for version
+    2, and the scan fills them; the table is empty until it does."""
+    c.execute("ALTER TABLE song ADD COLUMN folder TEXT")
+    c.execute("ALTER TABLE song ADD COLUMN name_key TEXT")
+    c.execute("CREATE INDEX song_folder ON song (folder, name_key, path)")
+    c.execute(
+        "CREATE TABLE folder (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, parent TEXT,"
+        " name TEXT NOT NULL, name_key TEXT NOT NULL, fold TEXT NOT NULL,"
+        " folders INTEGER NOT NULL DEFAULT 0, songs INTEGER NOT NULL DEFAULT 0,"
+        " folders_beneath INTEGER NOT NULL DEFAULT 0, songs_beneath INTEGER NOT NULL DEFAULT 0,"
+        " length REAL NOT NULL DEFAULT 0, artist TEXT, album TEXT, year INTEGER, image TEXT,"
+        " image_size INTEGER, image_mtime INTEGER, cover_kind TEXT, cover TEXT, thumb TEXT,"
+        " mosaic TEXT)"
+    )
+    c.execute("CREATE INDEX folder_parent ON folder (parent, name_key, path)")
+    c.execute("CREATE INDEX folder_thumb ON folder (thumb)")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -80,8 +159,27 @@ class NewerIndexError(Exception):
     """An index a newer MusiKata made."""
 
 
+class _Reading:
+    """A thread's reading connection, held in the thread's own storage: when the thread ends (or
+    the index closes) the connection is closed and the index lets go of it."""
+
+    def __init__(
+        self, c: sqlite3.Connection, held: dict[int, sqlite3.Connection], lock: threading.RLock
+    ) -> None:
+        self.c, self._held, self._lock = c, held, lock
+        with lock:
+            held[id(self)] = c
+
+    def __del__(self) -> None:
+        with self._lock:
+            self._held.pop(id(self), None)
+        self.c.close()
+
+
 class Index:
-    """One root's musikata.db: its writer thread and a reading connection per thread."""
+    """One root's musikata.db: its writer thread and a reading connection per thread, each closed
+    when its thread ends or the index closes, whichever comes first (QML's image threads read
+    through it, covers.py, and outlive no index)."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -90,6 +188,8 @@ class Index:
         ]
         self._jobs = queue.Queue()
         self._local = threading.local()
+        self._reading: dict[int, sqlite3.Connection] = {}  # each thread's, by its holder
+        self._reading_lock = threading.RLock()  # a holder may go (__del__) while it is held
         writer = connect(path)
         migrate(writer)
         self._thread = threading.Thread(
@@ -122,16 +222,21 @@ class Index:
 
     def read(self) -> sqlite3.Connection:
         """This thread's reading connection."""
-        c: sqlite3.Connection | None = getattr(self._local, "c", None)
-        if c is None:
-            c = connect(self.path)
-            self._local.c = c
-        return c
+        held: _Reading | None = getattr(self._local, "reading", None)
+        if held is None:
+            held = self._local.reading = _Reading(
+                connect(self.path), self._reading, self._reading_lock
+            )
+        return held.c
 
     def close(self) -> None:
+        """Ends the writer thread, after the writes asked for, and closes every thread's reading
+        connection."""
         self._jobs.put(None)
         self._thread.join()
-        c = getattr(self._local, "c", None)
-        if c is not None:
+        self._local.reading = None
+        with self._reading_lock:
+            reading = list(self._reading.values())
+            self._reading.clear()
+        for c in reading:
             c.close()
-            self._local.c = None

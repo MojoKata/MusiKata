@@ -55,7 +55,8 @@ ALBUMS = [
     ("Mara Okafor", "Kindling", 2015, None, 149, 10, "mp3", "Kindling", "no-cover no-year"),
 ]
 # further albums, so the Folders view has every shape of folder (R2.9, R5.8): an artist with two
-# albums, three, five (Soundtracks), a Remixes folder of albums inside an artist's folder
+# albums, three, five (Soundtracks), a Remixes folder of albums inside an artist's folder; one of
+# the soundtracks names no album artist, only the compilation flag (R2.5.3)
 MORE_ALBUMS = [
     ("Mara Okafor", "Live at the Lantern", 2016, "Soul", 151, 8, "mp3", "", ""),
     ("The Paper Lanterns", "Paper Weather", 2019, "Indie Rock", 461, 11, "flac", "", ""),
@@ -91,14 +92,14 @@ MORE_ALBUMS = [
             6,
             kind,
             f"Soundtracks/{name}",
-            "compilation",
+            odd,
         )
-        for name, year, seed, kind in (
-            ("Low Tide Diaries", 2018, 431, "mp3"),
-            ("Paper Satellites", 2020, 433, "aac"),
-            ("The Long Signal", 2021, 439, "flac"),
-            ("Saltwater Town", 2022, 443, "opus"),
-            ("Night Ferry", 2024, 449, "vorbis"),
+        for name, year, seed, kind, odd in (
+            ("Low Tide Diaries", 2018, 431, "mp3", "compilation"),
+            ("Paper Satellites", 2020, 433, "aac", "compilation"),
+            ("The Long Signal", 2021, 439, "flac", "compilation"),
+            ("Saltwater Town", 2022, 443, "opus", "compilation"),
+            ("Night Ferry", 2024, 449, "vorbis", "compilation no-albumartist"),
         )
     ],
 ]
@@ -159,7 +160,6 @@ WORDS = [
     "Tide",
     "Velvet",
     "Wire",
-    ").split(",
 ]
 
 
@@ -219,6 +219,8 @@ def _album(row, rng: random.Random, lib: Library) -> None:
         if "compilation" in odd:
             tags["artist"] = f"{rng.choice(WORDS)} {rng.choice(WORDS)}"
             tags["compilation"] = True
+        if "no-albumartist" in odd:
+            del tags["albumartist"]
         if "tide" in odd:  # the mockups' Tide Tables (N03, L05): the faults Needs attention shows
             tags["genre"] = [{2: "electronic", 5: "Electronica"}.get(n, "Electronic")]
             tags["year"] = None if n == 3 else year

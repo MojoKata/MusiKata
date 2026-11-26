@@ -105,6 +105,8 @@ on a module this table doesn't name, or one whose area isn't the table's.
 |---|---|---|
 | `musikata_core.db` | library | The index: its schema, migrations, the writer thread and read connections (A2.1, A1.3) |
 | `musikata_core.scanner` | library | Walking the root, comparing, reading in batches, moves by audio hash (A2.2, A2.3) |
+| `musikata_core.albums` | library | Albums, compilations and artists, kept by the scan (R2.5, A2.1) |
+| `musikata_core.sortnames` | library | Sort names: sort tags, articles, case, punctuation and numbers (R2.13) |
 | `musikata_core.watch` | library | Watching the root, and rescanning on focus where it can't (A2.4) |
 | `musikata_core.search` | library | FTS5 queries and `field:` terms (A2.5, R2.7) |
 | `musikata_core.folders` | library | The folder table and the mosaics' sources (A2.7, R2.9, R5.8) |
@@ -131,6 +133,9 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.app` | app | Starting, one MusiKata at a time, opening files (R1.6, R1.7) |
 | `musikata.bridges` | app | `Backend`, `Player` and `Library`, as QML sees them (A1.2) |
 | `musikata.models` | app | The list models (A1.5) |
+| `musikata.firstrun` | app | The first start: the root dropped, chosen or the platform's music folder (R2.1, X01-first-run) |
+| `musikata.folders` | app | The Folders view: its model, the open folder, the selection (R2.9, A2.7) |
+| `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.media` | app | `mpris`, `smtc`, `nowplaying_mac`: the system's media controls (A4.5) |
 | `musikata.tour` | app | The tour (A1.6) |

@@ -32,14 +32,18 @@ module QuickControls2BasicStyleImpl
 module QuickControls2Impl
 module QuickTemplates2
 module QuickShapes
+module QuickDialogs2
+module QuickDialogs2QuickImpl
+module QuickDialogs2Utils
+module QuickLayouts
 module Multimedia
 module DBus             linux macos
 module XcbQpa           linux
 module WaylandClient    linux
 module WlShellIntegration linux
 
-# The QML modules the views import (QtQuick, QtQuick.Controls.Basic, QtQuick.Shapes), with those
-# they import
+# The QML modules the views import (QtQuick, QtQuick.Controls.Basic, QtQuick.Shapes, and
+# QtQuick.Dialogs for the folder dialog of R2.1 and R2.10), with those they import
 qml QtQml
 qml QtQml/Models
 qml QtQml/WorkerScript
@@ -50,6 +54,9 @@ qml QtQuick/Controls/Basic
 qml QtQuick/Controls/Basic/impl
 qml QtQuick/Templates
 qml QtQuick/Shapes
+qml QtQuick/Dialogs
+qml QtQuick/Dialogs/quickimpl
+qml QtQuick/Layouts
 
 # Each desktop's own platform, and offscreen, which the tests and the tour draw on
 plugin platforms/qoffscreen
@@ -70,8 +77,9 @@ plugin platforminputcontexts/ibusplatforminputcontextplugin    linux
 # the desktop's fonts, colours and dialogs, through its portal or GTK
 plugin platformthemes/qxdgdesktopportal                 linux
 plugin platformthemes/qgtk3                             linux
-# album covers, mostly JPEG (R5); PNG is built in
+# album covers, mostly JPEG, and WebP, which R5.1 names too (R5); PNG is built in
 plugin imageformats/qjpeg
+plugin imageformats/qwebp
 
 # PySide6's own files a run needs: the package, its libraries, and Qt's ICU (Linux) and the C++
 # runtime (Windows)

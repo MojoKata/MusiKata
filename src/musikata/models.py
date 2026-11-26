@@ -1,16 +1,26 @@
 """The list models the QML views bind to (A1.5): rows paged from the index as they scroll into
-view, so QML never holds the whole library; sorting is SQL, not a proxy model.
+view, so QML never holds the whole library; sorting and filtering are SQL, not proxy models.
+
+A list's rows are found off the GUI thread (A1.3): a model sends its query, with its search (R2.7)
+when one filters it, to the search thread (`Searcher`), which finds the ids of its rows in the
+list's order, and the model takes them when they come back, by a signal queued to the GUI thread,
+dropping what a newer search or reload has made stale. Its pages are then read by id, each a
+lookup of 200 rows by their keys whatever the order, so typing never waits on a query, and
+scrolling, however deep, never sorts the list again: a page is a few milliseconds at any depth.
 
 What a row shows is decided here, as text (`docs/process/coding.md`: QML only lays out and binds):
-the title, or the file's name when the song has none; the genres joined; the length as m:ss; and
-whether it is the song playing."""
+the title, or the file's name when the song has none; the genres joined; the length as m:ss; an
+album's artist and year as one line; a cover as the address the cover provider serves it at; and
+whether it is the song or album playing."""
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
+import threading
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Sequence
 from typing import Any
 
 from PySide6.QtCore import Property as QtProperty
@@ -22,33 +32,131 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     Qt,
     Signal,
+    Slot,
 )
 
-PAGE = 200  # rows read at a time
-KEEP = 16  # pages held; the one read longest ago goes first
+from musikata_core import albums, folders, search
 
-# what a row of the Songs list holds, in the roles' order
+log = logging.getLogger(__name__)
+
+PAGE = 200  # rows read at a time
+SHORT = 2000  # rows a list without a search may have to be found at once, not on the search thread
+KEEP = 16  # pages held; the one read longest ago goes first
+COVERS = "image://covers/"  # where the cover provider serves a thumbnail, by its name (covers.py)
+UNKNOWN_ARTIST = "Unknown artist"
+
+# what a row of a list of songs holds, in the roles' order
 COLUMNS = ("title", "artist", "album", "genre", "year", "track", "rating", "time", "path")
 ROLES = {int(Qt.ItemDataRole.UserRole) + i: name for i, name in enumerate(COLUMNS)}
 PLAYING = int(Qt.ItemDataRole.UserRole) + len(COLUMNS)  # the role: whether it's the song playing
 
-# the Songs list's orders (R2.6): by album artist, then album, disc and track, so an album's songs
-# stay together; by title. A missing value sorts last, and case doesn't count.
-SORTS = {
-    "artist": (
-        "coalesce(albumartistsort, albumartist, artistsort, artist) IS NULL,"
-        " coalesce(albumartistsort, albumartist, artistsort, artist) COLLATE NOCASE,"
-        " coalesce(albumsort, album) IS NULL, coalesce(albumsort, album) COLLATE NOCASE,"
-        " disc, track, path"
-    ),
-    "title": "title IS NULL, title COLLATE NOCASE, path",
-}
-
-SELECT = (
-    "SELECT path, title, artist, album,"
-    " (SELECT group_concat(genre, '; ' ORDER BY position) FROM song_genre WHERE song_id = song.id),"
-    " year, track, rating, length FROM song ORDER BY {order} LIMIT ? OFFSET ?"
+# the Songs list's orders (R2.6), one for each column it sorts by: what it sorts by, how text is
+# compared, and what orders songs that tie. A missing value sorts last either way. By artist is
+# by album artist, then album, disc and track, so an album's songs stay together, by their sort
+# names (R2.13); so are the ties of genre, year, rating and time.
+BY_ARTIST = (
+    "artist_key IS NULL, artist_key, album_key IS NULL, album_key, album_id, disc, track, path"
 )
+NOCASE = " COLLATE NOCASE"
+COLUMN_SORTS: dict[str, tuple[str, str, str]] = {
+    "title": ("title", NOCASE, "path"),
+    "artist": ("artist_key", "", "album_key IS NULL, album_key, album_id, disc, track, path"),
+    "album": ("album_key", "", "album_id, disc, track, path"),
+    "genre": ("(SELECT genre FROM song_genre WHERE song_id = song.id AND position = 0)", NOCASE,
+              BY_ARTIST),
+    "year": ("year", "", BY_ARTIST),
+    "rating": ("coalesce(rating, 0)", "", BY_ARTIST),
+    "time": ("length", "", BY_ARTIST),
+}  # fmt: skip
+# the orders of the pages' lists: an album's by disc and track, an artist's other songs by album
+ORDERS = {
+    "tracks": albums.ALBUM_ORDER,
+    "others": "album_key IS NULL, album_key, disc, track, path",
+}
+# the Songs list's columns as its header shows them, and the order each sorts by ("": none)
+SONG_HEADERS = (
+    ("#", ""), ("TITLE", "title"), ("ARTIST", "artist"), ("ALBUM", "album"), ("GENRE", "genre"),
+    ("YEAR", "year"), ("RATING", "rating"), ("TIME", "time"),
+)  # fmt: skip
+
+
+def song_order(sort: str, descending: bool = False) -> str:
+    """The ORDER BY of a list of songs: one of ORDERS, or a column of COLUMN_SORTS either way."""
+    if sort in ORDERS:
+        return ORDERS[sort]
+    if sort not in COLUMN_SORTS:
+        raise ValueError(f"no such order: {sort}")
+    value, collate, ties = COLUMN_SORTS[sort]
+    return f"{value} IS NULL, {value}{collate} {'DESC' if descending else 'ASC'}, {ties}"
+
+
+def song_headers(sort: str, descending: bool) -> list[dict[str, str]]:
+    """The Songs list's column headers (R2.6): each its label, the order a click on it asks for
+    ("" for one that doesn't sort) and which way it sorts now ("up", "down", "" when it doesn't)."""
+    return [
+        {
+            "label": label,
+            "sort": key,
+            "order": ("down" if descending else "up") if key and key == sort else "",
+        }
+        for label, key in SONG_HEADERS
+    ]
+
+
+# Albums' orders (R2.6, R2.13): by album artist, title or year, each by sort names, as the header's
+# sort offers them; the label each has there
+ALBUM_SORTS = {
+    "artist": "artist_key, title_key, id",
+    "title": "title_key, artist_key, id",
+    "year": "year IS NULL, year, artist_key, title_key, id",
+}
+ALBUM_SORT_LABELS = {"artist": "Artist", "title": "Title", "year": "Year"}
+
+# what a list of songs selects, in row_of's order
+SONG_COLUMNS = (
+    "path, title, artist, album,"
+    " (SELECT group_concat(genre, '; ' ORDER BY position) FROM song_genre WHERE song_id = song.id),"
+    " year, track, rating, length"
+)
+
+
+def size_text(n: int) -> str:
+    """Bytes as the root's card gives them: 9.8 GB, 412 MB, 3 KB (powers of 1000, as the systems'
+    file managers mostly do)."""
+    for unit, size in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
+        if n >= size:
+            v = n / size
+            return f"{v:.1f} {unit}" if v < 100 else f"{v:.0f} {unit}"
+    return f"{n} bytes"
+
+
+KINDS = {
+    "mp3": "MP3", "flac": "FLAC", "aac": "AAC", "alac": "ALAC", "vorbis": "Ogg Vorbis",
+    "opus": "Opus", "wav": "WAV", "aiff": "AIFF",
+}  # fmt: skip
+LOSSLESS = {"flac", "alac", "wav", "aiff"}
+
+
+def format_text(groups: list[tuple[str | None, int | None, int | None, int]]) -> str:
+    """An album's format (R2.6) from its songs' (kind, sample rate, bit rate, songs): FLAC 44.1
+    kHz; MP3 320 kbps; several kinds, most songs first: FLAC, MP3. Empty when unknown."""
+    by_kind: dict[str, list[tuple[int | None, int | None, int]]] = {}
+    for kind, rate, bitrate, n in groups:
+        if kind:
+            by_kind.setdefault(kind, []).append((rate, bitrate, n))
+    if not by_kind:
+        return ""
+    if len(by_kind) > 1:
+        order = sorted(by_kind, key=lambda k: (-sum(g[2] for g in by_kind[k]), k))
+        return ", ".join(KINDS.get(k, k) for k in order)
+    kind, found = next(iter(by_kind.items()))
+    name = KINDS.get(kind, kind)
+    if kind in LOSSLESS:
+        rate = max(found, key=lambda g: g[2])[0]
+        return f"{name} {rate / 1000:g} kHz" if rate else name
+    songs = sum(g[2] for g in found)
+    kbps = round(sum((g[1] or 0) * g[2] for g in found) / songs / 1000)
+    return f"{name} {kbps} kbps" if kbps else name
 
 
 def time_text(seconds: float | None) -> str:
@@ -60,13 +168,59 @@ def time_text(seconds: float | None) -> str:
     return f"{h}:{rest // 60:02d}:{rest % 60:02d}" if h else f"{s // 60}:{s % 60:02d}"
 
 
+def length_text(seconds: float | None) -> str:
+    """An album's length as its page gives it: 44 min, 1 h 12 min; under a minute, 1 min."""
+    minutes = max(1, round((seconds or 0) / 60))
+    h, m = divmod(minutes, 60)
+    return f"{h} h {m} min" if h else f"{m} min"
+
+
+def plural(n: int, one: str, many: str | None = None) -> str:
+    return f"{n:,} {one if n == 1 else (many or one + 's')}"
+
+
+def count_text(shown: int, total: int, one: str, searching: bool) -> str:
+    """A view's count beside its title (R6.4): 128 albums; while a search filters it (R2.7), what
+    it shows of how many: 12 of 1,412 songs."""
+    return f"{shown:,} of {plural(total, one)}" if searching else plural(total, one)
+
+
+def no_match_text(text: str, many: str) -> str:
+    """What a list says when a search finds nothing in it (R2.7)."""
+    return f"No {many} match \u201c{text.strip()}\u201d"
+
+
 def title_of(title: str | None, path: str) -> str:
     """The title, or the file's name without its extension when the song has none."""
     return title or os.path.splitext(os.path.basename(path))[0]
 
 
+def artist_text(name: str | None) -> str:
+    return name or UNKNOWN_ARTIST
+
+
+def cover_url(thumb: str | None) -> str:
+    """The address QML shows a cover from, by its thumbnail's name; "" for none (R5.7)."""
+    return COVERS + thumb if thumb else ""
+
+
+def mosaic(n: int) -> list[dict[str, float]]:
+    """Where each of n covers (up to four) sits in a mosaic (R5.8's table, folders.layout), as
+    fractions of the tile and its gap: x and y place a piece at x * (size + gap), and w and h size
+    it at w * (size + gap) - gap, so the pieces meet with the gap between them."""
+    return [dict(zip("xywh", r, strict=True)) for r in folders.layout(n)]
+
+
+def tiles(thumbs: Sequence[str]) -> list[dict[str, Any]]:
+    """A mosaic of up to four covers, each piece with its source."""
+    return [
+        {"source": cover_url(t), **piece}
+        for t, piece in zip(thumbs, mosaic(len(thumbs)), strict=False)
+    ]
+
+
 def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
-    """A row of SELECT as the roles give it."""
+    """A row of SONG_COLUMNS as the roles give it."""
     path, title, artist, album, genre, year, track, rating, length = r
     return {
         "title": title_of(title, path),
@@ -81,46 +235,192 @@ def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
-class SongsModel(QAbstractListModel):
-    """Every song of the index, a page of rows read when a row of it is first asked for."""
+class Searcher(QObject):
+    """The search thread (R2.7, A1.3): runs the newest piece of work each list sent it, on a
+    thread of its own with its own reading connection, and hands each result back on the GUI
+    thread (None for work that failed, which the log tells of). Work sent while a list's earlier
+    work waits replaces it, so typing fast queues nothing; the thread ends when nothing waits, and
+    starts again with the next."""
+
+    _found = Signal(object)
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._lock = threading.Lock()
+        self._waiting: dict[Hashable, tuple[Callable[[], Any], Callable[[Any], None]]] = {}
+        self._thread: threading.Thread | None = None
+        self._found.connect(self._deliver)
+
+    def submit(self, key: Hashable, work: Callable[[], Any], then: Callable[[Any], None]) -> None:
+        """Runs work() on the search thread, then then(its result) on the GUI thread; replaces
+        work sent under the same key that hasn't started."""
+        with self._lock:
+            self._waiting[key] = (work, then)
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name="search", daemon=True)
+                self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                if not self._waiting:
+                    self._thread = None
+                    return
+                work, then = self._waiting.pop(next(iter(self._waiting)))
+            try:
+                result = work()
+            except Exception:  # a search that fails finds nothing, and the log says why
+                log.exception("a search failed")
+                result = None
+            self._found.emit((then, result))
+
+    @Slot(object)
+    def _deliver(self, found: tuple[Callable[[Any], None], Any]) -> None:
+        then, result = found
+        then(result)
+
+    def wait(self) -> None:
+        """Until the search thread has ended (its results still to be delivered): for closing."""
+        with self._lock:
+            thread = self._thread
+        if thread is not None:
+            thread.join()
+
+
+class PagedModel(QAbstractListModel):
+    """Rows of a query, a page read when a row of it is first asked for. A subclass gives the
+    query (`_query`: the columns it selects, its table, WHERE and parameters, and its order), how a
+    row of those columns reads (`_row`), the roles, its table's key, and which of its rows a
+    search's songs pick (`_narrow`).
+
+    The ids of its rows in its order, of those a search (R2.7) picks while one filters it, are
+    found on the search thread, so no query that sorts the whole list runs on the GUI thread, and
+    each page is read by them; `count` is how many it shows and `total` how many there are without
+    the search."""
 
     countChanged = Signal()
+    roles: tuple[str, ...] = ()
+    key = "id"  # the column a row is found by
 
     def __init__(
         self,
         read: Callable[[], sqlite3.Connection],
-        sort: str = "artist",
         parent: QObject | None = None,
-    ) -> None:
+        searcher: Searcher | None = None,
+    ):
         super().__init__(parent)
         self._read = read
-        self._sort = sort
-        self._count = 0
-        self._playing = ""  # the path of the song playing
-        self._pages: OrderedDict[int, list[dict[str, Any]]] = OrderedDict()
+        self._count = self._total = 0
+        self._pages: OrderedDict[int, list[dict[str, Any] | None]] = OrderedDict()
         self.pages_read = 0  # how many times a page was read: what the paging saves, for tests
+        self._searcher = searcher if searcher is not None else Searcher(self)
+        self._search = ""
+        self._query_of_search = search.Query()
+        self._ids: list[int] | None = None  # the rows found, in order; None: none yet
+        self._generation = 0  # which reload a search's result belongs to
+        self._shown = ""  # the search whose rows the list shows
+        self._pending = False  # a search sent to the search thread, its rows still to come
+
+    def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
+        """The columns selected, the table, the WHERE ("" for none), its parameters, the order."""
+        raise NotImplementedError
+
+    def _row(self, r: tuple[Any, ...]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _narrow(self, songs: str, params: tuple[Any, ...]) -> tuple[str, tuple[Any, ...]]:
+        """The WHERE that picks this list's rows from the songs a condition on `song` picks."""
+        return songs, params
+
+    def set_search(self, text: str) -> None:
+        """Filters the list by what the user typed (R2.7), or shows it whole for a search that
+        asks nothing; the rows come when the search thread has found them."""
+        self._search = text
+        self._query_of_search = search.parse(text)
+        self.reload()
 
     def reload(self) -> None:
-        """Reads the count afresh and drops the pages held: after a scan, or a new order."""
+        """Reads the list afresh from its start: after a new order, a new search or another
+        selection. Its rows, in order, are found on the search thread, and come with
+        countChanged."""
+        self._generation += 1
+        self._find(keep=False)
+
+    def refresh(self) -> None:
+        """Reads the rows afresh where they are, after a scan: once the search thread has found
+        them, rows added or taken away at the end and every row read again, never a reset, so a
+        view keeps its scroll position (A2.4). Until then the rows shown stay."""
+        self._generation += 1
+        self._find(keep=True)
+
+    def _find(self, keep: bool) -> None:
+        """Finds the ids of the list's rows in its order: those its search picks, or every one
+        without a search. A search's, and those of a list longer than SHORT, are found on the
+        search thread and come with countChanged; a short list's, a matter of a millisecond or two,
+        at once, so an album's page or a small folder opens whole."""
+        cols, table, where, params, order = self._query()
+        if self._query_of_search:
+            songs, song_params = search.condition(self._query_of_search)
+            narrow, narrow_params = self._narrow(songs, song_params)
+            found = f"({where}) AND {narrow}" if where else narrow
+            text = self._search
+        else:
+            found, narrow_params, text = where, (), ""
+        read, key, generation = self._read, self.key, self._generation
+        source = f"{table} WHERE {where}" if where else table
+
+        def work() -> tuple[int, list[int]]:
+            c = read()
+            sql = f"SELECT {key} FROM {table}{' WHERE ' + found if found else ''} ORDER BY {order}"
+            ids = [r[0] for r in c.execute(sql, (*params, *narrow_params))]
+            if not text:
+                return len(ids), ids
+            total = int(c.execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0])
+            return total, ids
+
+        if not text:
+            count = int(read().execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0])
+            if count <= SHORT:
+                self._found(generation, text, work(), keep)
+                return
+        self._pending = True
+        self._searcher.submit(
+            self, work, lambda result: self._found(generation, text, result, keep)
+        )
+
+    def _found(
+        self, generation: int, text: str, result: tuple[int, list[int]] | None, keep: bool = False
+    ) -> None:
+        if generation != self._generation:
+            return  # a newer search or reload has been asked for since
+        if keep and text == self._shown and result is not None:  # the same search, found again
+            self._resize(len(result[1]), result[0], result[1], text)
+            return
         self.beginResetModel()
         self._pages.clear()
-        self._count = int(self._read().execute("SELECT COUNT(*) FROM song").fetchone()[0])
+        self._total, self._ids = result if result is not None else (self._total, [])
+        self._count = len(self._ids)
+        self._shown, self._pending = text, False
         self.endResetModel()
         self.countChanged.emit()
 
-    def sort_by(self, sort: str) -> None:
-        if sort not in SORTS:
-            raise ValueError(f"no such order: {sort}")
-        self._sort = sort
-        self.reload()
-
-    def set_playing(self, path: str) -> None:
-        """Marks the song at `path` as the one playing ("": none), for the rows that show it."""
-        if path == self._playing:
-            return
-        self._playing = path
-        if self._count:
-            self.dataChanged.emit(self.index(0), self.index(self._count - 1), [PLAYING])
+    def _resize(self, count: int, total: int, ids: list[int] | None, shown: str) -> None:
+        """The rows now `count`, without a reset: those past the old count added, or those past
+        the new one taken away, and every row read again."""
+        old = self._count
+        self._pages.clear()
+        self._total, self._ids, self._shown, self._pending = total, ids, shown, False
+        if count > old:
+            self.beginInsertRows(QModelIndex(), old, count - 1)
+            self._count = count
+            self.endInsertRows()
+        elif count < old:
+            self.beginRemoveRows(QModelIndex(), count, old - 1)
+            self._count = count
+            self.endRemoveRows()
+        if count:
+            self.dataChanged.emit(self.index(0), self.index(count - 1))
+        self.countChanged.emit()
 
     def row(self, n: int) -> dict[str, Any] | None:
         """Row n, reading its page when it isn't held."""
@@ -129,8 +429,7 @@ class SongsModel(QAbstractListModel):
         p = n // PAGE
         page = self._pages.get(p)
         if page is None:
-            sql = SELECT.format(order=SORTS[self._sort])
-            page = [row_of(r) for r in self._read().execute(sql, (PAGE, p * PAGE))]
+            page = self._read_page(p)
             self.pages_read += 1
             self._pages[p] = page
             while len(self._pages) > KEEP:
@@ -140,23 +439,257 @@ class SongsModel(QAbstractListModel):
         i = n % PAGE
         return page[i] if i < len(page) else None
 
+    def _read_page(self, p: int) -> list[dict[str, Any] | None]:
+        """Page p of the rows found (`_find`), each looked up by its key, whatever the order: a
+        few milliseconds at any depth."""
+        cols, table, _where, _params, _order = self._query()
+        ids = (self._ids or [])[p * PAGE : (p + 1) * PAGE]
+        marks = ", ".join("?" * len(ids))
+        sql = f"SELECT {self.key}, {cols} FROM {table} WHERE {self.key} IN ({marks})"
+        rows = {r[0]: self._row(r[1:]) for r in self._read().execute(sql, ids)}
+        return [rows.get(i) for i in ids]  # None for a row gone since they were found
+
+    def _changed(self, role: str) -> None:
+        if self._count:
+            self.dataChanged.emit(self.index(0), self.index(self._count - 1), [self._role(role)])
+
+    def _role(self, name: str) -> int:
+        return int(Qt.ItemDataRole.UserRole) + self.roles.index(name)
+
+    def _value(self, row: dict[str, Any], name: str) -> Any:
+        return row[name]
+
     # ---------- QAbstractListModel ----------
 
     def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: B008
         return 0 if parent.isValid() else self._count
 
     def roleNames(self) -> dict[int, QByteArray]:
-        names = {k: QByteArray(v.encode()) for k, v in ROLES.items()}
-        return names | {PLAYING: QByteArray(b"playing")}
+        return {self._role(n): QByteArray(n.encode()) for n in self.roles}
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role: int = 0) -> Any:
-        name = "path" if role == PLAYING else ROLES.get(role)
-        row = self.row(index.row()) if name else None
-        if row is None or name is None:
+        i = role - int(Qt.ItemDataRole.UserRole)
+        if not 0 <= i < len(self.roles):
             return None
-        return row["path"] == self._playing if role == PLAYING else row[name]
+        row = self.row(index.row())
+        return None if row is None else self._value(row, self.roles[i])
 
     def _get_count(self) -> int:
         return self._count
 
+    def total(self) -> int:
+        """How many rows the list has without its search."""
+        return self._total
+
+    def searching(self) -> bool:
+        """Whether a search filters the list, or will once its rows come."""
+        return bool(self._query_of_search)
+
+    def filtered(self) -> bool:
+        """Whether the rows the list shows are a search's."""
+        return bool(self._shown)
+
+    def shown_search(self) -> str:
+        """The search whose rows the list shows ("" when it shows them all)."""
+        return self._shown
+
+    def pending(self) -> bool:
+        """Whether the rows found are still to come (`_find`)."""
+        return self._pending
+
+    def wait(self) -> None:
+        """Until the search thread has ended: for closing."""
+        self._searcher.wait()
+
     count = QtProperty(int, _get_count, notify=countChanged)
+
+
+class SongsModel(PagedModel):
+    """Songs of the index: every one (the Songs list), or those a WHERE picks (an album's, an
+    artist's on others' albums), in one of ORDERS, or by a column either way (COLUMN_SORTS)."""
+
+    roles = (*COLUMNS, "playing")
+    key = "song.id"
+
+    def __init__(
+        self,
+        read: Callable[[], sqlite3.Connection],
+        sort: str = "artist",
+        parent: QObject | None = None,
+        where: str = "",
+        params: tuple[Any, ...] = (),
+        searcher: Searcher | None = None,
+    ) -> None:
+        super().__init__(read, parent, searcher)
+        song_order(sort)  # one that exists
+        self._sort, self._descending = sort, False
+        self._where, self._params = where, params
+        self._playing = ""  # the path of the song playing
+
+    def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
+        order = song_order(self._sort, self._descending)
+        return SONG_COLUMNS, "song", self._where, self._params, order
+
+    def _row(self, r: tuple[Any, ...]) -> dict[str, Any]:
+        return row_of(r)
+
+    def _value(self, row: dict[str, Any], name: str) -> Any:
+        return row["path"] == self._playing if name == "playing" else row[name]
+
+    def select(self, where: str, params: tuple[Any, ...]) -> None:
+        """Lists the songs `where` picks instead, and reads them."""
+        self._where, self._params = where, params
+        self.reload()
+
+    def sort_by(self, sort: str, descending: bool = False) -> None:
+        """Lists the songs in another order: one of ORDERS, or a column's either way."""
+        song_order(sort, descending)
+        self._sort, self._descending = sort, descending
+        self.reload()
+
+    def order(self) -> tuple[str, bool]:
+        """The order the songs are in: its name, and whether it runs the other way."""
+        return self._sort, self._descending
+
+    def set_playing(self, path: str) -> None:
+        """Marks the song at `path` as the one playing ("": none), for the rows that show it."""
+        if path != self._playing:
+            self._playing = path
+            self._changed("playing")
+
+
+class AlbumsModel(PagedModel):
+    """Albums (R2.6): every one by album artist and title, by their sort names (R2.13), or those
+    of one genre; or one artist's, by year. Each row: its id (albumId), title, artist, year, the
+    line under its cover ("Lumen Drift · 2019"), genre, songs, length and cover, and whether it is
+    playing."""
+
+    roles = (
+        "albumId", "title", "artist", "year", "line", "genre", "songs", "time", "cover", "playing"
+    )  # fmt: skip
+
+    key = "album.id"
+
+    def __init__(
+        self,
+        read: Callable[[], sqlite3.Connection],
+        parent: QObject | None = None,
+        artist_id: int | None = None,
+        searcher: Searcher | None = None,
+    ) -> None:
+        super().__init__(read, parent, searcher)
+        self._artist_id = artist_id
+        self._genre = ""
+        self._sort = "artist"
+        self._playing = -1  # the id of the album playing
+
+    def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
+        cols = "id, title, artist, year, genre, songs, length, thumb"
+        if self._artist_id is not None:
+            return (
+                cols,
+                "album",
+                "artist_id = ?",
+                (self._artist_id,),
+                "year IS NULL, year, title_key, id",
+            )
+        order = ALBUM_SORTS[self._sort]
+        if self._genre:
+            return cols, "album", "genre = ?", (self._genre,), order
+        return cols, "album", "", (), order
+
+    def _narrow(self, songs: str, params: tuple[Any, ...]) -> tuple[str, tuple[Any, ...]]:
+        """An album a song the search finds is on (R2.7)."""
+        return f"album.id IN (SELECT song.album_id FROM song WHERE {songs})", params
+
+    def sort_by(self, sort: str) -> None:
+        """Lists the albums by album artist, title or year (ALBUM_SORTS)."""
+        if sort not in ALBUM_SORTS:
+            raise ValueError(f"no such order: {sort}")
+        self._sort = sort
+        self.reload()
+
+    def order(self) -> str:
+        return self._sort
+
+    def _row(self, r: tuple[Any, ...]) -> dict[str, Any]:
+        album_id, title, artist, year, genre, songs, length, thumb = r
+        shown = artist_text(artist)
+        return {
+            "albumId": album_id,
+            "title": title,
+            "artist": shown,
+            "year": str(year) if year else "",
+            "line": f"{shown} · {year}" if year else shown,
+            "genre": genre or "",
+            "songs": plural(songs, "song"),
+            "time": time_text(length),
+            "cover": cover_url(thumb),
+        }
+
+    def _value(self, row: dict[str, Any], name: str) -> Any:
+        return row["albumId"] == self._playing if name == "playing" else row[name]
+
+    def for_artist(self, artist_id: int) -> None:
+        """Lists that artist's albums instead, and reads them."""
+        self._artist_id = artist_id
+        self.reload()
+
+    def filter_genre(self, genre: str) -> None:
+        """Only the albums whose genre is `genre` ("": every album)."""
+        self._genre = genre
+        self.reload()
+
+    def set_playing(self, album_id: int) -> None:
+        """Marks the album with that id as playing (-1: none)."""
+        if album_id != self._playing:
+            self._playing = album_id
+            self._changed("playing")
+
+
+def artist_thumbs(artist: str) -> str:
+    """SQL for an artist's mosaic (R2.6): the covers of up to four of their albums, those with the
+    most songs first; for an artist with no album of their own (one on compilations), the covers
+    of the albums their songs are on. `artist` is the SQL of their id."""
+    return (
+        "coalesce((SELECT group_concat(thumb, ' ') FROM (SELECT thumb FROM album"
+        f" WHERE artist_id = {artist} AND thumb IS NOT NULL ORDER BY songs DESC, id LIMIT 4)),"
+        " (SELECT group_concat(thumb, ' ') FROM (SELECT DISTINCT album.thumb FROM song"
+        f" JOIN album ON album.id = song.album_id WHERE song.artist_id = {artist}"
+        " AND album.thumb IS NOT NULL ORDER BY album.songs DESC, album.id LIMIT 4)))"
+    )
+
+
+class ArtistsModel(PagedModel):
+    """Artists (R2.6), by their sort names (R2.13): each row its id (artistId), name, the line
+    under it ("3 albums · 41 songs") and its mosaic (artist_thumbs)."""
+
+    roles = ("artistId", "name", "line", "tiles")
+    key = "artist.id"
+
+    def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
+        cols = f"id, name, albums, songs, {artist_thumbs('artist.id')}"
+        return cols, "artist", "", (), "sort_key, id"
+
+    def _narrow(self, songs: str, params: tuple[Any, ...]) -> tuple[str, tuple[Any, ...]]:
+        """An artist of a song the search finds, or of the album it is on (R2.5.4, R2.7)."""
+        return (
+            f"artist.id IN (SELECT song.artist_id FROM song WHERE {songs}"
+            " UNION SELECT album.artist_id FROM song JOIN album ON album.id = song.album_id"
+            f" WHERE {songs})",
+            (*params, *params),
+        )
+
+    def _row(self, r: tuple[Any, ...]) -> dict[str, Any]:
+        artist_id, name, albums, songs, thumbs = r
+        return {
+            "artistId": artist_id,
+            "name": name,
+            "line": artist_line(albums, songs),
+            "tiles": tiles((thumbs or "").split()),
+        }
+
+
+def artist_line(albums: int, songs: int) -> str:
+    """What an artist's tile says under the name: 3 albums · 41 songs; 12 songs with no album."""
+    return " · ".join(([plural(albums, "album")] if albums else []) + [plural(songs, "song")])

@@ -44,3 +44,14 @@ class AudioInfo:
     bitrate: int
     sample_rate: int
     channels: int
+
+
+@dataclass(frozen=True)
+class Picture:
+    """A picture embedded in a song (R5.1): its type as ID3 and FLAC number them (3 is the front
+    cover; None when the format has no types, as MP4's covr), its MIME type as the file gives it
+    (it may be wrong or empty), and its bytes."""
+
+    type: int | None
+    mime: str
+    data: bytes

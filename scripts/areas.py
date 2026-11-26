@@ -47,6 +47,8 @@ CODE = {
         *_core(
             "db",
             "scanner",
+            "albums",
+            "sortnames",
             "watch",
             "search",
             "folders",

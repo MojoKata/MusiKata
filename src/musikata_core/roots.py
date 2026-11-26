@@ -37,6 +37,20 @@ def roots_dir(env: Mapping[str, str], platform: str = sys.platform) -> str:
     return os.path.join(data, "musikata", "roots")
 
 
+def caches_dir(env: Mapping[str, str], platform: str = sys.platform) -> str:
+    """Where this computer keeps each root's caches, cover thumbnails among them (R1.5's table),
+    each root's under its index's key; MUSIKATA_DATA moves them beside the indexes."""
+    if env.get("MUSIKATA_DATA"):
+        return os.path.join(env["MUSIKATA_DATA"], "cache")
+    home = env.get("HOME") or env.get("USERPROFILE") or os.path.expanduser("~")
+    if platform.startswith("win"):
+        local = env.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+        return os.path.join(local, "MusiKata", "Cache")
+    if platform == "darwin":
+        return os.path.join(home, "Library", "Caches", "MusiKata")
+    return os.path.join(env.get("XDG_CACHE_HOME") or os.path.join(home, ".cache"), "musikata")
+
+
 def path_key(root: str) -> str:
     """The folder name of a root that holds no id of its own (R1.5.2): a hash of its path."""
     return "path-" + hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:16]
@@ -134,9 +148,34 @@ def find_index(root: str, base: str, clock: Clock) -> Found:
     return Found(folder, key, writable)
 
 
-def remove_stale(base: str, clock: Clock, keep: str | None = None) -> list[str]:
-    """Removes each index folder not opened for 180 days (A2.9), but `keep`; says which in the
-    log, and returns them."""
+def recorded(root: str, base: str) -> Found | None:
+    """The index under `base` that last opened `root`, found by the path its index.json records,
+    the most recently opened when several do, without reading or writing anything in the root: for
+    a root that isn't there (R2.10), whose library is shown as it was. None when no index has
+    opened it."""
+    root = os.path.normcase(os.path.realpath(root))
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    found: list[tuple[str, str]] = []
+    for name in names:
+        data = _read_json(os.path.join(base, name, "index.json")) or {}
+        path, when = data.get("path"), data.get("opened")
+        if isinstance(path, str) and os.path.normcase(path) == root:
+            found.append((when if isinstance(when, str) else "", name))
+    if not found:
+        return None
+    name = max(found)[1]
+    return Found(os.path.join(base, name), name, False)
+
+
+def remove_stale(
+    base: str, clock: Clock, keep: str | None = None, caches: str | None = None
+) -> list[str]:
+    """Removes each index folder under `base` not opened for 180 days (A2.9), but `keep`, and its
+    caches under `caches` (caches_dir), which are kept under the same key; says which in the log,
+    and returns them."""
     opened: dict[str, datetime] = {}
     try:
         names = os.listdir(base)
@@ -152,5 +191,7 @@ def remove_stale(base: str, clock: Clock, keep: str | None = None) -> list[str]:
     gone = [name for name in stale(opened, clock.now()) if name != keep]
     for name in gone:
         shutil.rmtree(os.path.join(base, name), ignore_errors=True)
-        log.info("removed the index of %s, not opened for 180 days", name)
+        if caches is not None:
+            shutil.rmtree(os.path.join(caches, name), ignore_errors=True)
+        log.info("removed the index and caches of %s, not opened for 180 days", name)
     return gone

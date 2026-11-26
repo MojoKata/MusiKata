@@ -45,6 +45,17 @@ def test_a_failed_migration_leaves_the_index_as_it_was(tmp_path, monkeypatch):
     assert not c.execute("SELECT name FROM sqlite_master WHERE name = 'half'").fetchall()
 
 
+def test_a_migration_does_what_it_did_when_it_was_released(tmp_path, monkeypatch):
+    """A migration is SQL of its own, so a field added to today's code later (a migration of its
+    own) changes nothing an older migration makes."""
+    monkeypatch.setattr(db, "FIELDS", (*db.FIELDS, "bpm"))
+    c = db.connect(str(tmp_path / "musikata.db"))
+    db.MIGRATIONS[0](c)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(song)")]
+    assert "bpm" not in cols and cols[11:] == list(db.FIELDS[:-1])
+    c.close()
+
+
 def test_a_write_is_one_transaction_kept_whole_or_not_at_all(tmp_path):
     index = db.Index(str(tmp_path / "musikata.db"))
 
@@ -71,3 +82,60 @@ def test_each_thread_reads_through_a_connection_of_its_own(tmp_path):
     t.join()
     assert mine is index.read() and theirs[0] is not mine
     index.close()
+
+
+def test_closing_the_index_closes_every_threads_reading_connection(tmp_path):
+    """QML's image threads read covers through the index (covers.py) and outlive no index: each
+    one's connection is closed with it, not left open until the thread ends."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    opened, go_on = [], threading.Event()
+
+    def reader():
+        opened.append(index.read())
+        go_on.wait()
+
+    threads = [threading.Thread(target=reader, daemon=True) for _ in range(3)]
+    for t in threads:
+        t.start()
+    try:
+        while len(opened) < 3:
+            threading.Event().wait(0.001)
+        opened.append(index.read())
+        index.close()
+        for c in opened:
+            with pytest.raises(sqlite3.ProgrammingError):
+                c.execute("SELECT 1")
+    finally:
+        go_on.set()
+        for t in threads:
+            t.join()
+
+
+def test_a_thread_that_ends_lets_go_of_its_reading_connection(tmp_path):
+    index = db.Index(str(tmp_path / "musikata.db"))
+    opened = []
+    for _ in range(3):
+        t = threading.Thread(target=lambda: opened.append(index.read()))
+        t.start()
+        t.join()
+    for c in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            c.execute("SELECT 1")
+    index.close()
+
+
+def test_an_index_of_slice_2_gains_albums_and_artists_and_its_songs_are_read_again(tmp_path):
+    """Version 2 (R2.5, R2.13): albums and artists are worked out from the tags by the scan, so
+    the migration marks every song changed and the next scan reads them all."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    db.MIGRATIONS[0](c)
+    c.execute("PRAGMA user_version = 1")
+    c.execute("INSERT INTO song (path, size, mtime_ns, album) VALUES ('a.flac', 10, 5, 'X')")
+    assert db.migrate(c) == len(db.MIGRATIONS)
+    assert c.execute("SELECT path, size, mtime_ns, album_id FROM song").fetchall() == [
+        ("a.flac", 10, -1, None)
+    ]
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert {"album", "artist"} <= tables
+    c.close()

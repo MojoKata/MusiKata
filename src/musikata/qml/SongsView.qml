@@ -2,37 +2,19 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "."
 
-// Songs (R2.6): every song of the library, paged from the index as it scrolls (A1.5); a double
-// click plays a song (R7.1). Its search, sort and selection come with slice 3, the queue with
-// slice 4, the Edit tags panel with slice 5 (L03-songs-bulk-edit).
+// Songs (R2.6): every song of the library, or those the header's search finds (R2.7), paged from the
+// index as it scrolls (A1.5); a click on a column's header sorts by it, again the other way; a double
+// click plays a song (R7.1). Its selection comes with slice 3, the queue with slice 4, the Edit tags
+// panel with slice 5 (L03-songs-bulk-edit).
 Item {
     id: view
     required property var library
     required property var player
 
-    Text {
-        id: title
-        x: 28
-        y: 14
-        height: 36
-        verticalAlignment: Text.AlignVCenter
-        text: "Songs"
-        color: Theme.text
-        font { family: Theme.sans; pixelSize: 22; weight: Font.Bold }
-    }
-    Text {
-        anchors.left: title.right
-        anchors.leftMargin: 14
-        anchors.baseline: title.baseline
-        text: view.library.countText
-        color: Theme.muted
-        font { family: Theme.sans; pixelSize: 13 }
-    }
-
     Item {
         id: table
         x: 20
-        y: 70
+        y: 6
         width: view.width - 36
         height: view.height - y
 
@@ -52,19 +34,43 @@ Item {
             return out
         }
 
-        Repeater {
-            model: ["#", "TITLE", "ARTIST", "ALBUM", "GENRE", "YEAR", "RATING", "TIME"]
-            Text {
+        Repeater {  // the columns' headers, each sorting by its column (R2.6)
+            model: view.library.songHeaders
+            Item {
+                id: head
                 required property int index
-                required property string modelData
+                required property var modelData
+                readonly property bool atRight: index === 0 || index === 7
+                objectName: "head-" + modelData.sort
                 x: table.columns[index][0]
                 width: table.columns[index][1]
                 height: 32
-                verticalAlignment: Text.AlignVCenter
-                horizontalAlignment: index === 0 || index === 7 ? Text.AlignRight : Text.AlignLeft
-                text: modelData
-                color: Theme.faint
-                font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
+                Accessible.role: modelData.sort ? Accessible.ColumnHeader : Accessible.StaticText
+                Accessible.name: modelData.label
+                HoverHandler { id: headHover; enabled: head.modelData.sort !== ""; cursorShape: Qt.PointingHandCursor }
+                TapHandler { enabled: head.modelData.sort !== ""; onTapped: view.library.sortSongs(head.modelData.sort) }
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: head.atRight ? parent.right : undefined
+                    spacing: 3
+                    layoutDirection: head.atRight ? Qt.RightToLeft : Qt.LeftToRight
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(implicitWidth, head.width - (arrow.visible ? 15 : 0))
+                        elide: Text.ElideRight
+                        text: head.modelData.label
+                        color: head.modelData.order !== "" || headHover.hovered ? Theme.text : Theme.faint
+                        font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
+                    }
+                    Icon {
+                        id: arrow
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: head.modelData.order !== ""
+                        name: head.modelData.order === "down" ? "chevDown" : "chevUp"
+                        size: 12
+                        color: Theme.text
+                    }
+                }
             }
         }
         Rectangle { y: 32; width: table.width; height: 1; color: Theme.border }
