@@ -256,32 +256,43 @@ def test_loose_songs_on_no_album_give_their_folder_their_embedded_covers(index):
     )  # fmt: skip
 
 
-def test_an_index_of_slice_3_3_gains_folders_filled_from_its_rows(tmp_path):
-    """Version 4 (A2.7): the folders and each song's place come from the rows there, the songs
-    not read again; a folder's cover image is the one its album's row names."""
-    c = db.connect(str(tmp_path / "musikata.db"))
+def test_an_index_of_slice_3_3_gains_folders_and_its_songs_are_read_again(tmp_path):
+    """Version 4 (A2.7): each song's place and the folder rows are the scan's to work out
+    (folders.py, sortnames.py), and that code changes after the migration is released, so the
+    migration, fixed in time, marks every song changed: the next scan reads them all and fills the
+    folders, a cover image beside them included."""
+    music = tmp_path / "Music"
+    wav(music / "A" / "Disc 2" / "x.wav", 1)
+    wav(music / "A" / "y.wav", 2)
+    (music / "A" / "Disc 2" / "cover.jpg").write_bytes(b"jpeg")
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
     for step in db.MIGRATIONS[:3]:
         step(c)
     c.execute("PRAGMA user_version = 3")
-    c.execute(
-        "INSERT INTO song (id, path, size, mtime_ns) VALUES (1, 'A/Disc 2/x.flac', 10, 5),"
-        " (2, 'A/y.mp3', 10, 5)"
-    )
-    c.execute(
-        "INSERT INTO album (identity, artist, title, artist_key, title_key, folder, folder_image,"
-        " folder_image_size, folder_image_mtime) VALUES ('a', '', '', '', '', 'A/Disc 2',"
-        " 'A/Disc 2/cover.jpg', 3, 4)"
-    )
+    for n, rel in enumerate(("A/Disc 2/x.wav", "A/y.wav"), 1):
+        st = os.stat(music / rel)
+        c.execute(
+            "INSERT INTO song (id, path, size, mtime_ns) VALUES (?, ?, ?, ?)",
+            (n, rel, st.st_size, st.st_mtime_ns),
+        )
     assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT mtime_ns, folder FROM song ORDER BY id").fetchall() == [
-        (5, "A/Disc 2"), (5, "A")
+        (-1, None), (-1, None)
     ]  # fmt: skip
-    assert c.execute("SELECT path, songs_beneath, thumb FROM folder ORDER BY path").fetchall() == [
+    assert c.execute("SELECT COUNT(*) FROM folder").fetchone() == (0,)
+    c.close()
+    index = db.Index(path)
+    assert scan(music, index).changed == 2
+    st = os.stat(music / "A" / "Disc 2" / "cover.jpg")
+    assert index.read().execute(
+        "SELECT path, songs_beneath, thumb FROM folder ORDER BY path"
+    ).fetchall() == [
         ("", 2, None),
         ("A", 2, None),
-        ("A/Disc 2", 1, art.thumb_id("A/Disc 2/cover.jpg", 3, 4)),
+        ("A/Disc 2", 1, art.thumb_id("A/Disc 2/cover.jpg", st.st_size, st.st_mtime_ns)),
     ]
-    c.close()
+    index.close()
 
 
 # ---------- reading ----------

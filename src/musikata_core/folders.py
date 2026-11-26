@@ -285,13 +285,6 @@ def stale_images(c: sqlite3.Connection, images: Mapping[str, Sequence[art.Image]
     ]
 
 
-def rebuild(c: sqlite3.Connection, images: Mapping[str, Sequence[art.Image]] | None = None) -> None:
-    """Every folder's row afresh from the songs' rows: the folder table filled for an index made
-    before it (db's migration 4)."""
-    c.execute("DELETE FROM folder")
-    refresh(c, [f for (f,) in c.execute("SELECT DISTINCT folder FROM song")], images)
-
-
 # ---------- reading ----------
 
 

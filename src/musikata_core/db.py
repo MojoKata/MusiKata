@@ -5,7 +5,10 @@ list scrolling.
 
 The schema has a version (PRAGMA user_version), and MIGRATIONS run in order at open, each in one
 transaction. A slice that needs a table adds a migration at the end; a migration is never changed
-once released (A2.10's state snapshots read every older index)."""
+once released (A2.10's state snapshots read every older index). So that what a migration does stays
+fixed in time, it is SQL of its own and calls no other module: rows only code can work out (sort
+keys, albums, folders) are left to the next scan, by marking every song to be read again (R1.5.1:
+the index is rebuilt from the files, losing only time)."""
 
 from __future__ import annotations
 
@@ -15,8 +18,6 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future
 from typing import TypeVar
-
-from . import art, folders, sortnames
 
 T = TypeVar("T")
 
@@ -30,13 +31,15 @@ FIELDS = (
 
 
 def _v1(c: sqlite3.Connection) -> None:
-    """Songs and their genres (A2.1's song and song_genre)."""
+    """Songs and their genres (A2.1's song and song_genre), with R4.1's fields as they were then
+    (a field added to FIELDS later is a migration of its own)."""
     c.execute(
         "CREATE TABLE song (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
         " size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, kind TEXT, length REAL,"
-        " bitrate INTEGER, sample_rate INTEGER, channels INTEGER, audio_hash TEXT, error TEXT, "
-        + ", ".join(FIELDS)
-        + ")"
+        " bitrate INTEGER, sample_rate INTEGER, channels INTEGER, audio_hash TEXT, error TEXT,"
+        " title, artist, album, albumartist, track, tracktotal, disc, disctotal, year, date,"
+        " composer, comment, compilation, rating, artistsort, albumartistsort, albumsort,"
+        " rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, has_cover)"
     )
     c.execute("CREATE INDEX song_audio_hash ON song (audio_hash)")
     c.execute(
@@ -100,18 +103,11 @@ def _v3(c: sqlite3.Connection) -> None:
 
 def _v4(c: sqlite3.Connection) -> None:
     """Folders (A2.7, R2.9): each song's folder and its file name's sort key (R2.9.2), and the
-    folder table, filled from the rows there, so no song needs reading again; each folder's cover
-    image is the one its albums' rows name, until the next scan walks it. The scan keeps them from
-    then on (folders.py)."""
+    folder table. They are worked out by the scan (folders.py, sortnames.py), whose code may change
+    after this migration is released, so every song is read again by the next one, as for version
+    2, and the scan fills them; the table is empty until it does."""
     c.execute("ALTER TABLE song ADD COLUMN folder TEXT")
     c.execute("ALTER TABLE song ADD COLUMN name_key TEXT")
-    c.executemany(
-        "UPDATE song SET folder = ?, name_key = ? WHERE id = ?",
-        [
-            (path.rpartition("/")[0], sortnames.key_of(path.rpartition("/")[2]), song_id)
-            for song_id, path in c.execute("SELECT id, path FROM song").fetchall()
-        ],
-    )
     c.execute("CREATE INDEX song_folder ON song (folder, name_key, path)")
     c.execute(
         "CREATE TABLE folder (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, parent TEXT,"
@@ -124,13 +120,7 @@ def _v4(c: sqlite3.Connection) -> None:
     )
     c.execute("CREATE INDEX folder_parent ON folder (parent, name_key, path)")
     c.execute("CREATE INDEX folder_thumb ON folder (thumb)")
-    images: dict[str, list[art.Image]] = {}
-    for folder, image, size, mtime in c.execute(
-        "SELECT folder, folder_image, folder_image_size, folder_image_mtime FROM album"
-        " WHERE folder_image IS NOT NULL"
-    ):
-        images.setdefault(folder, []).append(art.Image(image.rpartition("/")[2], size, mtime))
-    folders.rebuild(c, images)
+    c.execute("UPDATE song SET mtime_ns = -1")
 
 
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]

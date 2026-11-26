@@ -45,6 +45,17 @@ def test_a_failed_migration_leaves_the_index_as_it_was(tmp_path, monkeypatch):
     assert not c.execute("SELECT name FROM sqlite_master WHERE name = 'half'").fetchall()
 
 
+def test_a_migration_does_what_it_did_when_it_was_released(tmp_path, monkeypatch):
+    """A migration is SQL of its own, so a field added to today's code later (a migration of its
+    own) changes nothing an older migration makes."""
+    monkeypatch.setattr(db, "FIELDS", (*db.FIELDS, "bpm"))
+    c = db.connect(str(tmp_path / "musikata.db"))
+    db.MIGRATIONS[0](c)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(song)")]
+    assert "bpm" not in cols and cols[11:] == list(db.FIELDS[:-1])
+    c.close()
+
+
 def test_a_write_is_one_transaction_kept_whole_or_not_at_all(tmp_path):
     index = db.Index(str(tmp_path / "musikata.db"))
 
