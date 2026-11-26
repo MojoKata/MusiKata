@@ -7,7 +7,7 @@ src/musikata_core/   no GUI: the modules of A1.9 (db, scanner, tags, patterns, a
 src/musikata/        the app (A1.9): QML (qml/), models, bridges, the player, media controls, the tour
 tests/               pytest: unit tests per core module, QML tests, the tour's layout checks
 scripts/             build, test and demo scripts (shell and Python)
-packaging/           versions.env, qt-modules.txt, the Windows installer script, macOS bundle files, icons
+packaging/           versions.env, qt-modules.txt, PyInstaller's spec, the Windows installer script, license texts
 docs/requirements/   what MusiKata does (R1 …)
 docs/architecture/   why it is built so (A1 …)
 docs/process/        how it is worked on (this folder)

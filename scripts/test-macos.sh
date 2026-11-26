@@ -4,9 +4,8 @@
 # at the Alternate rank (offered in Open With, never the default; A6.5) and the .dmg for the license
 # files (A6.6); then the app plays a demo file to its end and quits, the x86_64 one under Rosetta.
 # So a part of Qt trimmed by mistake (A6.2), a module PyInstaller left out, a library of the wrong
-# chip or a decoder PyAV's FFmpeg lacks fails it. On a Mac with no sound device --play decodes the
-# file to its end instead and ends with 3 (src/musikata/app.py): everything short of the sound,
-# which this says.
+# chip or a decoder PyAV's FFmpeg lacks fails it. GitHub's macOS runners have sound devices, so the
+# file is played, not only decoded: a Mac with none fails it.
 #
 # The demo file is made with the build's own Python and PyAV (build/macos-<arch>/python,
 # scripts/demo_library.py).
@@ -49,11 +48,8 @@ if kill -0 "$pid" 2>/dev/null; then
 fi
 wait "$pid" && st=0 || st=$?
 cat "$T/play.out"
-if [ "$st" != 0 ] && [ "$st" != 3 ] || ! grep -q "added=1" "$T/play.err"; then
-    echo "test-macos.sh: --play ended $st, or its scan did not run; it said:" >&2; tail -n 30 "$T/play.err" >&2; exit 1
+if [ "$st" != 0 ] || ! grep -q "added=1" "$T/play.err"; then
+    echo "test-macos.sh: --play ended $st (3: no sound device), or its scan did not run; it said:" >&2
+    tail -n 30 "$T/play.err" >&2; exit 1
 fi
-if [ "$st" = 0 ]; then
-    echo "test-macos.sh: MusiKata.app ($ARCH) played the demo file to its end, and scanned its root"
-else
-    echo "test-macos.sh: MusiKata.app ($ARCH) decoded the demo file to its end with no sound device to play it on, and scanned its root"
-fi
+echo "test-macos.sh: MusiKata.app ($ARCH) played the demo file to its end, and scanned its root"

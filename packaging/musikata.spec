@@ -18,7 +18,7 @@ with open(os.path.join(SRC, "musikata_core", "__init__.py"), encoding="utf-8") a
 # schemas as data
 hidden = collect_submodules("musikata") + collect_submodules("musikata_core")
 # the license files, inside the macOS bundle (Windows' go beside musikata.exe, after PyInstaller)
-LICENSES = os.environ.get("MUSIKATA_LICENSES")
+LICENSES = os.environ.get("MUSIKATA_LICENSES", "")
 licenses = [(os.path.join(LICENSES, f), ".") for f in ("LICENSE.txt", "THIRD-PARTY-NOTICES.txt")]
 a = Analysis(  # noqa: F821
     [os.path.join(SRC, "musikata", "__main__.py")],
