@@ -109,6 +109,7 @@ def load(
     library = Library(root, index, home_of(env), pool, clock=clock, watching=True)
     player = Player(root, playback())
     player.nowPlaying.connect(library.show_playing)
+    library.property("folders").play.connect(player.play)
     engine = QQmlApplicationEngine()
     engine.addImageProvider("covers", Covers(root, index.read, cache_of(index, env)))
     engine.setInitialProperties({"library": library, "player": player})

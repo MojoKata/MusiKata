@@ -5,7 +5,9 @@ import "."
 // The header of a library view (R6.4, L01-albums, L03-songs-bulk-edit): the view's title and count,
 // the search box (R2.7; `/` focuses it, Esc clears it), the view-mode switch where the view has more
 // than one mode, the sort, and the ⋮ menu. When the header is too narrow for everything, the search
-// box becomes its icon, which opens it over the title. What each says is the library's.
+// box becomes its icon, which opens it over the title. In Folders the title is the open folder's
+// path, a crumb per folder, each opening its folder; when they don't fit, the middle ones become …,
+// a menu of them (R2.9.1, L05, L08). What each says is the library's.
 Item {
     id: header
     required property var library
@@ -31,16 +33,108 @@ Item {
         x: 28
         y: 14
         height: 36
-        visible: !header.overTitle
+        visible: !header.overTitle && !crumbs.visible
         verticalAlignment: Text.AlignVCenter
         text: header.library.title
         color: Theme.text
         font { family: Theme.sans; pixelSize: 22; weight: Font.Bold }
     }
+    // the crumbs (R2.9.1): the first, then … for those folded, then the rest; the last in the
+    // title's weight
+    readonly property var crumbList: header.library.crumbs
+    readonly property real crumbGap: 26     // a separator and the space around it
+    readonly property var crumbWidths: {
+        const out = []
+        for (let i = 0; i < measure.count; i++)
+            out.push(measure.itemAt(i) ? measure.itemAt(i).implicitWidth : 0)
+        return out
+    }
+    // the room the crumbs may take: what is left with the search as its icon, beside the count
+    readonly property real crumbRoom: tools.x - 8 - 34 - 24 - count.implicitWidth - 14 - 28
+    readonly property int folded: crumbList.length && measure.count === crumbList.length
+        ? header.library.folders.foldCrumbs(crumbWidths, crumbRoom, ellipsisMeasure.implicitWidth, crumbGap) : 0
+    readonly property var shownCrumbs: {
+        if (!folded)
+            return crumbList.map((c, i) => ({ name: c.name, path: c.path, index: i }))
+        return [{ name: crumbList[0].name, path: crumbList[0].path, index: 0 },
+                { name: "…", path: "", index: -1 }]
+            .concat(crumbList.slice(1 + folded).map((c, i) => ({ name: c.name, path: c.path, index: 1 + folded + i })))
+    }
+    Repeater {
+        id: measure
+        model: header.crumbList
+        Text {
+            required property int index
+            required property var modelData
+            visible: false
+            text: modelData.name
+            font { family: Theme.sans; pixelSize: 22; weight: index === header.crumbList.length - 1 ? Font.Bold : Font.Normal }
+        }
+    }
+    Text { id: ellipsisMeasure; visible: false; text: "…"; font { family: Theme.sans; pixelSize: 22 } }
+
+    Row {
+        id: crumbs
+        objectName: "crumbs"
+        x: 28
+        y: 14
+        height: 36
+        spacing: 8
+        visible: header.crumbList.length > 0 && !header.overTitle
+        Repeater {
+            model: header.shownCrumbs
+            Row {
+                id: crumb
+                required property int index
+                required property var modelData
+                readonly property bool last: modelData.index === header.crumbList.length - 1
+                height: 36
+                spacing: 8
+                Text {
+                    objectName: "crumb"
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: crumb.last ? Math.min(implicitWidth, Math.max(40, header.crumbRoom - crumb.x)) : implicitWidth
+                    elide: Text.ElideRight
+                    text: crumb.modelData.name
+                    color: crumb.last ? Theme.text : (crumbHover.hovered ? Theme.cell : Theme.muted)
+                    font { family: Theme.sans; pixelSize: 22; weight: crumb.last ? Font.Bold : Font.Normal }
+                    Accessible.role: crumb.last ? Accessible.StaticText : Accessible.Link
+                    Accessible.name: crumb.modelData.index < 0 ? qsTr("More folders") : text
+                    HoverHandler { id: crumbHover; enabled: !crumb.last; cursorShape: Qt.PointingHandCursor }
+                    TapHandler {
+                        enabled: !crumb.last
+                        onTapped: crumb.modelData.index < 0
+                            ? foldedMenu.popup(parent, 0, parent.height + 4)
+                            : header.library.folders.open(crumb.modelData.path)
+                    }
+                }
+                Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !crumb.last
+                    name: "chevLeft"
+                    rotation: 180
+                    size: 16
+                    color: Theme.faint
+                }
+            }
+        }
+    }
+    Menu {
+        id: foldedMenu
+        Repeater {
+            model: header.crumbList.slice(1, 1 + header.folded)
+            MenuItem {
+                required property var modelData
+                text: modelData.name
+                onTriggered: header.library.folders.open(modelData.path)
+            }
+        }
+    }
+
     Text {
         id: count
         objectName: "viewCount"
-        anchors.left: title.right
+        anchors.left: crumbs.visible ? crumbs.right : title.right
         anchors.leftMargin: 14
         anchors.baseline: title.baseline
         visible: !header.overTitle
@@ -168,7 +262,7 @@ Item {
                         size: 16
                         color: header.library.mode === modelData.mode ? Theme.text : Theme.muted
                     }
-                    TapHandler { onTapped: header.library.setAlbumsMode(modelData.mode) }
+                    TapHandler { onTapped: header.library.setMode(modelData.mode) }
                 }
             }
         }

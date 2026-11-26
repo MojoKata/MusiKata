@@ -35,7 +35,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from musikata_core import albums, search
+from musikata_core import albums, folders, search
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +119,45 @@ SONG_COLUMNS = (
 )
 
 
+def size_text(n: int) -> str:
+    """Bytes as the root's card gives them: 9.8 GB, 412 MB, 3 KB (powers of 1000, as the systems'
+    file managers mostly do)."""
+    for unit, size in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
+        if n >= size:
+            v = n / size
+            return f"{v:.1f} {unit}" if v < 100 else f"{v:.0f} {unit}"
+    return f"{n} bytes"
+
+
+KINDS = {
+    "mp3": "MP3", "flac": "FLAC", "aac": "AAC", "alac": "ALAC", "vorbis": "Ogg Vorbis",
+    "opus": "Opus", "wav": "WAV", "aiff": "AIFF",
+}  # fmt: skip
+LOSSLESS = {"flac", "alac", "wav", "aiff"}
+
+
+def format_text(groups: list[tuple[str | None, int | None, int | None, int]]) -> str:
+    """An album's format (R2.6) from its songs' (kind, sample rate, bit rate, songs): FLAC 44.1
+    kHz; MP3 320 kbps; several kinds, most songs first: FLAC, MP3. Empty when unknown."""
+    by_kind: dict[str, list[tuple[int | None, int | None, int]]] = {}
+    for kind, rate, bitrate, n in groups:
+        if kind:
+            by_kind.setdefault(kind, []).append((rate, bitrate, n))
+    if not by_kind:
+        return ""
+    if len(by_kind) > 1:
+        order = sorted(by_kind, key=lambda k: (-sum(g[2] for g in by_kind[k]), k))
+        return ", ".join(KINDS.get(k, k) for k in order)
+    kind, found = next(iter(by_kind.items()))
+    name = KINDS.get(kind, kind)
+    if kind in LOSSLESS:
+        rate = max(found, key=lambda g: g[2])[0]
+        return f"{name} {rate / 1000:g} kHz" if rate else name
+    songs = sum(g[2] for g in found)
+    kbps = round(sum((g[1] or 0) * g[2] for g in found) / songs / 1000)
+    return f"{name} {kbps} kbps" if kbps else name
+
+
 def time_text(seconds: float | None) -> str:
     """A song's length as the lists show it: 4:18, 1:02:05; empty when unknown."""
     if seconds is None or seconds < 0:
@@ -165,17 +204,10 @@ def cover_url(thumb: str | None) -> str:
 
 
 def mosaic(n: int) -> list[dict[str, float]]:
-    """Where each of n covers (up to four) sits in a mosaic (R5.8's table), as fractions of the
-    tile and its gap: x and y place a piece at x * (size + gap), and w and h size it at
-    w * (size + gap) - gap, so the pieces meet with the gap between them."""
-    layouts: dict[int, list[tuple[float, float, float, float]]] = {
-        0: [],
-        1: [(0, 0, 1, 1)],
-        2: [(0, 0, 0.5, 1), (0.5, 0, 0.5, 1)],
-        3: [(0, 0, 0.5, 1), (0.5, 0, 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)],
-        4: [(0, 0, 0.5, 0.5), (0.5, 0, 0.5, 0.5), (0, 0.5, 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)],
-    }
-    return [dict(zip("xywh", r, strict=True)) for r in layouts[min(max(n, 0), 4)]]
+    """Where each of n covers (up to four) sits in a mosaic (R5.8's table, folders.layout), as
+    fractions of the tile and its gap: x and y place a piece at x * (size + gap), and w and h size
+    it at w * (size + gap) - gap, so the pieces meet with the gap between them."""
+    return [dict(zip("xywh", r, strict=True)) for r in folders.layout(n)]
 
 
 def tiles(thumbs: Sequence[str]) -> list[dict[str, Any]]:

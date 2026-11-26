@@ -261,7 +261,7 @@ def test_an_index_of_slice_3_1_gains_song_fts_filled_from_its_rows(tmp_path):
         " VALUES (7, 'A/Beyoncé - Halo.mp3', 10, 5, 'Halo', 'Beyoncé', 2008)"
     )
     c.execute("INSERT INTO song_genre VALUES (7, 0, 'Pop'), (7, 1, 'Soul')")
-    assert db.migrate(c) == 3
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT mtime_ns FROM song").fetchone()[0] == 5  # not to be read again
     assert c.execute("SELECT rowid, genre, year, filename FROM song_fts").fetchall() == [
         (7, "Pop Soul", 2008, "Beyoncé - Halo.mp3")

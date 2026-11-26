@@ -63,6 +63,42 @@ A table row is traced whole, its cells as written.
 | R2.7 | The header's search box (/ to focus it) filters the current view as the user types | test_slash_opens_the_search_typing_filters_and_escape_clears_it, test_a_search_filters_only_the_view_open_and_its_count_says_of_how_many, test_a_search_finds_its_rows_off_the_gui_thread_and_they_come_with_count_changed, test_albums_and_artists_a_search_finds_are_those_of_the_songs_it_finds, test_words_match_any_field_case_and_accents_aside, test_the_last_word_matches_as_its_prefix_while_typed, test_the_scan_keeps_song_fts_in_step_with_the_songs, test_a_field_narrows_its_word_or_phrase_to_its_columns_any_case |
 | R2.7 | (rating:>=4) narrow a term to one field | test_a_field_narrows_its_word_or_phrase_to_its_columns_any_case, test_artist_reads_the_album_artist_too_and_album_only_the_album, test_ratings_and_years_compare_as_numbers, test_ratings_compare_and_a_song_not_rated_is_zero |
 
+## 2.9. The Folders view
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R2.9 | Folders browses the music root one folder at a time | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, test_folders_in_the_header_its_crumbs_count_modes_sort_and_search_hint, test_a_folder_lists_its_folders_then_its_files_with_their_crumbs_and_count |
+| R2.9.1 | The header is the one Albums has (R6.4) | test_folders_in_the_header_its_crumbs_count_modes_sort_and_search_hint |
+| R2.9.1 | In place of the view's title it shows the open folder's path under the root | test_a_folder_lists_its_folders_then_its_files_with_their_crumbs_and_count, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back |
+| R2.9.1 | The root's own name, and any stand-in for it | test_the_root_lists_its_folders_by_name_titled_your_music_folders, test_folders_in_the_header_its_crumbs_count_modes_sort_and_search_hint |
+| R2.9.1 | Beside the title is the open folder's count | test_the_root_lists_its_folders_by_name_titled_your_music_folders, test_a_folder_lists_its_folders_then_its_files_with_their_crumbs_and_count, test_going_up_and_back, test_going_up_is_alt_up_or_cmd_up_on_macos_and_backspace, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back, tier 3: on macOS ⌘↑ goes up a folder |
+| R2.9.1 | Alt+← / the mouse's back button go back to the folder opened before | test_going_up_and_back, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back |
+| R2.9.1 | Clicking Folders in the sidebar returns to the root | test_the_sidebars_folders_opens_where_it_was_left_and_again_returns_to_the_root, test_long_paths_fold_their_middle_crumbs_into_an_ellipsis, test_long_paths_fold_their_middle_crumbs_into_a_menu, test_the_open_folder_and_the_mode_are_remembered_for_next_time, later: #0 |
+| R2.9.2 | The open folder's subfolders, then its own audio files | test_a_folder_lists_its_folders_then_its_files_with_their_crumbs_and_count, test_a_write_makes_a_row_for_each_folder_and_its_ancestors_with_their_counts |
+| R2.9.2 | A folder with no audio file anywhere beneath it | test_scans_keep_the_rows_after_moves_and_deletes_up_through_the_ancestors, test_the_walk_skips_hidden_ignored_and_settings_folders_and_the_roots_own |
+| R2.9.2 | Names sort as people read them | test_names_sort_as_people_read_them |
+| R2.9.2 | Double-click or Enter opens a folder or plays a file | test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back, test_play_plays_the_selections_first_song_and_activate_opens_or_plays |
+| R2.9.2 | Search (R2.7) filters the open folder and everything beneath it | test_a_search_lists_the_folders_and_files_beneath_that_match_with_where_they_are, test_a_search_finds_folders_whose_names_hold_every_word_case_and_accents_aside, test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes |
+| R2.9.3 | Each folder shows its own cover or a mosaic of the covers beneath it | test_a_folders_own_image_comes_first_then_the_embedded_cover_its_songs_share, test_a_mosaic_takes_up_to_four_subfolders_with_the_most_songs_in_name_order, test_a_folders_songs_sharing_an_embedded_cover_give_it_theirs, test_a_folders_mosaic_and_cover_are_shown_and_one_with_no_art_its_dashed_tile |
+| R2.9.4 | View modes, chosen in the header's view switch, the same for every folder | test_folders_in_the_header_its_crumbs_count_modes_sort_and_search_hint, test_a_drag_box_and_lists_checkboxes_select_and_the_selection_stays_across_modes, test_the_open_folder_and_the_mode_are_remembered_for_next_time |
+| R2.9.4 | In the three image modes the folder's own files follow the folders | test_a_folder_lists_its_folders_then_its_files_with_their_crumbs_and_count, test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, later: #0 |
+| R2.9.4 | \| Large images \| Covers about 220 px wide | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes |
+| R2.9.4 | \| Small images (default) \| Covers the size of Albums' | test_folders_in_the_header_its_crumbs_count_modes_sort_and_search_hint, test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes |
+| R2.9.4 | \| Cards \| Wide cards like the Genres view's | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, later: #0 |
+| R2.9.4 | \| List \| One table with Songs' columns | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, test_a_folders_list_row_shows_what_its_songs_share_and_their_total_time |
+| R2.9.5 | Each folder carries the worst path-match state | later: #0 |
+| R2.9.5 | A folder whose files all match shows nothing | later: #0 |
+| R2.9.6 | Acting on a selection | statement |
+| R2.9.6 | Folders and files are selected together | test_click_ctrl_click_shift_click_and_the_checkbox_select_folders_and_files, test_a_drag_box_and_lists_checkboxes_select_and_the_selection_stays_across_modes, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back |
+| R2.9.6 | A selected folder stands for every song beneath it | test_a_selection_of_folders_resolves_to_the_songs_beneath_them, test_a_folder_and_a_file_inside_it_count_its_songs_once |
+| R2.9.6 | The selection bar counts both | test_click_ctrl_click_shift_click_and_the_checkbox_select_folders_and_files, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back, later: #0 |
+| R2.9.6 | The same actions are in the right-click menu | later: #0 |
+| R2.9.6 | Folders and files are dragged as R6.10 says | later: #0 |
+| R2.9.7 | When the open folder holds audio files and no subfolders | test_a_folder_of_songs_has_its_strip_and_marks_the_values_that_differ, test_a_folder_of_songs_art_line_and_chip, later: #0 |
+| R2.9.7 | Edit tags, Album art and Infer from path | later: #0 |
+| R2.9.7 | Its files follow as a table | test_a_folder_of_songs_has_its_strip_and_marks_the_values_that_differ, test_values_that_differ_from_the_rest_of_a_folder_are_marked, later: #0 |
+| R2.9.7 | The view switch stays, and applies again on leaving the folder | test_a_folder_of_songs_has_its_strip_and_marks_the_values_that_differ |
+
 ## 2.13. Sort names
 
 | Item | Sentence starts | Shown by |

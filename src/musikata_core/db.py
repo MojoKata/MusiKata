@@ -16,6 +16,8 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from typing import TypeVar
 
+from . import art, folders, sortnames
+
 T = TypeVar("T")
 
 # R4.1's fields as the song table's columns, in Tags' order
@@ -96,7 +98,42 @@ def _v3(c: sqlite3.Connection) -> None:
     )
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3]
+def _v4(c: sqlite3.Connection) -> None:
+    """Folders (A2.7, R2.9): each song's folder and its file name's sort key (R2.9.2), and the
+    folder table, filled from the rows there, so no song needs reading again; each folder's cover
+    image is the one its albums' rows name, until the next scan walks it. The scan keeps them from
+    then on (folders.py)."""
+    c.execute("ALTER TABLE song ADD COLUMN folder TEXT")
+    c.execute("ALTER TABLE song ADD COLUMN name_key TEXT")
+    c.executemany(
+        "UPDATE song SET folder = ?, name_key = ? WHERE id = ?",
+        [
+            (path.rpartition("/")[0], sortnames.key_of(path.rpartition("/")[2]), song_id)
+            for song_id, path in c.execute("SELECT id, path FROM song").fetchall()
+        ],
+    )
+    c.execute("CREATE INDEX song_folder ON song (folder, name_key, path)")
+    c.execute(
+        "CREATE TABLE folder (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, parent TEXT,"
+        " name TEXT NOT NULL, name_key TEXT NOT NULL, fold TEXT NOT NULL,"
+        " folders INTEGER NOT NULL DEFAULT 0, songs INTEGER NOT NULL DEFAULT 0,"
+        " folders_beneath INTEGER NOT NULL DEFAULT 0, songs_beneath INTEGER NOT NULL DEFAULT 0,"
+        " length REAL NOT NULL DEFAULT 0, artist TEXT, album TEXT, year INTEGER, image TEXT,"
+        " image_size INTEGER, image_mtime INTEGER, cover_kind TEXT, cover TEXT, thumb TEXT,"
+        " mosaic TEXT)"
+    )
+    c.execute("CREATE INDEX folder_parent ON folder (parent, name_key, path)")
+    c.execute("CREATE INDEX folder_thumb ON folder (thumb)")
+    images: dict[str, list[art.Image]] = {}
+    for folder, image, size, mtime in c.execute(
+        "SELECT folder, folder_image, folder_image_size, folder_image_mtime FROM album"
+        " WHERE folder_image IS NOT NULL"
+    ):
+        images.setdefault(folder, []).append(art.Image(image.rpartition("/")[2], size, mtime))
+    folders.rebuild(c, images)
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]
 
 
 def connect(path: str) -> sqlite3.Connection:

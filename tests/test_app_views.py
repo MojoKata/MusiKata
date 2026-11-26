@@ -313,3 +313,167 @@ def test_a_list_keeps_its_place_and_its_search_when_a_scan_changes_its_rows(shel
     settle(shell, qtbot)
     assert songs.property("contentY") == 1500.0
     assert lib.property("search") == "many" and lib.property("view") == "songs"
+
+
+# ---------- Folders (R2.9) ----------
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"view": "folders", "folder": "", "mode": "small"},
+        {"view": "folders", "folder": "Lumen Drift", "mode": "large"},
+        {"view": "folders", "folder": "", "mode": "cards", "select": ["Lumen Drift"]},
+        {"view": "folders", "folder": "Lumen Drift", "mode": "list",
+         "select": ["Lumen Drift/Tide Tables"]},
+        {"view": "folders", "folder": "Lumen Drift/Glass Harbor"},
+        {"view": "folders", "folder": "", "mode": "large", "search": "tide"},
+        {"view": "folders", "folder": "", "mode": "list", "search": "tide"},
+    ],
+)  # fmt: skip
+def test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes(
+    shell, qtbot, qtlog, step
+):
+    shell.library.go(step)
+    qtbot.waitUntil(lambda: not shell.library.property("searching"), timeout=WAIT)
+    settle(shell, qtbot)
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
+    assert layout.faults(shell.window) == []
+    shell.window.setWidth(1920)
+    settle(shell, qtbot)
+    assert layout.faults(shell.window) == []
+
+
+def tiles(shell):
+    found = [i for i in every_item(shell.window.contentItem()) if i.inherits("FolderTile_QMLTYPE")
+             or (i.property("cover") is not None and i.property("line") is not None
+                 and i.property("large") is not None)]  # fmt: skip
+    return sorted(found, key=lambda i: (i.mapToScene(QPointF(0, 0)).y(),
+                                        i.mapToScene(QPointF(0, 0)).x()))  # fmt: skip
+
+
+@pytest.mark.slow
+def test_a_folders_mosaic_and_cover_are_shown_and_one_with_no_art_its_dashed_tile(shell, qtbot):
+    shell.library.go({"view": "folders", "folder": "", "mode": "small"})
+    shot = settle(shell, qtbot)
+    lumen, mara, lanterns = tiles(shell)
+    for tile, x, color in ((lumen, 0.25, "#3366cc"), (lumen, 0.75, "#33aa66"),
+                           (lanterns, 0.5, "#cc6633")):  # fmt: skip
+        p = tile.mapToScene(QPointF(tile.width() * x, tile.width() / 2)).toPoint()
+        got, want = shot.pixelColor(p), QColor(color)  # the thumbnails are JPEG: near, not exact
+        assert max(abs(got.red() - want.red()), abs(got.green() - want.green()),
+                   abs(got.blue() - want.blue())) <= 6, (got.name(), color)  # fmt: skip
+    p = mara.mapToScene(QPointF(mara.width() / 2, mara.width() / 2)).toPoint()
+    assert shot.pixelColor(p).name() not in ("#3366cc", "#33aa66", "#cc6633")
+
+
+@pytest.mark.slow
+def test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back(shell, qtbot):
+    lib = shell.library
+    f = lib.property("folders")
+    m = f.property("model")
+    played = []
+    f.play.connect(played.append)
+    lib.go({"view": "folders", "folder": "", "mode": "small"})
+    settle(shell, qtbot)
+    lumen, mara, _ = tiles(shell)
+    click(shell, lumen, 40, 40)
+    qtbot.waitUntil(lambda: f.property("selectionCount") == 1, timeout=WAIT)
+    QTest.mouseClick(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier,
+                     mara.mapToScene(QPointF(40, 40)).toPoint())  # fmt: skip
+    qtbot.waitUntil(lambda: f.property("selectionText") == "2 folders · 7 songs selected",
+                    timeout=WAIT)  # fmt: skip
+    settle(shell, qtbot)
+    click(shell, one(shell, "playSelection"))
+    qtbot.waitUntil(lambda: bool(played), timeout=WAIT)
+    assert played == ["Lumen Drift/Glass Harbor/01.flac"]
+    click(shell, one(shell, "clearSelection"))
+    qtbot.waitUntil(lambda: f.property("selectionCount") == 0, timeout=WAIT)
+    at = lumen.mapToScene(QPointF(40, 40)).toPoint()
+    QTest.mouseDClick(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at)
+    qtbot.waitUntil(lambda: f.property("path") == "Lumen Drift", timeout=WAIT)
+    assert lib.property("viewCount") == "2 folders · 5 songs"
+    f.open("Lumen Drift/Tide Tables")
+    settle(shell, qtbot)
+    assert visible(one(shell, "strip"))
+    crumb = [c for c in items(shell.window.contentItem(), "crumb") if c.property("text") ==
+             "Lumen Drift"][0]  # fmt: skip
+    click(shell, crumb)
+    qtbot.waitUntil(lambda: f.property("path") == "Lumen Drift", timeout=WAIT)
+    shell.window.requestActivate()
+    qtbot.waitUntil(lambda: shell.window.isActive(), timeout=WAIT)
+    QTest.keyClick(shell.window, Qt.Key.Key_Left, Qt.KeyboardModifier.AltModifier)
+    qtbot.waitUntil(lambda: f.property("path") == "Lumen Drift/Tide Tables", timeout=WAIT)
+    key(shell, Qt.Key.Key_Backspace)
+    qtbot.waitUntil(lambda: f.property("path") == "Lumen Drift", timeout=WAIT)
+    QTest.mouseClick(shell.window, Qt.MouseButton.BackButton, Qt.KeyboardModifier(0),
+                     QPointF(700, 600).toPoint())  # the mouse's back button  # fmt: skip
+    qtbot.waitUntil(lambda: f.property("path") == "Lumen Drift/Tide Tables", timeout=WAIT)
+    key(shell, Qt.Key.Key_Backspace)
+    qtbot.waitUntil(lambda: f.property("path") == "Lumen Drift", timeout=WAIT)
+    QTest.keyClick(shell.window, Qt.Key.Key_Up, Qt.KeyboardModifier.AltModifier)
+    qtbot.waitUntil(lambda: f.property("path") == "", timeout=WAIT)
+    settle(shell, qtbot)
+    click(shell, tiles(shell)[2], 40, 40)  # The Paper Lanterns, then Enter opens it
+    qtbot.waitUntil(lambda: f.property("selectionCount") == 1, timeout=WAIT)
+    key(shell, Qt.Key.Key_Return)
+    qtbot.waitUntil(lambda: f.property("path") == "The Paper Lanterns", timeout=WAIT)
+    key(shell, Qt.Key.Key_Right)  # the next row selected
+    key(shell, Qt.Key.Key_Return)
+    qtbot.waitUntil(lambda: f.property("path") == "The Paper Lanterns/Northbound Static",
+                    timeout=WAIT)  # fmt: skip
+    key(shell, Qt.Key.Key_Down)
+    key(shell, Qt.Key.Key_Return)  # a file: played
+    qtbot.waitUntil(lambda: len(played) == 2, timeout=WAIT)
+    assert played[1] == "The Paper Lanterns/Northbound Static/01.flac"
+    assert m.rowCount() == 2
+
+
+@pytest.mark.slow
+def test_a_drag_box_and_lists_checkboxes_select_and_the_selection_stays_across_modes(shell, qtbot):
+    lib = shell.library
+    f = lib.property("folders")
+    lib.go({"view": "folders", "folder": "", "mode": "small"})
+    settle(shell, qtbot)
+    lumen, mara, _ = tiles(shell)
+    start = lumen.mapToScene(QPointF(-2, lumen.width() + 70)).toPoint()  # under the tiles
+    end = mara.mapToScene(QPointF(30, 30)).toPoint()
+    QTest.mousePress(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), start)
+    for n in range(1, 11):
+        QTest.mouseMove(shell.window, start + (end - start) * (n / 10))
+    QTest.mouseRelease(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), end)
+    qtbot.waitUntil(lambda: f.property("selectionCount") == 2, timeout=WAIT)
+    lib.setMode("list")
+    settle(shell, qtbot)
+    assert f.property("selectionCount") == 2 and f.property("selectionState") == "some"
+    click(shell, one(shell, "selectAll"))  # some selected: none
+    qtbot.waitUntil(lambda: f.property("selectionState") == "none", timeout=WAIT)
+    click(shell, one(shell, "selectAll"))  # none: all
+    qtbot.waitUntil(lambda: f.property("selectionState") == "all", timeout=WAIT)
+    click(shell, one(shell, "selectAll"))
+    qtbot.waitUntil(lambda: f.property("selectionState") == "none", timeout=WAIT)
+    rows = one(shell, "folderRows")
+    check = [i for i in every_item(rows) if i.property("mark") is not None and visible(i)][0]
+    click(shell, check)
+    qtbot.waitUntil(lambda: f.property("selectionCount") == 1, timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_long_paths_fold_their_middle_crumbs_into_a_menu(shell, qtbot):
+    deep = "/".join(["A rather long folder name"] * 6)
+    fill_one = [scanner.Read(scanner.Seen(f"{deep}/1.flac", 10, 1), Tags(title="Deep"),
+                             AudioInfo("flac", 200.0, 900, 44100, 2), "deep")]  # fmt: skip
+    shell.index.write(lambda c: scanner.write_batch(c, fill_one, {})).result()
+    shell.library.reload()
+    shell.library.go({"view": "folders", "folder": deep})
+    settle(shell, qtbot)
+    shown = [c.property("text") for c in items(shell.window.contentItem(), "crumb")
+             if visible(c)]  # fmt: skip
+    assert shown[1] == "…" and len(shown) < 6
+    assert layout.faults(shell.window) == []
+    more = [c for c in items(shell.window.contentItem(), "crumb") if c.property("text") == "…"][0]
+    click(shell, more)
+    click(shell, menu_item(shell, "A rather long folder name", qtbot))
+    qtbot.waitUntil(lambda: shell.library.property("folders").property("path").count("/") == 1,
+                    timeout=WAIT)  # fmt: skip

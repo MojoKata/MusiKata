@@ -29,13 +29,36 @@ SIZES = (SHOT, DESIGN)
 # (screen, what the window shows, as Library.go takes it): a screen is named for its mockup
 # (docs/mockups/README.md); one that shows only part of its mockup yet says so (L03 without the
 # Edit tags panel, which comes with slice 5); one with no mockup takes the next number of its area
-# (Artists and an artist's page, R2.6, are L10 and L11; a search being typed, R2.7, is L12)
+# (Artists and an artist's page, R2.6, are L10 and L11; a search being typed, R2.7, is L12);
+# Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of L07, the state
+# dots and chips of R3.9, the tint by a cover's colour)
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor"}),
     ("L10-artists", {"view": "artists"}),
     ("L11-artist", {"view": "artist", "artist": "Lumen Drift"}),
     ("L03-songs", {"view": "songs"}),
+    ("L04-folders", {"view": "folders", "folder": "", "mode": "small"}),
+    ("L05-folders-large", {"view": "folders", "folder": "Lumen Drift", "mode": "large"}),
+    (
+        "L06-folders-cards",
+        {
+            "view": "folders",
+            "folder": "",
+            "mode": "cards",
+            "select": ["Lumen Drift", "Mara Okafor"],
+        },
+    ),
+    (
+        "L07-folders-list",
+        {
+            "view": "folders",
+            "folder": "Mara Okafor",
+            "mode": "list",
+            "select": ["Mara Okafor/Kindling", "Mara Okafor/Kindling (acoustic).m4a"],
+        },
+    ),
+    ("L08-folder-songs", {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small"}),
     ("L12-search", {"view": "albums", "search": "lumen dri"}),
 ]
 POLL = 20  # ms between looks at whether the covers have loaded

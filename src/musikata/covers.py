@@ -6,25 +6,78 @@ image in its folder), scaled so its shorter side is one of SIZES, and kept in th
 folder (R1.5) under its name, a hash of the cover's path, size and modification time
 (musikata_core.art.thumb_id): a changed cover is a new name. A cover that can't be read, or isn't
 an image Qt can decode, gives an empty image, which the views show as no cover (R5.7), and the App
-log says which."""
+log says which. A thumbnail's cover is found by its name in the album rows, else in the folder rows
+(a folder's own cover, R5.8).
+
+A folder's mosaic (R5.8, A2.7) is `image://covers/mosaic/<name>+<name>…`, its pieces' thumbnails by
+name: drawn with QPainter from those thumbnails at the size asked for, each a centre crop in R5.8's
+layout with a gap between, and kept in the cache under a hash of its pieces' names, which are
+hashes of their covers' paths, sizes and modification times; so a changed cover makes a new
+mosaic, drawn when next shown."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import sqlite3
 import tempfile
 from collections.abc import Callable
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtGui import QImage, QPainter
 from PySide6.QtQuick import QQuickImageProvider
 
-from musikata_core import art, tags
+from musikata_core import art, folders, tags
 
 log = logging.getLogger(__name__)
 
 SIZES = (256, 512)  # a thumbnail's shorter side, in pixels: the grids', the album page's
+MOSAIC = "mosaic/"  # a mosaic's address under the provider, before its pieces' names
+
+
+def mosaic_id(thumbs: list[str]) -> str:
+    """The provider's name for a mosaic of these thumbnails (R5.8), in order."""
+    return MOSAIC + "+".join(thumbs)
+
+
+def mosaic_name(thumbs: list[str]) -> str:
+    """The name a mosaic is cached under: a hash of its pieces' names (A2.7)."""
+    return "m" + hashlib.sha256("+".join(thumbs).encode()).hexdigest()[:32]
+
+
+def gap_for(side: int) -> int:
+    """The gap between a mosaic's pieces at `side` pixels: R5.8's 2 px where a tile is drawn,
+    about 160 px wide from a 256 px image."""
+    return max(2, round(side * 2 / 160))
+
+
+def draw_mosaic(pieces: list[QImage], side: int) -> QImage:
+    """A square mosaic `side` pixels wide of up to four pictures in R5.8's layout, each a centre
+    crop with a transparent gap between them; a piece that is empty leaves its place empty, and
+    with none to draw the image is empty."""
+    if not any(not p.isNull() for p in pieces):
+        return QImage()
+    image = QImage(side, side, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    gap = gap_for(side)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    for piece, (fx, fy, fw, fh) in zip(pieces, folders.layout(len(pieces)), strict=False):
+        x, y = round(fx * (side + gap)), round(fy * (side + gap))
+        w, h = round(fw * (side + gap)) - gap, round(fh * (side + gap)) - gap
+        if piece.isNull() or w <= 0 or h <= 0:
+            continue
+        scaled = piece.scaled(
+            w,
+            h,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        crop = QRect((scaled.width() - w) // 2, (scaled.height() - h) // 2, w, h)
+        painter.drawImage(QRect(x, y, w, h), scaled, crop)
+    painter.end()
+    return image
 
 
 def side_for(requested: QSize) -> int:
@@ -69,17 +122,21 @@ class Covers(QQuickImageProvider):
         return self.image(id, side_for(requestedSize))
 
     def image(self, name: str, side: int) -> QImage:
-        """The thumbnail `name` at `side`: the cached one, else made from the cover and kept."""
-        for ext in (".jpg", ".png"):
-            path = os.path.join(self._cache, f"{name}-{side}{ext}")
-            if os.path.exists(path):
-                cached = QImage(path)
-                if not cached.isNull():
-                    return cached
+        """The thumbnail `name` at `side`, or a mosaic's (`mosaic_id`): the cached one, else made
+        from the cover, or drawn from its pieces, and kept."""
+        if name.startswith(MOSAIC):
+            return self.mosaic(name[len(MOSAIC) :].split("+"), side)
+        cached = self._cached(name, side)
+        if cached is not None:
+            return cached
+        c = self._read()
         row = (
-            self._read()
-            .execute("SELECT cover_kind, cover FROM album WHERE thumb = ? LIMIT 1", (name,))
-            .fetchone()
+            c.execute(
+                "SELECT cover_kind, cover FROM album WHERE thumb = ? LIMIT 1", (name,)
+            ).fetchone()
+            or c.execute(
+                "SELECT cover_kind, cover FROM folder WHERE thumb = ? LIMIT 1", (name,)
+            ).fetchone()
         )
         if row is None:
             return QImage()
@@ -91,6 +148,27 @@ class Covers(QQuickImageProvider):
             return image
         self._keep(image, name, side)
         return image
+
+    def mosaic(self, thumbs: list[str], side: int) -> QImage:
+        """The mosaic of these thumbnails at `side`: the cached one, else drawn from them (each
+        from the cache, or made) and kept; empty when none of them can be shown."""
+        name = mosaic_name(thumbs)
+        cached = self._cached(name, side)
+        if cached is not None:
+            return cached
+        image = draw_mosaic([self.image(t, side) for t in thumbs[: folders.MOSAIC]], side)
+        if not image.isNull():
+            self._keep(image, name, side)
+        return image
+
+    def _cached(self, name: str, side: int) -> QImage | None:
+        for ext in (".jpg", ".png"):
+            path = os.path.join(self._cache, f"{name}-{side}{ext}")
+            if os.path.exists(path):
+                cached = QImage(path)
+                if not cached.isNull():
+                    return cached
+        return None
 
     def _source(self, kind: str, path: str) -> bytes | None:
         """The cover's bytes: the front picture embedded in the song at `path`, or the image file

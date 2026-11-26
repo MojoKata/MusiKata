@@ -23,7 +23,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import BinaryIO, Literal
 
-from . import albums, art, db, search
+from . import albums, art, db, folders, search, sortnames
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags
 from .tags import read as read_tags
 
@@ -382,6 +382,12 @@ def read_one(root: str, seen: Seen) -> Read:
         return Read(seen, error=f"{type(e).__name__}: {e}")
 
 
+def _place(path: str) -> dict[str, object]:
+    """A song's folder and its file name's sort key (R2.9.2), for the Folders view (A2.7)."""
+    folder, _, name = path.rpartition("/")
+    return {"folder": folder, "name_key": sortnames.key_of(name)}
+
+
 def _values(r: Read) -> dict[str, object]:
     t = r.tags or Tags()
     i = r.info
@@ -390,6 +396,7 @@ def _values(r: Read) -> dict[str, object]:
         "kind": i.kind if i else None, "length": i.length if i else None,
         "bitrate": i.bitrate if i else None, "sample_rate": i.sample_rate if i else None,
         "channels": i.channels if i else None, "audio_hash": r.audio_hash, "error": r.error,
+        **_place(r.seen.path),
     }  # fmt: skip
     row.update({name: getattr(t, name) for name in db.FIELDS})
     return row
@@ -404,14 +411,17 @@ def write_batch(
     """One batch into the index, in the writer's transaction: each file's row added or replaced,
     or, for a new path whose audio hash a gone row has (`moves`: hash -> old path), that row moved
     here (A2.2, step 4); and the albums and artists those songs left or joined summarized again
-    (R2.5), with `images`, each folder's images, for their covers."""
+    (R2.5), with `images`, each folder's images, for their covers, then the folders they left or
+    joined and those above them (A2.7)."""
     res = Result()
     touched = albums.Touched()
+    places: set[str] = set()
     written: list[int] = []
     for r in batch:
         values = _values(r)
         old = moves.pop(r.audio_hash, None) if r.audio_hash else None
         row = c.execute("SELECT id FROM song WHERE path = ?", (old or r.seen.path,)).fetchone()
+        places.update(albums.folder_of(p) for p in (old or r.seen.path, r.seen.path))
         if row:
             sets = ", ".join(f"{k} = :{k}" for k in values)
             c.execute(f"UPDATE song SET {sets} WHERE id = :id", {**values, "id": row[0]})
@@ -435,6 +445,7 @@ def write_batch(
         written.append(song_id)
     search.index_songs(c, written)
     albums.refresh(c, touched, images)
+    folders.refresh(c, places, images)
     return res
 
 
@@ -459,7 +470,11 @@ def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched
     c.execute("DELETE FROM song_fts WHERE rowid = ?", copy)
     c.execute("DELETE FROM song WHERE id = ?", copy)
     sets = ", ".join(f"{k} = ?" for k in ROW)
-    c.execute(f"UPDATE song SET path = ?, {sets} WHERE id = ?", (new, *values, keep[0]))
+    place = _place(new)
+    c.execute(
+        f"UPDATE song SET path = ?, folder = ?, name_key = ?, {sets} WHERE id = ?",
+        (new, place["folder"], place["name_key"], *values, keep[0]),
+    )
     c.execute("DELETE FROM song_genre WHERE song_id = ?", keep)
     c.executemany(
         "INSERT INTO song_genre VALUES (?, ?, ?)", [(keep[0], n, g) for n, g in enumerate(genres)]
@@ -583,6 +598,8 @@ def scan(
         c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
         albums.refresh(c, touched, images)
         albums.refresh_folders(c, images)  # covers added or changed beside unchanged songs
+        places = {albums.folder_of(p) for p in [*remove, *taken, *taken.values()]}
+        folders.refresh(c, places | set(folders.stale_images(c, images)), images)
         return len(remove)
 
     total.removed = index.write(delete).result()

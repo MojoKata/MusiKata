@@ -40,7 +40,8 @@ Window {
             top: win.library.searchable ? header.bottom : parent.top
         }
         sourceComponent: ({
-            albums: albums, album: album, artists: artists, artist: artist, songs: songs
+            albums: albums, album: album, artists: artists, artist: artist, songs: songs,
+            folders: folders
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player } }
@@ -48,4 +49,5 @@ Window {
     Component { id: artists; ArtistsView { library: win.library } }
     Component { id: artist; ArtistPage { library: win.library; player: win.player } }
     Component { id: songs; SongsView { library: win.library; player: win.player } }
+    Component { id: folders; FoldersView { library: win.library } }
 }
