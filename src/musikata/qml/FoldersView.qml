@@ -12,10 +12,13 @@ import "."
 //
 // A click selects (Ctrl/⌘-click adds, Shift-click takes the range), as does a cover's checkbox and
 // List's, and a drag box in the image modes (R2.9.6); a double click or Enter opens a folder or
-// plays a file; Alt+↑ (⌘↑ on macOS) or Backspace goes up, Alt+← or the mouse's back button back.
+// plays a file and the files after it (R7.1); a right click on a row of files or of List opens its
+// menu, Play next and Add to queue (R7.2); Alt+↑ (⌘↑ on macOS) or Backspace goes up, Alt+← or the
+// mouse's back button back.
 Item {
     id: view
     required property var library
+    required property var player
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
     readonly property string mode: folders.mode
@@ -42,6 +45,8 @@ Item {
     TapHandler { acceptedButtons: Qt.BackButton; onTapped: view.folders.back() }
     Keys.onReturnPressed: if (view.current >= 0) view.folders.activate(view.current)
     Keys.onEnterPressed: if (view.current >= 0) view.folders.activate(view.current)
+    // ← and → move the selection here, rather than seek (R6.9); Alt+← stays Back
+    Keys.onShortcutOverride: (event) => event.accepted = (event.key === Qt.Key_Left || event.key === Qt.Key_Right) && !(event.modifiers & Qt.AltModifier)
     Keys.onLeftPressed: view.step(-1)
     Keys.onRightPressed: view.step(1)
     Keys.onUpPressed: view.step(view.gridMode && view.current < view.folders.folderRows ? -rows.columns : -1)
@@ -336,6 +341,7 @@ Item {
                     onTapped: (modifiers) => view.tapped(cell.index, modifiers)
                     onActivated: view.folders.activate(cell.index)
                     onToggled: view.rowsModel.toggle(cell.index)
+                    onMenu: songMenu.openFor(view.rowsModel, cell.index)
                 }
             }
             Component {
@@ -357,6 +363,7 @@ Item {
                     selected: cell.selected
                     onTapped: (modifiers) => view.tapped(cell.index, modifiers)
                     onActivated: view.folders.activate(cell.index)
+                    onMenu: songMenu.openFor(view.rowsModel, cell.index)
                 }
             }
         }
@@ -407,6 +414,8 @@ Item {
         }
         return out
     }
+
+    SongMenu { id: songMenu; player: view.player }
 
     SelectionBar {
         objectName: "selectionBar"

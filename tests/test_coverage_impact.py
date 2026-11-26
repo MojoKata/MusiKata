@@ -84,11 +84,12 @@ def test_an_area_new_or_gone_has_a_row_with_a_dash_for_the_side_it_isnt_on():
 class Gh:
     """`gh` as the script calls it, answering from canned output."""
 
-    def __init__(self, master_runs=None):
+    def __init__(self, master_runs=None, unmeasured=()):
         self.calls = []
         self.master_runs = (
             [{"databaseId": 1, "headSha": "a" * 40}] if master_runs is None else (master_runs)
         )
+        self.unmeasured = set(unmeasured)  # runs whose coverage job didn't pass
 
     def __call__(self, args):
         self.calls.append(args)
@@ -98,9 +99,16 @@ class Gh:
             if "master" in args:
                 return json.dumps(self.master_runs)
             return json.dumps([{"databaseId": 2, "headSha": "b" * 40}])
-        if args[:2] == ["run", "view"]:
-            body = MASTER if args[2] == "1" else BRANCH
-            return "tier1\tRun\tt | library | 1 | 1.0% | 1 of 100 | 1.0% | 1 of 100 |\n" + log(body)
+        if args[:2] == ["run", "view"] and "--json" in args:
+            coverage = "failure" if int(args[2]) in self.unmeasured else "success"
+            jobs = [
+                {"name": "pages", "conclusion": "failure", "databaseId": 90},
+                {"name": "coverage", "conclusion": coverage, "databaseId": 100 + int(args[2])},
+            ]
+            return json.dumps({"jobs": jobs})
+        if args[:3] == ["run", "view", "--job"]:  # the coverage job's log alone
+            body = MASTER if args[3] == "101" else BRANCH
+            return log(body)
         raise AssertionError(args)
 
 
@@ -111,9 +119,21 @@ def test_for_a_pr_it_compares_masters_last_green_run_with_the_pr_heads(capsys):
     assert out.startswith(
         "Before: master at aaaaaaaa (run 1). After: this branch at bbbbbbbb (run 2).\n\n| Area"
     )
-    assert "| library | 97.2% / 93.2% |" in out  # the coverage job's row, not tier 1's
+    assert "| library | 97.2% / 93.2% |" in out
+    # each run's coverage job's own log, not the run's: a job cancelled unstarted has none
+    assert ["run", "view", "--job", "101", "--repo", ci.REPO, "--log"] in fake.calls
     listed = [c for c in fake.calls if c[:2] == ["run", "list"]]
-    assert listed[1][-2:] == ["--commit", "b" * 40] and "--status" in listed[0]
+    assert listed[1][-2:] == ["--commit", "b" * 40] and "completed" in listed[0]
+
+
+def test_a_run_counts_by_its_coverage_job_not_by_how_the_whole_run_ended(capsys):
+    """Master's run after a merge failed at its Pages deploy, with its coverage measured: it is
+    the base; a run whose coverage job didn't pass is passed over for the one before."""
+    runs = [{"databaseId": 7, "headSha": "c" * 40}, {"databaseId": 1, "headSha": "a" * 40}]
+    fake = Gh(master_runs=runs, unmeasured={7})
+    base, _ = ci.runs_for_pr(fake, 58)
+    assert base == {"id": "1", "sha": "a" * 40}
+    assert ci.runs_for_pr(Gh(master_runs=runs), 58)[0]["id"] == "7"  # its pages job failed
 
 
 def test_two_runs_by_id_are_compared_as_given(capsys):
@@ -124,10 +144,15 @@ def test_two_runs_by_id_are_compared_as_given(capsys):
 
 
 def test_no_green_run_or_no_table_stops_it_saying_why():
-    with pytest.raises(SystemExit, match="no green ci.yml run"):
+    with pytest.raises(SystemExit, match="whose coverage job passed"):
         ci.main(["--pr", "44"], gh=Gh(master_runs=[]))
+    with pytest.raises(SystemExit, match="whose coverage job passed"):
+        ci.main(["--pr", "44"], gh=Gh(unmeasured={1}))
+    fake = Gh()
     with pytest.raises(SystemExit, match="no coverage table"):
-        ci.run_areas(lambda args: "coverage\tRun\tt nothing here\n", "3")
+        ci.run_areas(lambda a: fake(a) if "--json" in a else "coverage\tRun\tt none\n", "3")
+    with pytest.raises(SystemExit, match="coverage job didn't pass"):
+        ci.main(["1", "2"], gh=Gh(unmeasured={2}))  # a run given by id whose job failed
 
 
 def test_it_wants_a_pr_or_two_runs():

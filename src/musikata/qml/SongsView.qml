@@ -4,8 +4,9 @@ import "."
 
 // Songs (R2.6): every song of the library, or those the header's search finds (R2.7), paged from the
 // index as it scrolls (A1.5); a click on a column's header sorts by it, again the other way; a double
-// click plays a song (R7.1). Its selection comes with slice 3, the queue with slice 4, the Edit tags
-// panel with slice 5 (L03-songs-bulk-edit).
+// click plays a song, the rest of the list after it its queue (R7.1), and a right click opens its
+// menu, Play next and Add to queue (R7.2). Its selection and the Edit tags panel come with slice 5
+// (L03-songs-bulk-edit).
 Item {
     id: view
     required property var library
@@ -86,12 +87,15 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             model: view.library.songs
             delegate: SongRow {
+                required property int index
                 width: list.width
                 columns: table.columns
-                onActivated: view.player.play(path)
+                onActivated: view.player.playFrom(view.library.songs, index)
+                onMenu: songMenu.openFor(view.library.songs, index)
             }
             ScrollBar.vertical: ScrollBar { }
         }
+        SongMenu { id: songMenu; player: view.player }
         Text {
             anchors.centerIn: list
             visible: text !== ""

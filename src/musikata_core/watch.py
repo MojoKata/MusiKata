@@ -1,21 +1,22 @@
-"""Watching the root (A2.4, R2.4): while MusiKata runs, a QFileSystemWatcher on every folder under
-the root that the scan walks, each watched as the walk reaches it, the changes it reports gathered
-for a second before a partial rescan of the folders they were in (scanner.Scope), and folders
-added and removed as the tree changes.
+"""Watching the root (A2.4, R2.4): while MusiKata runs, a watch on every folder under the root that
+the scan walks, each watched as the walk reaches it, the changes it reports gathered for a second
+before a partial rescan of the folders they were in (scanner.Scope), and folders added and removed
+as the tree changes. On Linux the watch is inotify's own (inotify.Inotify), which also reports a
+file rewritten in place; elsewhere it is QFileSystemWatcher, whose watch on a folder does.
 When the system refuses a watch (Linux's fs.inotify.max_user_watches), watching stops, the log says
 so, and MusiKata rescans when its window gains focus instead.
 
 What to rescan and when is worked out by plain objects over the clock (`Gatherer`, `OwnWrites`),
-tested by moving a fake one; `Watcher` carries QFileSystemWatcher's reports to them.
+tested by moving a fake one; `Watcher` carries the system's reports to them.
 
 A root that isn't there can't be watched (R2.10): `Presence` looks for it, and for the linked
 folders that couldn't be reached, every few seconds while one is missing, so that MusiKata rescans
 when it comes back.
 
 A folder's watch reports what changes in its list of files: a file added, removed, renamed or
-given another modification time or attributes. On Linux it doesn't report a file rewritten in
-place (inotify's IN_MODIFY isn't in Qt's mask for folders), so a copy still being written is looked
-at again until it settles (`Gatherer.scanned`)."""
+given other attributes, and a file written and closed (a tag editor's rewrite in place). A copy
+still being written is reported when it is closed; one read before then is looked at again until it
+settles (`Gatherer.scanned`), as on a platform whose watch said nothing more."""
 
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from concurrent.futures import wait as wait_for
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, Signal
 
+from . import inotify
 from .clock import Clock
 from .scanner import Seen, full_path
 
@@ -119,6 +121,24 @@ def refused_text(folders: int, platform: str, limit: int | None) -> str:
     return f"the system refused to watch all {folders:,} of the root's folders"
 
 
+def folders_watch(
+    parent: QObject, platform: str = sys.platform
+) -> inotify.Inotify | QFileSystemWatcher:
+    """What watches the root's folders on `platform` (A2.4): inotify's own on Linux, so that a
+    file rewritten in place is reported, else QFileSystemWatcher; Qt's on Linux too when the
+    system gives no inotify instance, and the log says so."""
+    if platform.startswith("linux"):
+        try:
+            return inotify.Inotify(parent)
+        except OSError as e:
+            log.warning(
+                "couldn't watch with inotify (%s): watching through Qt, which misses a file"
+                " rewritten in place",
+                e,
+            )
+    return QFileSystemWatcher(parent)
+
+
 def inotify_limit(path: str = LIMIT) -> int | None:
     """Linux's limit on the folders a user watches; None where there is none to read."""
     try:
@@ -129,12 +149,13 @@ def inotify_limit(path: str = LIMIT) -> int | None:
 
 
 class Watcher(QObject):
-    """A QFileSystemWatcher on the root's folders (A2.4), each known by its path under the root
-    and its real path, as the scans walk them. A change it reports gathers its folder (`Gatherer`),
-    and `ready` says when the folders gathered are due. When the system refuses a watch on a folder
-    that is there, it stops watching altogether, logs why, and says so with `stopped`; MusiKata
-    rescans on focus instead (R2.4). `add` stands in for QFileSystemWatcher.addPaths in tests:
-    it takes paths, and gives those it couldn't watch."""
+    """A watch on the root's folders (A2.4; `folders_watch`), each known by its path under the
+    root and its real path, as the scans walk them. A change it reports gathers its folder
+    (`Gatherer`), and `ready` says when the folders gathered are due; changes the system lost
+    (inotify's queue overflowed) gather every folder watched. When the system refuses a watch on a
+    folder that is there, it stops watching altogether, logs why, and says so with `stopped`;
+    MusiKata rescans on focus instead (R2.4). `add` stands in for the watch's own in tests: it
+    takes paths, and gives those it couldn't watch."""
 
     ready = Signal()
     stopped = Signal(str)
@@ -148,9 +169,17 @@ class Watcher(QObject):
     ) -> None:
         super().__init__(parent)
         self._root, self._gatherer = root, gatherer
-        self._fs = QFileSystemWatcher(self)
-        self._fs.directoryChanged.connect(self._on_changed)
-        self._add = add if add is not None else self._fs.addPaths
+        self._folders = folders_watch(self)
+        own_add: Callable[[list[str]], list[str]]
+        self._remove: Callable[[list[str]], object]
+        if isinstance(self._folders, inotify.Inotify):
+            self._folders.changed.connect(self._on_changed)
+            self._folders.overflowed.connect(self._on_overflowed)
+            own_add, self._remove = self._folders.add, self._folders.remove
+        else:
+            self._folders.directoryChanged.connect(self._on_changed)
+            own_add, self._remove = self._folders.addPaths, self._folders.removePaths
+        self._add = add if add is not None else own_add
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -171,7 +200,7 @@ class Watcher(QObject):
             return
         drop = [os.path.normpath(full_path(self._root, f)) for f in gone if f in self._known]
         if drop:  # before adding: a folder renamed keeps its watch, under its old name
-            self._fs.removePaths(drop)
+            self._remove(drop)
         for path in drop:
             del self._known[self._watched.pop(path)]
         new = {f: real for f, real in walked.items() if f not in self._known}
@@ -214,9 +243,11 @@ class Watcher(QObject):
         self.stopped.emit(why)
 
     def close(self) -> None:
-        """Lets go of every watch and what was gathered."""
+        """Lets go of every watch and what was gathered, for good: no folder is watched after."""
         if self._watched:
-            self._fs.removePaths(list(self._watched))
+            self._remove(list(self._watched))
+        if isinstance(self._folders, inotify.Inotify):
+            self._folders.close()
         self._known.clear()
         self._watched.clear()
         self.forget()
@@ -260,6 +291,12 @@ class Watcher(QObject):
     def _on_changed(self, path: str) -> None:
         folder = self._watched.get(os.path.normpath(path))
         if folder is not None:
+            self.changed(folder)
+
+    def _on_overflowed(self) -> None:
+        """The system lost changes (A2.4): every folder watched is rescanned."""
+        log.warning("changes under %s were lost: rescanning every folder watched", self._root)
+        for folder in list(self._known):
             self.changed(folder)
 
     def _on_timer(self) -> None:

@@ -541,9 +541,16 @@ def nowbar(p, playing=True, pos=0.38, title="Signal Fires", artist="Lumen Drift 
 
 
 def header(p, title, sub, x0=SIDE_W, x1=W, search="Search the library", toggles=True, sort="Artist",
-           crumbs=None, modes=("grid", "list"), mode=0, search_w=250):
+           crumbs=None, modes=("grid", "list"), mode=0, search_w=250, back=None, typed=None):
+    """The header (R6.4). On a page (an album's, an artist's), `back` is the way back in the
+    title's place; `typed` is a search typed into the box, which has the focus."""
     tx = x0 + 28
-    if crumbs:  # Folders: the path under the root, never the root's name (R2.9.1)
+    if back:  # a page: the way back where a view's title is, its own title below
+        tx += text(p, tx, 16, "‹  " + back, 13, "muted", 500, h=32)
+        if sub:
+            text(p, tx + 14, 16, sub, 12.5, "muted", h=32)
+        sub = None
+    elif crumbs:  # Folders: the path under the root, never the root's name (R2.9.1)
         for i, c in enumerate(crumbs):
             last = i == len(crumbs) - 1
             tx += text(p, tx, 14, c, 22, "text" if last else "muted", 700 if last else 600)
@@ -551,7 +558,8 @@ def header(p, title, sub, x0=SIDE_W, x1=W, search="Search the library", toggles=
                 tx += text(p, tx + 7, 14, "›", 22, "faint", 400) + 14
     else:
         tx += text(p, tx, 14, title, 22, "text", 700)
-    text(p, tx + 14, 20, sub, 12.5, "muted")
+    if sub:
+        text(p, tx + 14, 20, sub, 12.5, "muted")
     r = x1 - (124 if x1 == W else 16)   # leave the window buttons their corner
     icon(p, "more", r - 14, 32, 18, "muted"); r -= 40
     if sort:
@@ -571,6 +579,12 @@ def header(p, title, sub, x0=SIDE_W, x1=W, search="Search the library", toggles=
     if search and search_w <= 40:  # a narrowed header keeps search as its icon (R6.4)
         rect(p, r - 32, 16, 32, 32, 16, "input", "border")
         icon(p, "search", r - 16, 32, 15, "muted")
+    elif search and typed:  # focused, with what was typed and the caret after it; no `/` hint
+        sw = search_w
+        rect(p, r - sw, 16, sw, 32, 16, "input", "accent", 1.3)
+        icon(p, "search", r - sw + 18, 32, 15, "muted")
+        cw = text(p, r - sw + 34, 16, typed, 12.5, "text", h=32, w=sw - 50)
+        rect(p, r - sw + 35 + cw, 24, 1.4, 16, 0, "text")
     elif search:
         sw = search_w
         rect(p, r - sw, 16, sw, 32, 16, "input", "border")
@@ -752,47 +766,51 @@ def x02_root_unavailable(p):
     l01_albums(p, missing=True)
 
 
+GLASS_PLAYS = [31, 44, 18, 52, 27, 15, 9, 22, 13, 11]
+
+
 def l02_album(p):
+    """An album's page with the header (R6.4) and a search typed into it (R2.7): rating:>=4 leaves
+    the songs of four stars and up, 6 of 10, each with its own track number."""
     window(p)
     sidebar(p, "Albums")
-    window_buttons(p)
     x0 = SIDE_W + 28
-    g = QLinearGradient(0, 0, 0, 330)
+    g = QLinearGradient(0, 0, 0, 346)
     g.setColorAt(0, col("#0f3b57", 0.9)); g.setColorAt(1, col("bg", 0.0))
-    rect(p, SIDE_W, 0, W - SIDE_W, 330, 0, g)
-    text(p, x0, 18, "‹  Albums", 13, "muted", 500)
-    shadow(p, x0, 56, 220, 220, 12, 22)
-    art(p, x0, 56, 220, 11, 12)
+    rect(p, SIDE_W, 0, W - SIDE_W, 346, 0, g)
+    header(p, None, "6 of 10 songs", back="Albums", typed="rating:>=4", toggles=False, sort=None)
+    window_buttons(p)
+    shadow(p, x0, 72, 220, 220, 12, 22)
+    art(p, x0, 72, 220, 11, 12)
     tx = x0 + 248
-    text(p, tx, 70, "ALBUM · 2019 · ELECTRONIC", 11, "#b9e6f2", 700)
-    text(p, tx, 92, "Glass Harbor", 40, "text", 800)
-    text(p, tx, 150, "Lumen Drift", 17, "text", 600)
-    text(p, tx, 178, "10 songs · 44 min · FLAC 16-bit/44.1 kHz", 12.5, "muted")
+    text(p, tx, 86, "ALBUM · 2019 · ELECTRONIC", 11, "#b9e6f2", 700)
+    text(p, tx, 108, "Glass Harbor", 40, "text", 800)
+    text(p, tx, 166, "Lumen Drift", 17, "text", 600)
+    text(p, tx, 194, "10 songs · 44 min · FLAC 16-bit/44.1 kHz", 12.5, "muted")
     bx = tx
-    bx += button(p, bx, 220, "Play", "primary", "play", w=104) + 10
-    bx += button(p, bx, 220, "Shuffle", "ghost", "shuffle") + 10
-    bx += button(p, bx, 220, "Edit tags", "ghost", "genre") + 10
-    bx += button(p, bx, 220, "Album art", "ghost", "image") + 10
-    rect(p, bx, 220, 34, 34, 9, "surface", "borderStrong")
-    icon(p, "more", bx + 17, 237, 16, "muted")
+    bx += button(p, bx, 236, "Play", "primary", "play", w=104) + 10
+    bx += button(p, bx, 236, "Shuffle", "ghost", "shuffle") + 10
+    bx += button(p, bx, 236, "Edit tags", "ghost", "genre") + 10
+    bx += button(p, bx, 236, "Album art", "ghost", "image") + 10
+    rect(p, bx, 236, 34, 34, 9, "surface", "borderStrong")
+    icon(p, "more", bx + 17, 253, 16, "muted")
     cx = tx
-    cx += chip(p, cx, 268, "Art embedded in 10 of 10", "ok", "okSoft", ic="check") + 8
-    cx += chip(p, cx, 268, "cover.jpg in folder", "muted", "raised", ic="image") + 8
-    chip(p, cx, 268, "Tags match path", "ok", "okSoft", ic="check")
-    # tracks
-    ty = 316
+    cx += chip(p, cx, 284, "Art embedded in 10 of 10", "ok", "okSoft", ic="check") + 8
+    cx += chip(p, cx, 284, "cover.jpg in folder", "muted", "raised", ic="image") + 8
+    chip(p, cx, 284, "Tags match path", "ok", "okSoft", ic="check")
+    # the tracks the search leaves, each with its own number
+    ty = 332
     tw_total = W - SIDE_W - 56
     cols = [("#", x0 + 4, 26, "right"), ("TITLE", x0 + 48, 380, "left"), ("RATING", x0 + 560, 90, "left"),
             ("PLAYS", x0 + 690, 60, "right"), ("TIME", x0 + tw_total - 70, 60, "right")]
     table_header(p, x0, ty, cols, tw_total)
-    for i, t in enumerate(GLASS[:9]):
-        y = ty + 34 + i * 40
-        if y > H - BAR_H - 36:
-            break
-        cur = i == 3
+    shown = [i for i, r in enumerate(GLASS_RATE) if r >= 4]
+    for row, i in enumerate(shown):
+        y = ty + 34 + row * 40
+        cur, hover = i == 3, i == 7
         if cur:
             rect(p, x0 - 8, y, tw_total + 16, 38, 8, "accentSoft")
-        if i == 5:
+        if hover:
             rect(p, x0 - 8, y, tw_total + 16, 38, 8, "hover")
             icon(p, "play", x0 + 22, y + 19, 13, "text")
         elif cur:
@@ -800,12 +818,50 @@ def l02_album(p):
                 rect(p, x0 + 15 + k * 5, y + 26 - hh, 3, hh, 1, "accentHi")
         else:
             text(p, x0 + 4, y, str(i + 1), 13, "muted", w=26, h=38, align="right")
-        text(p, x0 + 48, y, t, 13.5, "accentHi" if cur else "text", 600 if cur else 400, h=38, w=380)
+        text(p, x0 + 48, y, GLASS[i], 13.5, "accentHi" if cur else "text", 600 if cur else 400, h=38, w=380)
         stars(p, x0 + 560, y + 19, GLASS_RATE[i], r=5, gap=13)
-        text(p, x0 + 690, y, str([31, 44, 18, 52, 27, 15, 9, 22, 13][i]), 12.5, "muted", w=60, h=38, align="right")
-        if i == 5:
+        text(p, x0 + 690, y, str(GLASS_PLAYS[i]), 12.5, "muted", w=60, h=38, align="right")
+        if hover:
             icon(p, "more", x0 + tw_total - 92, y + 19, 15, "muted")
         text(p, x0 + tw_total - 70, y, GLASS_LEN[i], 12.5, "muted", w=60, h=38, align="right", mono=True)
+    nowbar(p)
+
+
+# Lumen Drift's albums on their page, by year, as the demo library has them: title, year, seed (None: no art)
+LUMEN_ALBUMS = [("Glass Harbor", 2019, 11), ("Glass Harbor Remixed", 2020, 301), ("Tide Tables", 2022, 131),
+                ("Tide Tables Remixed", 2023, 311), ("Harbor Lights - Single", None, None)]
+
+
+def l11_artist(p):
+    """An artist's page (R2.6) with the header (R6.4) and a search typed into it (R2.7): "ebb"
+    leaves the album with Ebb on it, 1 of 5, and their other song "ebb & flow", 1 of 1."""
+    window(p)
+    sidebar(p, "Artists")
+    header(p, None, "1 of 5 albums · 1 of 1 other song", back="Artists", typed="ebb", toggles=False,
+           sort=None)
+    window_buttons(p)
+    x0 = SIDE_W + 28
+    mosaic(p, x0, 72, 160, [11, 131, 301, 311])
+    tx = x0 + 188
+    text(p, tx, 104, "ARTIST", 11, "muted", 700)
+    text(p, tx, 124, "Lumen Drift", 36, "text", 800)
+    text(p, tx, 176, "5 albums · 36 songs", 12.5, "muted")
+    text(p, x0, 256, "Albums", 17, "text", 700)
+    card, y = 150, 292
+    for title, year, seed in [a for a in LUMEN_ALBUMS if a[0] == "Tide Tables"]:
+        art(p, x0, y, card, seed)
+        text(p, x0, y + card + 8, title, 13.5, "text", 600, w=card)
+        text(p, x0, y + card + 28, f"Lumen Drift · {year}", 12, "muted", w=card)
+    text(p, x0, 514, "Other songs", 17, "text", 700)
+    cw = W - x0 - 28
+    cols = [("#", x0 + 4, 26, "right"), ("TITLE", x0 + 48, 380, "left"), ("ALBUM", x0 + 470, 200, "left"),
+            ("RATING", x0 + cw - 180, 90, "left"), ("TIME", x0 + cw - 70, 60, "right")]
+    for label, cx, w, al in cols:
+        text(p, cx, 546, label, 11, "faint", 700, w=w, h=24, align=al)
+    y = 574
+    text(p, x0 + 48, y, "ebb & flow", 13.5, "text", h=38, w=380)
+    stars(p, x0 + cw - 180, y + 19, 0, r=5, gap=13)
+    text(p, x0 + cw - 70, y, "3:41", 12.5, "muted", w=60, h=38, align="right", mono=True)
     nowbar(p)
 
 
@@ -2620,6 +2676,7 @@ SCREENS = {
     "L07-folders-list": l07_folders_list,
     "L08-folder-songs": l08_folder_songs,
     "L09-needs-attention": l09_needs_attention,
+    "L11-artist": l11_artist,
     "T01-infer-from-path": t01_infer,
     "T02-album-art": t02_album_art,
     "T03-organize-files": t03_organize,

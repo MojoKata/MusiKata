@@ -9,6 +9,7 @@ Rectangle {
     id: row
     signal tapped(int modifiers)
     signal activated()
+    signal menu()  // a right click: its songs' menu (SongMenu)
     signal toggled()
     required property var columns       // [x, width]: check, name, artist, album, year, rating, time
     required property bool isFolder
@@ -31,6 +32,7 @@ Rectangle {
     Accessible.selected: row.selected
 
     HoverHandler { id: hover }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: row.menu() }
     TapHandler {
         id: tap
         gesturePolicy: TapHandler.ReleaseWithinBounds

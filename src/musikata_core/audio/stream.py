@@ -95,16 +95,27 @@ class Ring:
         with self._lock:
             self._start = self._held = 0
 
+    def drop(self, frames: int) -> int:
+        """Takes back up to `frames` of the newest frames held, as if never written; gives how
+        many that was."""
+        with self._lock:
+            n = max(0, min(frames, self._held))
+            self._held -= n
+            return n
+
 
 class Stream:
-    """One song's samples on their way to the device: the ring they wait in, whether the decoder
-    has given its last, and how many frames the device has taken."""
+    """The samples on their way to the device, one song's after another's (A4.2): the ring they
+    wait in, whether the decoders have given their last, and how many frames have been fed and
+    taken. A frame's place in the stream is the count of frames fed before it, so `taken` is the
+    place of the next frame the device reads."""
 
     def __init__(self, rate: int, channels: int, ahead: float = AHEAD_SECONDS) -> None:
         self.rate, self.channels = rate, channels
         self.block = frames_of(BLOCK_SECONDS, rate)
         self.ring = Ring(frames_of(ahead, rate), channels)
         self.finished = False  # the decoder has given its last block
+        self.written = 0  # frames fed
         self.taken = 0  # frames the device has read out
         self.short = 0  # times the device asked and the ring was empty before the end
 
@@ -116,10 +127,27 @@ class Stream:
         """A decoded block into the ring; `wants` said there was room for it."""
         if self.ring.write(block) < len(block):
             raise OverflowError(f"no room for {len(block)} frames ({self.ring.free} free)")
+        self.written += len(block)
 
     def finish(self) -> None:
         """The decoder has nothing more: what the ring holds is the song's end."""
         self.finished = True
+
+    def reopen(self) -> None:
+        """More is coming after all (a song to follow, or a seek): `wants` asks for it again."""
+        self.finished = False
+
+    def cut(self, at: int) -> int:
+        """Takes back every frame fed from place `at` on, so what is fed next follows the frame
+        before it; gives how many frames that was. The device has taken what is before `taken`, so
+        `at` is never before it."""
+        if not self.taken <= at <= self.written:
+            raise ValueError(
+                f"cutting at {at}: the device has taken {self.taken}, {self.written} fed"
+            )
+        n = self.ring.drop(self.written - at)
+        self.written -= n
+        return n
 
     def take(self, frames: int) -> Block:
         """What the device reads: up to `frames` frames, fewer when the ring runs short."""

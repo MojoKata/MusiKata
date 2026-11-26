@@ -550,45 +550,56 @@ def test_a_folder_under_a_link_that_leads_nowhere_names_the_link():
     assert not scanner.under("AB/1.wav", {"A"}) and not scanner.under("A/1.wav", set())
 
 
-def test_more_than_a_quarter_of_the_songs_gone_is_held_for_the_users_answer(tmp_path, caplog):
+def test_more_than_a_quarter_and_more_than_20_gone_is_held_for_the_users_answer(tmp_path, caplog):
     music = tmp_path / "Music"
-    _songs(music, 4, "A")
-    _songs(music, 4, "B", start=4)
+    _songs(music, 46, "A")
+    _songs(music, 4, "B", start=46)
     index = db.Index(str(tmp_path / "musikata.db"))
     _scan(music, index)
-    for i in range(3):  # 3 of 8: more than a quarter
+    for i in range(20):  # 20 of 50: more than a quarter, but not more than 20
+        os.remove(music / "A" / f"{i}.wav")
+    res = _scan(music, index)
+    assert res.held == [] and res.removed == 20 and len(_rows(index)) == 30
+    for i in range(20, 41):  # 21 of 30: more than a quarter, and more than 20
         os.remove(music / "A" / f"{i}.wav")
     caplog.set_level(logging.WARNING)
     res = _scan(music, index)
-    assert res.held == ["A/0.wav", "A/1.wav", "A/2.wav"] and res.songs == 8 and res.removed == 0
-    assert len(_rows(index)) == 8 and "the user is asked" in caplog.text
+    gone = sorted(f"A/{i}.wav" for i in range(20, 41))
+    assert res.held == gone and res.songs == 30 and res.removed == 0
+    assert len(_rows(index)) == 30 and "the user is asked" in caplog.text
     kept = _scan(music, index, keep=set(res.held))  # Keep them: not asked about again
-    assert kept.held == [] and kept.removed == 0 and len(_rows(index)) == 8
-    assert scanner.remove(str(music), index, res.held) == 3  # Remove
-    assert set(_rows(index)) == {"A/3.wav", *(f"B/{i}.wav" for i in range(4, 8))}
+    assert kept.held == [] and kept.removed == 0 and len(_rows(index)) == 30
+    assert scanner.remove(str(music), index, res.held) == 21  # Remove
+    assert set(_rows(index)) == {*(f"A/{i}.wav" for i in range(41, 46)),
+                                 *(f"B/{i}.wav" for i in range(46, 50))}  # fmt: skip
     index.close()
 
 
 def test_a_quarter_is_of_the_whole_library_whichever_scan_finds_them_gone(tmp_path):
     music = tmp_path / "Music"
-    _songs(music, 4, "A")
-    _songs(music, 4, "B", start=4)
+    _songs(music, 25, "A")
+    _songs(music, 59, "B", start=25)
     index = db.Index(str(tmp_path / "musikata.db"))
     known = _scan(music, index).folders
-    for i in (0, 1):  # 2 of 8, though half of A: a quarter, not more
+    for i in range(21):  # 21 of 84, though most of A: a quarter, not more
         os.remove(music / "A" / f"{i}.wav")
     res = _scan(music, index, _scope("A", known=known))
-    assert res.held == [] and res.removed == 2
-    os.remove(music / "B" / "4.wav")
-    os.remove(music / "B" / "5.wav")  # 2 of the 6 left, though only B is scanned: more
+    assert res.held == [] and res.removed == 21
+    for i in range(25, 47):  # 22 of the 63 left, though only B is scanned: more
+        os.remove(music / "B" / f"{i}.wav")
     res = _scan(music, index, _scope("B", known=known))
-    assert res.held == ["B/4.wav", "B/5.wav"] and res.songs == 6 and res.removed == 0
+    assert res.held == [f"B/{i}.wav" for i in range(25, 47)] and res.songs == 63
+    assert res.removed == 0
     index.close()
 
 
-def test_more_than_a_quarter_means_more():
-    assert not scanner.over_a_quarter(0, 0) and not scanner.over_a_quarter(1, 4)
-    assert scanner.over_a_quarter(2, 7) and scanner.over_a_quarter(1, 1)
+def test_a_scan_asks_first_over_a_quarter_and_over_20_gone():
+    assert not scanner.asks_first(0, 0) and not scanner.asks_first(1, 1)
+    assert not scanner.asks_first(20, 40)  # over a quarter, not over 20
+    assert scanner.asks_first(21, 40) and scanner.asks_first(21, 21)  # over both
+    assert not scanner.asks_first(21, 84)  # a quarter, not more
+    assert scanner.asks_first(21, 83)
+    assert not scanner.asks_first(30, 200)  # over 20, under a quarter
 
 
 def test_songs_taken_out_on_remove_are_those_still_gone_while_the_root_is_there(tmp_path):

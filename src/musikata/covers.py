@@ -14,16 +14,20 @@ A folder's mosaic (R5.8, A2.7) is `image://covers/mosaic/<name>+<name>…`, its 
 name: drawn with QPainter from those thumbnails at the size asked for, each a centre crop in R5.8's
 layout with a gap between, and kept in the cache under a hash of its pieces' names, which are
 hashes of their covers' paths, sizes and modification times; so a changed cover makes a new
-mosaic, drawn when next shown."""
+mosaic, drawn when next shown.
+
+After each scan the cache is trimmed (A2.7, `trim`): a thumbnail or mosaic that no album or folder
+row points at any more is removed, on the scan's thread; a file of any other name is left."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
 import os
+import re
 import sqlite3
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QImage, QPainter
@@ -35,6 +39,8 @@ log = logging.getLogger(__name__)
 
 SIZES = (256, 512)  # a thumbnail's shorter side, in pixels: the grids', the album page's
 MOSAIC = "mosaic/"  # a mosaic's address under the provider, before its pieces' names
+# a cached thumbnail's or mosaic's file: its name (art.thumb_id, mosaic_name), its side, its kind
+CACHED = re.compile(r"(m?[0-9a-f]{32})-[0-9]+\.(?:jpg|png)")
 
 
 def mosaic_id(thumbs: list[str]) -> str:
@@ -45,6 +51,61 @@ def mosaic_id(thumbs: list[str]) -> str:
 def mosaic_name(thumbs: list[str]) -> str:
     """The name a mosaic is cached under: a hash of its pieces' names (A2.7)."""
     return "m" + hashlib.sha256("+".join(thumbs).encode()).hexdigest()[:32]
+
+
+def cached_name(file: str) -> str | None:
+    """The name of the thumbnail or mosaic a file of the cache holds, from the file's name; None
+    for a file that isn't one (a thumbnail still being saved, or anything else)."""
+    found = CACHED.fullmatch(file)
+    return found.group(1) if found else None
+
+
+def live(c: sqlite3.Connection) -> set[str]:
+    """The thumbnails and mosaics the index's rows point at (R5.1, R5.8): each album's and each
+    folder's own cover's, each piece of a folder's mosaic, and the mosaic, by their names."""
+    names = {str(t) for (t,) in c.execute("SELECT thumb FROM album WHERE thumb IS NOT NULL")}
+    names |= {str(t) for (t,) in c.execute("SELECT thumb FROM folder WHERE thumb IS NOT NULL")}
+    for (mosaic,) in c.execute("SELECT mosaic FROM folder WHERE mosaic IS NOT NULL"):
+        pieces = str(mosaic).split()
+        names.update(pieces)
+        if len(pieces) > 1:  # one piece shows whole, as itself (folders.picture_url)
+            names.add(mosaic_name(pieces))
+    return names
+
+
+def trim(cache: str, kept: Collection[str]) -> list[str]:
+    """Removes from the cache folder `cache` each thumbnail and mosaic whose name isn't in `kept`
+    (A2.7); every other file stays. The files removed, by name; a cache that isn't there, or a file
+    that can't be removed, costs only room, and the log says which."""
+    try:
+        files = sorted(os.listdir(cache))
+    except FileNotFoundError:
+        return []
+    except OSError as e:
+        log.warning("the cover cache %s couldn't be trimmed: %s", cache, e)
+        return []
+    removed = []
+    for file in files:
+        name = cached_name(file)
+        if name is None or name in kept:
+            continue
+        try:
+            os.remove(os.path.join(cache, file))
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            log.warning("the stale thumbnail %s couldn't be removed from %s: %s", file, cache, e)
+            continue
+        removed.append(file)
+    if removed:
+        log.info("removed %d stale thumbnails and mosaics from %s", len(removed), cache)
+    return removed
+
+
+def trim_cache(cache: str, c: sqlite3.Connection) -> list[str]:
+    """After a scan (A2.7): the thumbnails and mosaics no row of the index at `c` points at any
+    more, removed from `cache` (`trim`)."""
+    return trim(cache, live(c))
 
 
 def gap_for(side: int) -> int:
@@ -163,6 +224,21 @@ class Covers(QQuickImageProvider):
         if not image.isNull():
             self._keep(image, name, side)
         return image
+
+    def file(self, name: str, side: int = SIZES[0]) -> str | None:
+        """The file of the thumbnail `name` at `side` in the cache, made first when it isn't there
+        (the system's media controls show it, A4.5); None when the cover can't be shown. Called off
+        the GUI thread."""
+        if self.image(name, side).isNull():
+            return None
+        return self._cached_path(name, side)
+
+    def _cached_path(self, name: str, side: int) -> str | None:
+        for ext in (".jpg", ".png"):
+            path = os.path.join(self._cache, f"{name}-{side}{ext}")
+            if os.path.exists(path):
+                return path
+        return None
 
     def _cached(self, name: str, side: int) -> QImage | None:
         for ext in (".jpg", ".png"):

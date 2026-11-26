@@ -5,10 +5,11 @@ branch coverage before and after, from the per-area table CI's `coverage` job pr
     coverage_impact.py --pr N              master's last green run against the PR's
     coverage_impact.py BASE_RUN HEAD_RUN   two runs of ci.yml, by id
 
-Before is master's last green CI run, After the pull request's latest green run on its head
-commit. A row is an area that moved by MOVE points or more, in lines or in branches; the total,
-`all`, is always there. Each After figure carries its band's mark (BANDS), and a Legend line
-under the table says what they mean. The figures are worked out from the counts, unrounded."""
+Before is master's last CI run whose coverage job passed, After the pull request's on its head
+commit (a run counts by its coverage job, so a deploy that failed after it doesn't hide it). A row
+is an area that moved by MOVE points or more, in lines or in branches; the total, `all`, is always
+there. Each After figure carries its band's mark (BANDS), and a Legend line under the table says
+what they mean. The figures are worked out from the counts, unrounded."""
 
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 REPO = "MojoKata/MusiKata"
 WORKFLOW = "ci.yml"
 JOB = "coverage"
+LOOK_BACK = 10  # runs looked through for one whose coverage job passed
 MOVE = 0.5  # points, in lines or in branches, for an area's row
 TOTAL = "all"
 BANDS = ((95.0, "⭐"), (80.0, "🟢"), (60.0, "🟡"), (0.0, "🔴"))
@@ -115,7 +117,20 @@ def gh(args: list[str]) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
 
+def _coverage_job(gh: Gh, run: int | str) -> str | None:
+    """The id of the run's coverage job when it passed: what the table needs, whatever else
+    failed (a Pages deploy GitHub couldn't finish, a build that never got a runner)."""
+    jobs = json.loads(gh(["run", "view", str(run), "--repo", REPO, "--json", "jobs"]))["jobs"]
+    passed = [j for j in jobs if j["name"] == JOB and j["conclusion"] == "success"]
+    return str(passed[0]["databaseId"]) if passed else None
+
+
+def _measured(gh: Gh, run: int) -> bool:
+    return _coverage_job(gh, run) is not None
+
+
 def _green(gh: Gh, filters: list[str]) -> dict[str, str]:
+    """The newest run of ci.yml under `filters` whose coverage job passed."""
     found = json.loads(
         gh(
             [
@@ -126,18 +141,21 @@ def _green(gh: Gh, filters: list[str]) -> dict[str, str]:
                 "--workflow",
                 WORKFLOW,
                 "--status",
-                "success",
+                "completed",
                 "--limit",
-                "1",
+                str(LOOK_BACK),
                 "--json",
                 "databaseId,headSha",
                 *filters,
             ]
         )  # fmt: skip
     )
-    if not found:
-        raise SystemExit(f"coverage_impact: no green {WORKFLOW} run for {' '.join(filters)}")
-    return {"id": str(found[0]["databaseId"]), "sha": found[0]["headSha"]}
+    for run in found:
+        if _measured(gh, run["databaseId"]):
+            return {"id": str(run["databaseId"]), "sha": run["headSha"]}
+    raise SystemExit(
+        f"coverage_impact: no {WORKFLOW} run for {' '.join(filters)} whose {JOB} job passed"
+    )
 
 
 def runs_for_pr(gh: Gh, pr: int) -> tuple[dict[str, str], dict[str, str]]:
@@ -150,8 +168,12 @@ def runs_for_pr(gh: Gh, pr: int) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def run_areas(gh: Gh, run: str) -> dict[str, Area]:
-    """The areas the run's coverage job measured, from its log."""
-    log = gh(["run", "view", run, "--repo", REPO, "--log"])
+    """The areas the run's coverage job measured, from that job's log alone (a run's whole log
+    can't be had while one of its jobs has none, as one cancelled before it started)."""
+    job = _coverage_job(gh, run)
+    if job is None:
+        raise SystemExit(f"coverage_impact: run {run}'s {JOB} job didn't pass")
+    log = gh(["run", "view", "--job", job, "--repo", REPO, "--log"])
     found = areas("\n".join(line for line in log.splitlines() if line.startswith(JOB + "\t")))
     if not found:
         raise SystemExit(f"coverage_impact: run {run} has no coverage table in its {JOB} job")

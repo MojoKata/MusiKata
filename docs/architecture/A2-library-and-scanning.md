@@ -13,7 +13,7 @@ SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's 
 | `folder` | One row per folder under the root that has audio beneath it: path, parent, counts of subfolders and songs (direct and beneath), its own cover's source, the mosaic's sources, the worst path-match state beneath it (A2.7) |
 | `playlist` | One row per playlist file: path, modification time, smart rule (R8.9) |
 | `playlist_entry` | Playlist, position, the path as written, the song it resolves to (or none: missing, R8.7) |
-| `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/plays/`, a file per computer (A2.8) |
+| `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/<computer id>/plays.json`, a file per computer (A2.8) |
 | `change` / `change_file` | The change history (R4.9), indexed from `.musikata/history/` (A3.5) |
 | `waveform` | Song, the audio's hash, the peaks as a blob (A5.1) |
 | `ignored` | Needs attention entries the user dismissed, with the file's modification time (R2.8), from `.musikata/ignored.json` |
@@ -33,14 +33,18 @@ A2.2. **The scan.**
 4. Rows whose file wasn't seen are removed at the end, unless the file reappears elsewhere with
    the same `audio_hash`, which is a move: the row's path changes and its play counts stay. None
    is removed when the root itself isn't there (R2.10); the rows beneath a link to a folder that
-   can't be reached stay (R2.3.2, R2.10); and when more than a quarter of the library's songs are
-   gone, their removal waits on the user's answer (R2.10.1).
+   can't be reached stay (R2.3.2, R2.10); and when more than a quarter of the library's songs, and
+   more than 20, are gone, their removal waits on the user's answer (R2.10.1).
 
 A2.3. **The audio hash** is a hash of the first and last 64 KB of the audio frames, skipping the
 tag blocks, so retagging a file doesn't change it and two copies of a song match.
 
-A2.4. **Watching.** `QFileSystemWatcher` on every folder under the root, with changes gathered for
-a second before a partial rescan of the folders named. On Linux the inotify watch limit
+A2.4. **Watching.** A watch on every folder under the root, with changes gathered for a second
+before a partial rescan of the folders named. On Linux it is inotify's own, one watch per folder,
+through `ctypes` on the C library and read with a `QSocketNotifier`: it asks for what Qt's
+`QFileSystemWatcher` asks of a folder and `IN_CLOSE_WRITE` too, since Qt's leaves out the events
+of a file rewritten in place, as a tag editor (Picard, kid3, puddletag) rewrites one. Elsewhere it
+is `QFileSystemWatcher`, whose watch on a folder reports a rewrite. On Linux the inotify watch limit
 (`fs.inotify.max_user_watches`) can be smaller than the number of folders; when adding a watch
 fails, MusiKata stops watching, logs it, and rescans on focus instead (R2.4). Writes MusiKata
 makes itself are recognised by path and time and not rescanned twice.
@@ -69,7 +73,10 @@ of a large library is one indexed query on `parent`, not a walk of the disk.
   sources' thumbnails, at the two sizes the views use, and kept in the cache folder (R1.5) under
   a hash of its sources' identities and modification times. A changed cover changes the hash of
   every mosaic it is in, and they are redrawn when next shown; stale ones are removed with the
-  thumbnail cache's trimming.
+  thumbnail cache's trimming. That trimming runs after each scan that finds the root, on the
+  scan's thread: each thumbnail and mosaic in the cache that no album or folder row points at any
+  more, as its cover, a piece of its mosaic or the mosaic itself, is removed; a file of any other
+  name is left.
 - **The models.** Folders binds to one `FolderModel` for every mode, folders then files (R2.9.2);
   the mode is the QML delegate, not a different model, so switching modes keeps the selection
   and the scroll position.
@@ -80,24 +87,38 @@ every filesystem and share. No file is locked; two computers sharing a root keep
 apart instead:
 
 - Each computer has an id, made on its first start and kept in the shared settings, with its name
-  for display.
-- Play counts are a file per computer, `plays/<computer id>.json`, written whole by that computer
+  for display. What belongs to one computer is in a folder named by its id, `<computer id>/`, each
+  file with a plain name inside.
+- Play counts are a file per computer, `<computer id>/plays.json`, written whole by that computer
   alone from the counts it keeps in the index, at most once a minute while playing and at quit; the
   count shown is the sum of the files. No two computers ever write the same file, so plays are never
   lost or counted twice, and a root kept in sync by Dropbox, OneDrive or Syncthing gets no
   "conflicted copy" files from them, nor a new upload each time a song ends. A crash loses nothing:
   the counts are in the index, and the file is written at the next start.
-- Each entry of `plays/`, `ratings.json` and `ignored.json` names its song by its path under the
-  root and its audio hash (A2.3), as in `{"path": "…", "hash": "…", "count": 12, "last": "…"}`. A
-  reader matches an entry by path, and by hash when no song has that path, so a song moved by any
-  means, by MusiKata (R12) or in a file manager, keeps its plays, rating and dismissal on every
-  computer. Two exact copies (R2.12) are told apart by path while both exist. Each computer rewrites
-  the paths in its own files when its scan finds a move.
+- What's playing (R1.8, R7.2) is a file per computer too, `<computer id>/now-playing.json`: the
+  queue's songs in the order they play, whether the user added each (R7.2) and its place in the
+  order shuffle off returns to (R7.3), which is current and the place in it. It is written when
+  the queue changes (its songs, their orders or where it comes from), on pause and at quit, and
+  at most once a minute while playing, so a crash loses at most a minute of the place; never on
+  the GUI thread. At start the queue is rebuilt from it, paused on the current song at its place;
+  a song found by neither path nor hash is dropped, and when that is the current one, the queue
+  starts at the next one still there, from its start. A shuffled queue comes back in the same
+  order; only a next lap's (repeat All) is drawn anew. Shuffle and repeat themselves are the
+  shared settings' (R7.3, R13.9).
+- Each entry of `plays.json`, `now-playing.json`, `ratings.json` and `ignored.json` names its song
+  by its path under the root and its audio hash (A2.3), as in
+  `{"path": "…", "hash": "…", "count": 12, "last": "…"}`. A reader matches an entry by path, and
+  by hash when no song has that path, so a song moved by any means, by MusiKata (R12) or in a file
+  manager, keeps its plays, rating, dismissal and place in the queue on every computer. Two exact
+  copies (R2.12) are told apart by path while both exist. Each computer rewrites the paths in its
+  own files when its scan finds a move.
 - `ignored.json` and `ratings.json` change seldom and are merged entry by entry: before writing,
   MusiKata reads the file again, and the newest entry wins.
 - The change history is one file per entry (A3.5), never rewritten, so there is nothing to merge.
 - When `.musikata` can't be written (R1.5.2), the same data is kept in the index only, and the
-  root's settings are read and never written.
+  root's settings are read and never written; `now-playing.json` is kept as a file beside the
+  index (A2.9), and at start the root's copy is read instead when it is there and the newer (its
+  `saved` time).
 
 A2.9. **Finding a root's index.** Each root has an id, made when it is first opened and kept in
 `<root>/.musikata/root.json`, apart from the root's settings, which a new root copies (R13.9). Its
@@ -129,7 +150,7 @@ Schema in `src/musikata_core/schemas/`, which the tests hold every example below
   rest of the file is kept.
 - **Paths** are under the root, with `/` between folders, on every platform. **Times** are UTC, in
   ISO 8601. **Hashes** are the audio hash of A2.3, as 64 hexadecimal digits.
-- **Who writes it:** `plays/<id>.json` only its computer; `ratings.json` and `ignored.json` any
+- **Who writes it:** `<id>/plays.json` and `<id>/now-playing.json` only its computer; `ratings.json` and `ignored.json` any
   computer, merged entry by entry with the newest `changed` winning (A2.8); a history entry is
   written once and never changed (A3.5); `root.json` once, when the root is first opened (A2.9).
 
@@ -167,7 +188,8 @@ them as `from_bands` until a slider changes (R19.6):
   "format": 1,
   "computer": {"id": "b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c4d", "name": "Studio-PC"},
   "library": {"root": "/home/ana/Music", "watch": true},
-  "playback": {"device": null, "replaygain": "album", "replaygain_default": -6.0, "resume": true},
+  "playback": {"device": null, "replaygain": "album", "replaygain_default": -6.0, "resume": true,
+               "shuffle": false, "repeat": "off"},
   "equalizer": {
     "on": true, "preset": "Car", "by_genre": true,
     "presets": [
@@ -187,7 +209,7 @@ them as `from_bands` until a slider changes (R19.6):
 }
 ```
 
-`plays/<computer id>.json` (`plays.v1.schema.json`), only the songs this computer has played:
+`<computer id>/plays.json` (`plays.v1.schema.json`), only the songs this computer has played:
 
 ```json
 {
@@ -197,6 +219,36 @@ them as `from_bands` until a slider changes (R19.6):
     {"path": "Lumen Drift/Glass Harbor/04 Signal Fires.flac",
      "hash": "3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a",
      "count": 12, "last": "2026-11-25T20:41:00Z"}
+  ]
+}
+```
+
+`<computer id>/now-playing.json` (`now-playing.v1.schema.json`), what this computer was playing
+(R1.8, A2.8): the songs in the order they play, `unshuffled` each one's place in the order shuffle
+off returns to (R7.3), `added` whether the user added it (R7.2); `current` the place of the song
+playing or cued among them, `null` when the queue has played out, and `position` the seconds into
+it; `source` where the queue comes from (Up next's "Playing from"); `saved` when it was written. A
+song whose hash isn't known has none. The fields it doesn't know, the file's and each song's, are
+kept when it is written again; a newer format is read for what it can and never written (above):
+
+```json
+{
+  "format": 1,
+  "saved": "2026-11-26T17:30:00Z",
+  "source": "Glass Harbor",
+  "current": 1,
+  "position": 83.4,
+  "songs": [
+    {"path": "Lumen Drift/Glass Harbor/03 Undertow.flac",
+     "hash": "5b7d9f0a2c4e6b8d1f3a3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e",
+     "added": false, "unshuffled": 2},
+    {"path": "Lumen Drift/Glass Harbor/04 Signal Fires.flac",
+     "hash": "3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a",
+     "added": false, "unshuffled": 3},
+    {"path": "Marrow Oak/Kindling.mp3", "added": true, "unshuffled": 0},
+    {"path": "Lumen Drift/Glass Harbor/01 Tidewater.flac",
+     "hash": "9d2b4f6a8c1e3a5b7d9f2c4e6a8b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b",
+     "added": false, "unshuffled": 1}
   ]
 }
 ```

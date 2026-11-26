@@ -4,10 +4,11 @@ import "."
 // A song on an album's or an artist's page (L02-album): its track number, or under the pointer a
 // play button, or while it plays the playing mark; its title, the column the page adds (`extra`:
 // the album, on an artist's page), its rating and length. A click on the play button or a double
-// click plays it.
+// click plays it; a right click opens its menu (SongMenu).
 Rectangle {
     id: row
     signal activated()
+    signal menu()
     required property var columns       // [x, width] of each column: #, title, extra, rating, time
     required property string path
     required property bool playing
@@ -25,6 +26,7 @@ Rectangle {
 
     HoverHandler { id: hover }
     TapHandler { onDoubleTapped: row.activated() }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: row.menu() }
 
     component Cell: Text {
         property int column

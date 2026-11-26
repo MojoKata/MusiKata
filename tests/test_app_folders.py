@@ -298,32 +298,56 @@ def test_a_folder_and_a_file_inside_it_count_its_songs_once(view, qtbot):
     assert view.property("selectionText") == "2 folders · 3 files · 3 songs selected"
 
 
-def test_play_plays_the_selections_first_song_and_activate_opens_or_plays(view):
+def test_play_plays_the_selections_first_song_and_activate_opens_or_plays(view, index):
+    paths = dict(index.read().execute("SELECT id, path FROM song"))
     played = []
-    view.play.connect(played.append)
+    view.play.connect(lambda songs, source: played.append(([paths[i] for i in songs], source)))
     m = view.property("model")
     view.open("Lumen Drift")
     m.click(4, False, False)
     m.click(1, True, False)
-    view.playSelection()  # Remixes comes first in the list
-    assert played == ["Lumen Drift/Remixes/Glass/01.flac"]
+    view.playSelection()  # Remixes comes first in the list, then the file: all of them queued
+    both = ["Lumen Drift/Remixes/Glass/01.flac", "Lumen Drift/Lumen Drift - Harbor Lights.flac"]
+    assert played == [(both, "Lumen Drift")]
     m.clearSelection()
     m.click(4, False, False)
     view.playSelection()
-    view.playRow(0)
-    view.playRow(4)
+    view.playRow(0)  # a folder's play button: its songs, from its first
+    view.playRow(3)  # a file's: it and the files after it
     view.playRow(99)
-    assert played[1:] == ["Lumen Drift/Lumen Drift - Harbor Lights.flac",
-                          "Lumen Drift/2019 - Glass Harbor/01.flac",
-                          "Lumen Drift/Lumen Drift - Harbor Lights.flac"]  # fmt: skip
+    assert played[1:] == [
+        (["Lumen Drift/Lumen Drift - Harbor Lights.flac"], "Lumen Drift"),
+        (["Lumen Drift/2019 - Glass Harbor/01.flac", "Lumen Drift/2019 - Glass Harbor/02.flac"],
+         "2019 - Glass Harbor"),
+        (["Lumen Drift/ebb & flow.mp3", "Lumen Drift/Lumen Drift - Harbor Lights.flac"],
+         "Lumen Drift"),
+    ]  # fmt: skip
     view.activate(4)
-    assert played[-1] == "Lumen Drift/Lumen Drift - Harbor Lights.flac"
+    assert played[-1] == (["Lumen Drift/Lumen Drift - Harbor Lights.flac"], "Lumen Drift")
     view.activate(1)
     assert view.property("path") == "Lumen Drift/Remixes"
     view.activate(99)
     m.clearSelection()
     view.playSelection()  # nothing selected: nothing
     assert len(played) == 5
+
+
+def test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title(view, index):
+    paths = dict(index.read().execute("SELECT id, path FROM song"))
+    m = view.property("model")
+    assert m.source() == folders.ROOT_TITLE and m.queue_from(99) == ([], "")
+    view.open("Lumen Drift")
+    assert [paths[i] for i in m.songs_at(2)] == [
+        "Lumen Drift/Tide Tables/01 - Neap Tide.flac",
+        "Lumen Drift/Tide Tables/02 - Spring Tide.flac",
+        "Lumen Drift/Tide Tables/03 - Slack Water.flac",
+    ]
+    assert [paths[i] for i in m.songs_at(3)] == ["Lumen Drift/ebb & flow.mp3"]
+    assert m.songs_at(99) == []
+    queued, source = m.queue_from(3)
+    assert [paths[i] for i in queued][0] == "Lumen Drift/ebb & flow.mp3" and source == "Lumen Drift"
+    m.selectRows([2, 1], False)  # a folder and the folder beside it, in the list's order
+    assert [paths[i] for i in m.selected_songs()][0] == "Lumen Drift/Remixes/Glass/01.flac"
 
 
 def test_the_folder_holding_the_song_playing_is_marked(view):

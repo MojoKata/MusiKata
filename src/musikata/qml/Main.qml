@@ -2,12 +2,15 @@ import QtQuick
 import QtQuick.Dialogs
 import "."
 
-// The main window (R6.1): the sidebar, and the open view or page (R2.6), as the library says, a view
+// The main window (R6.1): the sidebar, and the open view or page (R2.6), as the library says, either
 // under its header (R6.4); `/` opens the header's search (R2.7, R6.9). Over the view, the banner of
 // a root or linked folder that isn't there (R2.10, X02-root-unavailable), with Try again and Choose
 // another folder… (the platform's folder dialog), and the question of songs gone (R2.10.1). The
-// title names a root given for this run only (R2.1.2). The now-playing bar (R6.5) comes with
-// slice 4.
+// title names a root given for this run only (R2.1.2). The now-playing bar (R6.5) runs along the
+// bottom, and Up next (R7.2) opens over the view's right side above it. Space plays and pauses,
+// Ctrl+→ and Ctrl+← (⌘ on macOS) go to the next song and the one before, and ← and → seek 5 seconds
+// (R6.9, R7.4), unless what has the focus uses them: a text box, the Folders view's grid, the
+// volume.
 Window {
     id: win
     required property var library
@@ -21,7 +24,7 @@ Window {
 
     Sidebar {
         id: sidebar
-        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        anchors { left: parent.left; top: parent.top; bottom: bar.top }
         library: win.library
     }
     ViewHeader {
@@ -97,7 +100,7 @@ Window {
         id: view
         objectName: "view"
         anchors {
-            left: sidebar.right; right: parent.right; bottom: parent.bottom
+            left: sidebar.right; right: parent.right; bottom: bar.top
             top: banners.bottom
             topMargin: banners.height > 0 ? 12 : 0
         }
@@ -111,5 +114,40 @@ Window {
     Component { id: artists; ArtistsView { library: win.library } }
     Component { id: artist; ArtistPage { library: win.library; player: win.player } }
     Component { id: songs; SongsView { library: win.library; player: win.player } }
-    Component { id: folders; FoldersView { library: win.library } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player } }
+
+    UpNext {
+        objectName: "upNext"
+        anchors { right: parent.right; bottom: bar.top; rightMargin: 16; bottomMargin: 12 }
+        width: Math.min(420, win.width - sidebar.width - 32)
+        height: Math.max(200, bar.y - 12 - 76)
+        visible: win.player.upNextOpen
+        player: win.player
+    }
+    NowPlayingBar {
+        id: bar
+        objectName: "nowPlayingBar"
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        player: win.player
+    }
+    Shortcut {
+        sequence: "Space"
+        onActivated: win.player.toggle()
+    }
+    Shortcut {
+        sequence: "Ctrl+Right"
+        onActivated: win.player.next()
+    }
+    Shortcut {
+        sequence: "Ctrl+Left"
+        onActivated: win.player.previous()
+    }
+    Shortcut {
+        sequence: "Left"
+        onActivated: win.player.seekBack()
+    }
+    Shortcut {
+        sequence: "Right"
+        onActivated: win.player.seekAhead()
+    }
 }

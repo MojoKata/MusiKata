@@ -10,10 +10,12 @@ where it is.
 
 Why: the device pulls on its own schedule, on another thread. A sink starved at the start, a song
 whose end is never noticed, a pause that doesn't hold, or a thread left running at close are each
-only seen with a real sink pulling."""
+only seen with a real sink pulling; so is a join the device has to cross without a gap, and a
+seek it has to hear."""
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 
@@ -26,7 +28,8 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
 from musikata import app, bridges, models, player
-from musikata_core.audio import stream
+from musikata_core import nowplaying, settings
+from musikata_core.audio import gain, stream
 from musikata_core.audio.decode import DecodeError
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -62,11 +65,17 @@ class Tone:
         class Song:
             seconds = tone.seconds_ if tone.length else None
 
+            def __init__(self):
+                self.rate, self.start = rate, 0
+
+            def seek(self, sample):
+                self.start = sample
+
             def blocks(self, frames):
                 n = int(tone.seconds_ * rate)
                 t = np.arange(n) / rate
                 x = (0.1 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
-                for i, at in enumerate(range(0, n, frames)):
+                for i, at in enumerate(range(self.start, n, frames)):
                     if tone.error is not None and i >= tone.good:
                         raise tone.error
                     yield np.repeat(x[at : at + frames, None], channels, axis=1)
@@ -83,8 +92,9 @@ def make(tmp_path, null_output):
     """Players over tmp_path, each closed after the test: make(opener=None, output=None)."""
     made = []
 
-    def make_(opener=None, output=None):
-        engine = player.Engine(opener or player.DecodedSong, output or null_output)
+    def make_(opener=None, output=None, engine=None):
+        if engine is None:
+            engine = player.Engine(opener or player.DecodedSong, output or null_output)
         p = bridges.Player(str(tmp_path), engine)
         made.append(p)
         return p
@@ -92,6 +102,29 @@ def make(tmp_path, null_output):
     yield make_
     for p in made:
         p.close()
+
+
+@pytest.fixture
+def queued(tmp_path, null_output):
+    """A player over an index of a.flac, b.flac and c.flac (opened by `opener`), closed after the
+    test: queued(opener) gives the player and the songs' ids."""
+    from musikata_core import db
+
+    made = []
+    index = db.Index(str(tmp_path / "musikata.db"))
+    fill(index, [{"path": f"{n}.flac", "title": n} for n in "abc"])
+    ids = [r[0] for r in index.read().execute("SELECT id FROM song ORDER BY path")]
+
+    def make_(opener):
+        engine = player.Engine(opener, null_output)
+        p = bridges.Player(str(tmp_path), engine, read=index.read)
+        made.append(p)
+        return p, ids
+
+    yield make_
+    for p in made:
+        p.close()
+    index.close()
 
 
 def heard(p):
@@ -123,6 +156,16 @@ def test_the_device_reads_the_ring_as_bytes_and_writes_nothing():
     assert io.read(24).data() == np.full(6, 0.5, "<f4").tobytes()  # whole frames only
     assert s.taken == 3 and io.bytesAvailable() == 56
     assert io.writeData(b"abc", 3) == -1
+
+
+def test_the_device_reads_the_ring_at_the_volume_ramped_to():
+    s = stream.Stream(1000, 1, ahead=0.1)
+    s.feed(np.full((6, 1), 0.5, np.float32))
+    volume = gain.Volume(1.0, ramp=4)
+    io = player.RingDevice(s, volume)
+    volume.set(0.0)
+    got = np.frombuffer(io.read(24).data(), "<f4")
+    assert np.allclose(got, [0.375, 0.25, 0.125, 0.0, 0.0, 0.0])
 
 
 def test_asking_an_engine_with_nothing_playing_to_pause_resume_or_stop_does_nothing(qtbot):
@@ -192,6 +235,92 @@ def test_a_paused_song_stays_where_it_is_until_it_resumes(make, qtbot):
     qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
     qtbot.waitUntil(lambda: p.property("position") > at, timeout=WAIT)
     qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_the_volume_reaches_the_samples_the_device_takes_and_the_next_song_keeps_it(make, qtbot):
+    p = make(Tone(5.0))
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+    p.setVolume(0.5)
+    want = player.gain_of(0.5)
+    qtbot.waitUntil(lambda: p._engine._volume.now == pytest.approx(want), timeout=WAIT)
+    assert p._engine._sink.volume() == 1.0  # the sink's own stays whole: it is applied once
+    p.play("b.flac")
+    qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
+    assert p._engine._volume.now == pytest.approx(want)  # from its first sample, no ramp
+
+
+@pytest.mark.slow
+def test_a_song_plays_at_the_replaygain_it_was_asked_with(make, qtbot):
+    p = make(Tone(5.0))
+    p.play("a.flac")  # not in an index: as a song without tags, at -6 dB
+    qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+    assert p._engine._feed.heard.gain == pytest.approx(10 ** (-6 / 20))
+
+
+@pytest.mark.slow
+def test_songs_of_the_queue_join_in_one_stream_the_sink_never_stopped(queued, tmp_path, qtbot):
+    tone = Tone(0.6)
+    p, ids = queued(tone)
+    seen = []  # at each song heard: the sink and stream playing it, and the place before
+
+    def on_now(path):
+        e = p._engine
+        seen.append((path, e._sink, e._feed.stream if e._feed else None, last[0]))
+
+    last = [0.0]
+    p.positionChanged.connect(lambda: last.__setitem__(0, p.property("position")))
+    p.nowPlaying.connect(on_now)
+    p.play_songs(ids, "")
+    qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+    assert [s[0] for s in seen] == ["a.flac", "b.flac", "c.flac", ""]
+    sinks, streams = {id(s[1]) for s in seen[1:3]}, {id(s[2]) for s in seen[1:3]}
+    assert len(sinks) == len(streams) == 1  # the sink and the stream went on from song to song
+    assert seen[1][2].short == 0  # and the device never found the ring empty
+    assert all(s[3] >= 0.45 for s in seen[1:3])  # each heard when the last had played out
+    assert [os.path.basename(x) for x in tone.opened] == ["a.flac", "b.flac", "c.flac"]
+    assert tone.closed == tone.opened
+
+
+@pytest.mark.slow
+def test_a_seek_moves_the_sound_and_the_position_follows_from_there(make, qtbot):
+    p = make(Tone(4.0))
+    log = heard(p)
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("position") > 0.1, timeout=WAIT)
+    p.seek(3.0)
+    assert p.property("position") == 3.0  # at once
+    since = len(log["positions"])
+    qtbot.waitUntil(lambda: p.property("position") > 3.2, timeout=WAIT)
+    assert min(log["positions"][since:]) >= 3.0  # never back to where it was
+    qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_a_queue_kept_across_a_restart_plays_on_from_its_place(queued, qtbot):
+    """R1.8: the song cued at its place starts there when play is pressed, never from its start."""
+    p, ids = queued(Tone(4.0))
+    p.restore(nowplaying.State(((ids[0], False), (ids[1], False)), (0, 1), 0, 3.0, ""))
+    assert p.property("position") == 3.0 and not p.property("playing")
+    log = heard(p)
+    p.toggle()
+    qtbot.waitUntil(lambda: p.property("position") > 3.2, timeout=WAIT)
+    assert min(log["positions"]) >= 3.0  # never from the start
+    qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_a_seek_into_the_last_seconds_opens_the_next_song_and_joins_it(queued, qtbot):
+    tone = Tone(14.0)  # the next is opened ten seconds before the end is decoded, 2 s ahead
+    p, ids = queued(tone)
+    p.play_songs(ids[:2], "")
+    qtbot.waitUntil(lambda: p.property("position") > 0.1, timeout=WAIT)
+    assert [os.path.basename(x) for x in tone.opened] == ["a.flac"]
+    p.seek(13.6)
+    qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
+    assert [os.path.basename(x) for x in tone.opened] == ["a.flac", "b.flac"]
+    assert p.property("position") < 1.0 and p.property("playing")
 
 
 @pytest.mark.slow
@@ -272,6 +401,120 @@ def test_closing_while_a_song_plays_stops_it_and_ends_the_thread(make, qtbot):
     qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
     p.close()
     assert tone.closed == tone.opened and not p._thread._thread.isRunning()
+
+
+# ---------- devices (R7.7, A4.6) ----------
+
+
+@pytest.fixture
+def second_output(qtbot, null_output):
+    """A second null sink at 22.05 kHz (the first is at PulseAudio's 44.1), loaded for the test
+    and unloaded after it unless the test did: (its device, a function that unloads it, and the
+    outputs as an engine sees them, the second left out once unloaded).
+
+    Qt 6.12's PulseAudio backend sees a sink come but not go: its list keeps a sink unloaded,
+    and says nothing changed. So the engine is given the list with the second left out once it
+    is unloaded, and Qt's signal is sent by the test; the rest, the real sink gone from under a
+    real QAudioSink, is the engine's. (PulseAudio itself moves the stream whose sink went to the
+    default sink, which plays it on at 44.1 kHz: at 48 it would switch to 48 for it.)"""
+    if shutil.which("pactl") is None:
+        pytest.skip("no pactl: tier 1's container has it")
+    r = subprocess.run(["pactl", "load-module", "module-null-sink", "sink_name=musikata_second",
+                        "rate=22050", "norewinds=1"], capture_output=True, text=True)  # fmt: skip
+    if r.returncode != 0:
+        pytest.skip(f"couldn't load a second null sink: {r.stderr.strip()}")
+    module = r.stdout.strip()
+    gone = []
+
+    def unload():
+        if not gone:
+            gone.append(subprocess.run(["pactl", "unload-module", module], check=True))
+
+    def found():
+        return next((d for d in QMediaDevices.audioOutputs() if bytes(d.id().data()) == SECOND),
+                    None)  # fmt: skip
+
+    def outputs():
+        return [
+            d for d in QMediaDevices.audioOutputs() if not gone or bytes(d.id().data()) != SECOND
+        ]
+
+    try:
+        qtbot.waitUntil(lambda: found() is not None, timeout=WAIT)
+        yield found(), unload, outputs
+    finally:
+        unload()
+
+
+SECOND = b"musikata_second"
+
+
+def test_the_device_chosen_is_played_on_when_it_is_there_else_the_default(null_output):
+    assert player.device_id(player.chosen_output("musikata_null")) == "musikata_null"
+    default = player.device_id(QMediaDevices.defaultAudioOutput())
+    assert player.device_id(player.chosen_output("not-plugged-in")) == default
+    assert player.device_id(player.chosen_output("")) == default
+
+
+@pytest.mark.slow
+def test_the_engine_plays_on_the_device_chosen_in_settings(tmp_path, qtbot, second_output):
+    engine = player.Engine(Tone(5.0))
+    p = bridges.Player(str(tmp_path), engine, playback=settings.Playback(device="musikata_second"))
+    try:
+        p.play("a.flac")
+        qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+        assert player.device_id(engine._device) == "musikata_second"
+        assert engine._feed.stream.rate == 22_050
+    finally:
+        p.close()
+
+
+@pytest.mark.slow
+def test_a_device_that_goes_away_pauses_and_moves_to_the_default_from_the_same_sample(
+    make, qtbot, second_output
+):
+    device, unload, outputs = second_output
+    engine = player.Engine(Tone(3.0), lambda: device, outputs=outputs)
+    p = make(engine=engine)
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("position") > 0.5, timeout=WAIT)
+    old_sink = engine._sink
+    assert engine._feed.stream.rate == 22_050
+    before = p.property("position")
+    unload()
+    with qtbot.waitSignal(engine.outputChanged, timeout=WAIT) as moved:
+        engine._devices.audioOutputsChanged.emit()  # as Qt would
+    qtbot.waitUntil(lambda: p.property("paused"), timeout=WAIT)
+    default = QMediaDevices.defaultAudioOutput()
+    assert moved.args == [default.description()] and engine._sink is not old_sink
+    assert player.device_id(engine._device) == player.device_id(default)
+    rate = default.preferredFormat().sampleRate()
+    assert engine._feed.stream.rate == rate != 22_050  # resampled for it from here on
+    at = engine._feed.position(0)
+    assert p.property("position") == pytest.approx(at, abs=0.01)
+    assert before <= at < before + 0.5  # where the old device had got to, not the ring's end
+    assert not engine._started and p.property("playing") is False
+    qtbot.wait(200)  # the one fixed wait: nothing plays until play is pressed
+    assert engine._feed.stream.taken == 0
+    p.toggle()  # play
+    qtbot.waitUntil(lambda: p.property("position") > at + 0.1, timeout=WAIT)
+    assert p.property("path") == "a.flac" and p.last == ""
+    qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_another_device_going_away_changes_nothing(make, qtbot, second_output):
+    _, unload, outputs = second_output
+    p = make(engine=player.Engine(Tone(3.0), outputs=outputs))  # on the null sink, the default
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("position") > 0.2, timeout=WAIT)
+    sink = p._engine._sink
+    said = []
+    p._engine.outputChanged.connect(said.append)
+    unload()
+    p._engine._devices.audioOutputsChanged.emit()
+    qtbot.wait(200)  # the one fixed wait: the engine hears the list change, and nothing comes of it
+    assert said == [] and p._engine._sink is sink and p.property("playing")
 
 
 # ---------- --play FILE: the builds' start test ----------

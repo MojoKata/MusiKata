@@ -89,6 +89,41 @@ def test_replaygain_reads_db_and_peaks_in_their_written_forms():
     assert parse.replaygain("n/a") is None
 
 
+def test_opus_r128_gains_are_whole_256ths_of_a_db_to_r128_moved_to_replaygains_level():
+    assert parse.r128("-2560") == -10 + 5.0  # -10 dB to -23 LUFS is -5 dB to ReplayGain's
+    assert parse.r128(" +512 ") == 7.0 and parse.r128("0") == 5.0
+    assert [parse.r128(v) for v in ("-6.5", "1e3", "40000", "", None, "x")] == [None] * 6
+
+
+def test_opus_r128_gains_win_over_its_replaygain_keys_and_carry_no_peak():
+    raw = {"R128_TRACK_GAIN": ["-1280"], "R128_ALBUM_GAIN": ["-768"],
+           "REPLAYGAIN_TRACK_GAIN": ["-3.00 dB"], "REPLAYGAIN_TRACK_PEAK": ["0.5"]}  # fmt: skip
+    t = parse.from_vorbis(raw)
+    assert (t.rg_track_gain, t.rg_album_gain) == (0.0, 2.0)
+    assert (t.rg_track_peak, t.rg_album_peak) == (0.5, None)  # the peak of the REPLAYGAIN_ keys
+    broken = parse.from_vorbis({"R128_TRACK_GAIN": ["loud"], "REPLAYGAIN_TRACK_GAIN": ["-3 dB"]})
+    assert broken.rg_track_gain == -3.0
+
+
+def test_id3_rva2_from_quod_libet_and_easyid3_when_there_is_no_txxx():
+    rva2 = [("track", -4.5, 0.9), ("ALBUM", -5.25, 0.0), ("normalize", 2.0, 1.0)]
+    t = parse.from_id3({}, rva2=rva2)
+    assert (t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak) == (
+        -4.5, 0.9, -5.25, None,
+    )  # fmt: skip
+    both = parse.from_id3({"TXXX:REPLAYGAIN_TRACK_GAIN": ["-2 dB"]}, rva2=rva2)
+    assert (both.rg_track_gain, both.rg_track_peak, both.rg_album_gain) == (-2.0, None, -5.25)
+
+
+def test_replaygain_from_ape_or_vorbis_keys_in_any_case():
+    raw = {"replaygain_track_gain": ["+1.230000 dB"], "Replaygain_Album_Peak": ["1.042"],
+           "MP3GAIN_MINMAX": ["089,201"]}  # fmt: skip
+    assert parse.replaygain_of(raw) == {"rg_track_gain": 1.23, "rg_track_peak": None,
+                                        "rg_album_gain": None, "rg_album_peak": 1.042}  # fmt: skip
+    t = parse.with_replaygain(parse.from_id3({}), parse.replaygain_of(raw))
+    assert (t.rg_track_gain, t.rg_album_gain, t.rg_album_peak) == (1.23, None, None)
+
+
 def test_vorbis_keys_in_any_case_repeated_and_their_older_names():
     raw = {
         "TITLE": ["", "Moonpull"], "ARTIST": ["lumen drift"], "ALBUM ARTIST": ["Lumen Drift"],
@@ -183,8 +218,16 @@ def test_any_text_is_read_without_an_error(value):
     parse.genres([value])
     parse.vorbis_rating(value, value)
     parse.replaygain(value)
+    parse.r128(value)
     parse.from_vorbis(
-        {"TRACKNUMBER": [value], "DATE": [value], "GENRE": [value], "RATING": [value]}
+        {
+            "TRACKNUMBER": [value],
+            "DATE": [value],
+            "GENRE": [value],
+            "RATING": [value],
+            "R128_TRACK_GAIN": [value],
+            "REPLAYGAIN_ALBUM_GAIN": [value],
+        }  # fmt: skip
     )
 
 

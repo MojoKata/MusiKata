@@ -24,7 +24,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
-from .bridges import Library
+from .bridges import Library, Player
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
 # MusiKata maximized on a 1920 x 1080 screen (R6.2.1), less what a panel or taskbar takes
@@ -35,14 +35,17 @@ SIZES = (SHOT, DESIGN)
 # (screen, what the window shows, as Library.go takes it): a screen is named for its mockup
 # (docs/mockups/README.md); one that shows only part of its mockup yet says so (L03 without the
 # Edit tags panel, which comes with slice 5); one with no mockup takes the next number of its area
-# (Artists and an artist's page, R2.6, are L10 and L11; a search being typed, R2.7, is L12);
-# Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of L07, the state
-# dots and chips of R3.9, the tint by a cover's colour)
+# (Artists, R2.6, is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08); an album's
+# page and an artist's show a search typed into the header over them, as their mockups do (L02,
+# L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of
+# L07, the state dots and chips of R3.9, the tint by a cover's colour). The first queues Glass
+# Harbor, paused at its first song, so every screen after it shows the now-playing bar (R6.5) and
+# the playing album and song marked, with no sound to wait on (Player.go).
 STEPS: list[tuple[str, dict[str, Any]]] = [
-    ("L01-albums", {"view": "albums"}),
-    ("L02-album", {"view": "album", "album": "Glass Harbor"}),
+    ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
+    ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
     ("L10-artists", {"view": "artists"}),
-    ("L11-artist", {"view": "artist", "artist": "Lumen Drift"}),
+    ("L11-artist", {"view": "artist", "artist": "Lumen Drift", "search": "ebb"}),
     ("L03-songs", {"view": "songs"}),
     ("L04-folders", {"view": "folders", "folder": "", "mode": "small"}),
     ("L05-folders-large", {"view": "folders", "folder": "Lumen Drift", "mode": "large"}),
@@ -66,6 +69,17 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
     ),
     ("L08-folder-songs", {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small"}),
     ("L12-search", {"view": "albums", "search": "lumen dri"}),
+    (
+        "N08-up-next",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "upNext": True,
+        },
+    ),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
 ]
@@ -107,6 +121,7 @@ class Tour(QObject):
         out: str,
         only: str = "",
         done: Callable[[int], None] = _quit,
+        player: Player | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -116,6 +131,7 @@ class Tour(QObject):
         mine = screens(state_of(library))
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
+        self.player = player
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -145,6 +161,8 @@ class Tour(QObject):
         name, step = self.steps[self._i]
         if self.library is not None and "view" in step:
             self.library.go(step)
+        if self.player is not None and "view" in step:
+            self.player.go(step)
         self._size = 0
         self._at_size()
 

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/now-playing.v1.schema.json",
+  "title": "<root>/.musikata/<computer id>/now-playing.json: what one computer was playing (R1.8, A2.8)",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "saved": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When it was written: UTC, ISO 8601"
+    },
+    "source": {
+      "type": "string",
+      "description": "Where the queue comes from: an album's title, Songs, a folder's name"
+    },
+    "current": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "The place in songs of the song playing or cued; null when the queue has played out"
+    },
+    "position": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Seconds into the current song"
+    },
+    "songs": {
+      "type": "array",
+      "description": "The queue in the order it plays: those before current have played",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The file's path under the root, with / separators"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The audio hash of A2.3; left out when not known"
+          },
+          "added": {
+            "type": "boolean",
+            "description": "Added by the user with Play next or Add to queue (R7.2)"
+          },
+          "unshuffled": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Its place in the order shuffle off returns to (R7.3)"
+          }
+        },
+        "required": [
+          "path",
+          "added",
+          "unshuffled"
+        ]
+      }
+    }
+  },
+  "required": [
+    "format",
+    "saved",
+    "current",
+    "position",
+    "songs"
+  ]
+}

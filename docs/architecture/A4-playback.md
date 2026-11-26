@@ -9,9 +9,9 @@ A4.1. **The pipeline.**
 ```
  file ──PyAV decode──▶ trim encoder padding ──▶ resample to the device's rate ──┐
                                                                                 ▼
- sound device ◀── QAudioSink ◀── ring buffer (≈2 s) ◀── volume ◀── equalizer ◀── ReplayGain
-                                       │
-                                       └──▶ the analyzer's ring buffer (A4.3)
+ sound device ◀── QAudioSink ◀── volume ◀── ring buffer (≈2 s) ◀── equalizer ◀── ReplayGain
+                                                 │
+                                                 └──▶ the analyzer's ring buffer (A4.3)
 ```
 
 - **Decoding** is PyAV, the Python binding of FFmpeg, whose wheels carry FFmpeg's decoders for
@@ -24,17 +24,26 @@ A4.1. **The pipeline.**
 - The playback thread (A1.3) decodes and processes blocks of about 20 ms until the ring buffer
   holds two seconds; the device pulls from it on its own schedule, so a busy GUI or a slow disk
   doesn't stop the sound.
+- The volume is applied as the device pulls, after the ring: applied before it, a change would
+  be heard two seconds late.
 
-A4.2. **The queue and the joins between songs.** The queue lives in `musikata` as a list of song
-ids with a cursor and a shuffle order (R7.2, R7.3). Ten seconds before a song ends, the next one is
-opened and its first blocks decoded, and its samples follow the last samples of the current one
-in the same stream, so there is no gap:
+A4.2. **The queue and the joins between songs.** The queue lives in `musikata_core.audio` as a
+list of song ids with a cursor and a shuffle order (R7.2, R7.3). Ten seconds before a song ends,
+the next one is opened and its first blocks decoded, and its samples follow the last samples of the
+current one in the same stream, so there is no gap:
 
 - Everything is resampled to the one rate the device runs at, so songs of different sample rates
-  and channels join exactly.
+  and channels join exactly. Songs of one rate go through the same resampler one after the other,
+  so their join is what resampling them as one song would give; a song of another rate starts a
+  resampler of its own where the last one's output ends. At that seam each resampler is primed
+  with its song continued past the seam by linear prediction (Burg's method), the one before
+  forward and the one after back, and what it makes of the continuation dropped, so neither
+  makes up an edge there: the seam doesn't click, and nothing of one song is mixed into the other
+  (a crossfade is #4).
 - The silence encoders add is trimmed: an MP3's start delay and end padding from its LAME or Xing
   header, an AAC file's from its `iTunSMPB` tag, an Opus file's pre-skip. Tests check each on
-  generated files with a known number of samples.
+  generated files with a known number of samples. FFmpeg's demuxers read each of these and trim
+  it as they decode, so MusiKata trims nothing again.
 - A change of ReplayGain or equalizer preset at the join (R7.6.1) is ramped over 50 ms.
 
 A4.3. **The analyzer's audio.** Each block handed to the ring buffer is also copied, with its
@@ -71,9 +80,10 @@ A4.5. **The system's media controls** (R7.8):
 | Windows | System Media Transport Controls, through `ISystemMediaTransportControlsInterop` for the window | `winrt-Windows.Media` (PyWinRT), Windows only |
 | macOS | `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter` | `pyobjc-framework-MediaPlayer`, macOS only |
 
-Each is a small module behind one interface (`now_playing(song)`, `state(playing)`, and signals for
-the commands), so the rest of the app doesn't know which is in use, and a platform without one
-still plays.
+Each is a small module behind one interface (`now_playing(song)`, `state(playing)`, `seeked(position)`
+for a song moved other than by playing on, which MPRIS's `Seeked` and the other platforms' timelines
+need, and signals for the commands), so the rest of the app doesn't know which is in use, and a
+platform without one still plays.
 
 A4.6. **Seeking and devices.** A seek (R7.4) asks PyAV for the nearest keyframe before the
 position, decodes forward to the exact sample, and replaces what is in the ring buffer, so the

@@ -14,9 +14,9 @@ watching (a move by copying, then removing: `copied`).
 What a scan doesn't do (R2.10): take a root that isn't there for a root whose songs were all
 removed, or a folder joined by a link that leads nowhere (R2.3.2) for one whose songs were; their
 rows stay as they were, and the result says so. And a scan that finds more than a quarter of the
-library's songs gone holds their removal (`Result.held`) until the user answers (R2.10.1), since a
-folder renamed or a share half mounted looks the same as songs deleted; `remove` takes them out
-then."""
+library's songs gone, and more than 20, holds their removal (`Result.held`) until the user answers
+(R2.10.1), since a folder renamed or a share half mounted looks the same as songs deleted; `remove`
+takes them out then. Fewer are taken out without asking."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 BATCH = 200  # files read and written at a time (A2.2)
 HASHED = 64 * 1024  # bytes of audio at each end the audio hash reads (A2.3)
 IGNORE = ".musikataignore"  # a folder holding one is skipped (R2.3.1)
+ASK_OVER = 20  # more songs gone than this, and over a quarter, wait on the user (R2.10.1)
 # told of each folder a walk lists: its path under the root, its real path, its modification time
 Reached = Callable[[str, str, int], None]
 
@@ -631,9 +632,10 @@ def remove(root: str, index: db.Index, paths: Collection[str]) -> int:
     return removed
 
 
-def over_a_quarter(gone: int, songs: int) -> bool:
-    """Whether `gone` songs of a library of `songs` is more than a quarter of it (R2.10.1)."""
-    return gone * 4 > songs
+def asks_first(gone: int, songs: int) -> bool:
+    """Whether taking out `gone` songs of a library of `songs` waits on the user's answer
+    (R2.10.1): when they are more than a quarter of it and more than ASK_OVER."""
+    return gone > ASK_OVER and gone * 4 > songs
 
 
 def scan(
@@ -658,10 +660,10 @@ def scan(
 
     A root that isn't there changes nothing (`Result.missing`), and the songs beneath a link that
     leads nowhere stay (`Result.unreachable`) (R2.10). When the songs gone are more than a quarter
-    of the library's, whichever scan finds them, a partial one included, none is taken out: they
-    are `Result.held` for the user's answer (R2.10.1); `keep`, the songs the user said to keep,
-    stay without being asked about again. `hold` False takes them out unasked: for a test whose
-    subject is the removal itself, in a library too small for a quarter to mean anything."""
+    of the library's and more than ASK_OVER (`asks_first`), whichever scan finds them, a partial
+    one included, none is taken out: they are `Result.held` for the user's answer (R2.10.1);
+    `keep`, the songs the user said to keep, stay without being asked about again. `hold` False
+    takes them out unasked: for a test whose subject is the removal itself."""
     c = index.read()
     images: dict[str, list[art.Image]] = {}
     tree = Tree()
@@ -718,7 +720,7 @@ def scan(
     if not os.path.isdir(root):  # gone while it was walked: what wasn't seen isn't taken out
         log.warning("%s went while it was scanned: nothing is taken out", root)
         total.missing, removing, taken = True, [], {}
-    elif hold and over_a_quarter(len(removing), total.songs):
+    elif hold and asks_first(len(removing), total.songs):
         log.warning(
             "%d of the %d songs in %s are gone: the user is asked before they are taken out",
             len(removing),

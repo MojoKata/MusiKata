@@ -317,7 +317,11 @@ def test_a_selection_of_folders_resolves_to_the_songs_beneath_them(index):
     assert folders.count_songs(c, ["A"], []) == 3  # not AB's
     assert folders.count_songs(c, ["A", "A/B"], ["A/z.mp3", "c.mp3"]) == 4  # each once
     assert folders.count_songs(c, [], []) == 0
-    assert folders.first_song(c, "A") == "A/B/1.mp3"  # subfolders first, then files, by name
-    assert folders.first_song(c, "") == "A/B/1.mp3" and folders.first_song(c, "Nope") is None
+    paths = dict(c.execute("SELECT id, path FROM song"))
+    # subfolders first, each whole, then files, by name: what Play on a folder queues (R7.1)
+    in_a = ["A/B/1.mp3", "A/B/2.mp3", "A/z.mp3"]
+    assert [paths[i] for i in folders.songs_beneath(c, "A")] == in_a
+    assert [paths[i] for i in folders.songs_beneath(c, "")] == [*in_a, "AB/x.mp3", "c.mp3"]
+    assert folders.songs_beneath(c, "Nope") == []
     where, params = folders.beneath("path", "")
     assert c.execute(f"SELECT COUNT(*) FROM song WHERE {where}", params).fetchone()[0] == 5

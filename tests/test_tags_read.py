@@ -5,10 +5,13 @@ Why: parse.py's shapes are only half of it: which frames Mutagen hands on, how I
 upgraded, and which file kind an .m4a is, are the edge's, and are tested here on real files."""
 
 import contextlib
+import importlib
 import os
 import shutil
 import sys
 
+import mutagen
+import mutagen.apev2
 import mutagen.id3 as id3
 import mutagen.mp4
 import pytest
@@ -20,6 +23,8 @@ from musikata_core import tags
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import demo_library as demo  # noqa: E402
+
+tag_read = importlib.import_module("musikata_core.tags.read")  # the module, not tags.read
 
 SONG = {
     "title": "Signal Fires", "artist": "Lumen Drift", "album": "Glass Harbor",
@@ -169,6 +174,74 @@ def test_mp4_freeform_rating_and_replaygain(audio, tmp_path):
     f.save()
     t, _ = tags.read(path)
     assert (t.title, t.rating, t.rg_track_gain) == ("Paper Moons", 5, -4.25)
+
+
+def _replaygain_as_written(path, kind):
+    """ReplayGain written into `path` as the common programs write it for its kind (A3.2): TXXX
+    frames (foobar2000's lower case), Vorbis comments, MP4 freeform atoms, Opus's R128_* gains."""
+    gains = {"track_gain": "-7.50 dB", "track_peak": "0.812", "album_gain": "-6.25 dB",
+             "album_peak": "0.977"}  # fmt: skip
+    if kind in ("mp3", "wav", "aiff"):
+        f = mutagen.File(path)
+        if f.tags is None:
+            f.add_tags()
+        for k, v in gains.items():
+            f.tags.add(id3.TXXX(encoding=3, desc=f"replaygain_{k}", text=[v]))
+        f.save()
+    elif kind in ("aac", "alac"):
+        f = mutagen.mp4.MP4(path)
+        for k, v in gains.items():
+            f[f"----:com.apple.iTunes:replaygain_{k}"] = [mutagen.mp4.MP4FreeForm(v.encode())]
+        f.save()
+    else:
+        f = mutagen.File(path)
+        if kind == "opus":  # RFC 7845: -12.5 and -11.25 dB to -23 LUFS, no peaks
+            f["R128_TRACK_GAIN"], f["R128_ALBUM_GAIN"] = "-3200", "-2880"
+        else:
+            for k, v in gains.items():
+                f[f"REPLAYGAIN_{k.upper()}"] = v
+        f.save()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("kind", list(demo.KINDS))
+def test_each_kind_gives_its_replaygain_as_its_taggers_write_it(audio, tmp_path, kind):
+    path = _copy(audio, kind, tmp_path)
+    _replaygain_as_written(path, kind)
+    t, _ = tags.read(path)
+    peaks = (None, None) if kind == "opus" else (0.812, 0.977)
+    assert (t.rg_track_gain, t.rg_album_gain) == (-7.5, -6.25)
+    assert (t.rg_track_peak, t.rg_album_peak) == peaks
+
+
+@pytest.mark.slow
+def test_an_mp3s_replaygain_in_rva2_frames_or_an_apev2_tag(audio, tmp_path):
+    """Quod Libet and Mutagen's EasyID3 write RVA2 frames; mp3gain an APEv2 tag at the end."""
+    path = _copy(audio, "mp3", tmp_path, "rva2.mp3")
+    f = mutagen.File(path)
+    if f.tags is None:
+        f.add_tags()
+    f.tags.add(id3.RVA2(desc="track", channel=1, gain=-4.5, peak=0.75))
+    f.tags.add(id3.RVA2(desc="album", channel=2, gain=9.0, peak=1.0))  # not the master volume
+    f.save()
+    t, _ = tags.read(path)
+    assert (t.rg_track_gain, t.rg_track_peak, t.rg_album_gain) == (-4.5, pytest.approx(0.75), None)
+    path = _copy(audio, "mp3", tmp_path, "mp3gain.mp3")
+    ape = mutagen.apev2.APEv2()
+    ape["REPLAYGAIN_TRACK_GAIN"] = "+1.230000 dB"
+    ape["REPLAYGAIN_TRACK_PEAK"] = "0.501000"
+    ape["MP3GAIN_MINMAX"] = "089,201"
+    ape.save(path)
+    t, _ = tags.read(path)
+    assert (t.rg_track_gain, t.rg_track_peak, t.rg_album_gain) == (1.23, 0.501, None)
+
+
+def test_an_apev2_tag_that_cant_be_read_is_logged_and_passed_over(tmp_path, caplog):
+    path = tmp_path / "cut.mp3"
+    path.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 200 + b"APETAGEX" + b"\xd0\x07" + b"\x00" * 22)
+    assert tag_read._ape_replaygain(str(path)) == {}
+    assert tag_read._ape_replaygain(str(tmp_path / "gone.mp3")) == {}
+    assert "couldn't read the APEv2 tag" in caplog.text
 
 
 @pytest.mark.slow

@@ -3,6 +3,7 @@ the scan on a thread of its own, its progress and end reaching QML's thread as s
 
 import functools
 import os
+import sys
 import threading
 from concurrent.futures import BrokenExecutor, ThreadPoolExecutor
 
@@ -218,8 +219,8 @@ def test_an_albums_page_says_what_it_holds(lib):
     assert page.property("chips")[0] == {"text": "Art embedded in 1 of 2", "tone": "warn"}
     songs = page.property("songs")
     assert [songs.row(i)["title"] for i in range(songs.count)] == ["Tidewater", "Glass Harbor"]
-    assert page.first_song() == "LD/GH/01.flac" == lib.firstSong(page.property("id"))
-    assert lib.firstSong(-1) == "" and lib.property("backText") == "Albums"
+    assert songs.queue_from(0) == (songs._ids, "Glass Harbor")  # what a double click queues
+    assert lib.property("backText") == "Albums"
 
 
 def test_an_artists_page_lists_their_albums_then_their_other_songs(lib):
@@ -336,9 +337,13 @@ def test_the_header_says_each_views_title_count_modes_and_sort(lib):
     assert (lib.property("title"), lib.property("viewCount")) == ("Songs", "5 songs")
     assert lib.property("sorts") == [] and lib.property("sortText") == ""
     assert [h["order"] for h in lib.property("songHeaders")][2] == "up"  # by artist
-    lib.openAlbum(album_id(lib, "Glass Harbor"))
-    assert not lib.property("searchable") and lib.property("title") == ""
+    assert not lib.property("onPage")
+    lib.openAlbum(album_id(lib, "Glass Harbor"))  # a page: the way back, the search, no sort
+    assert lib.property("searchable") and lib.property("onPage") and lib.property("title") == ""
     assert lib.property("viewCount") == "" and lib.property("sortText") == ""
+    assert lib.property("modes") == [] and lib.property("searchHint") == "Search this album"
+    lib.openArtist(lib.property("album").property("artistId"))
+    assert lib.property("searchHint") == "Search this artist" and lib.property("sorts") == []
 
 
 def test_the_sorts_order_albums_and_a_songs_column_turns_the_other_way_on_a_second_click(lib):
@@ -396,7 +401,6 @@ def test_a_page_opened_from_a_search_goes_back_to_it_and_the_sidebar_clears_it(l
     search(lib, qtbot, "glass")
     lib.openAlbum(album_id(lib, "Glass Harbor"))
     assert lib.property("view") == "album" and lib.property("search") == ""
-    lib.setSearch("tide")  # a page has no search box: nothing
     assert lib.property("album").property("songs").count == 2
     lib.back()
     assert lib.property("view") == "albums" and lib.property("search") == "glass"
@@ -404,6 +408,97 @@ def test_a_page_opened_from_a_search_goes_back_to_it_and_the_sidebar_clears_it(l
     lib.openArtist(lib.property("album").property("artistId"))
     lib.show("albums")
     assert lib.property("search") == "" and lib.property("albums").count == 2
+
+
+def test_the_header_searches_an_albums_page_and_its_count_says_of_how_many(lib, qtbot):
+    lib.openAlbum(album_id(lib, "Glass Harbor"))
+    songs = lib.property("album").property("songs")
+    search(lib, qtbot, "tide")
+    assert [songs.row(i)["title"] for i in range(songs.count)] == ["Tidewater"]
+    assert lib.property("viewCount") == "1 of 2 songs" and lib.property("emptyText") == ""
+    assert songs.queue_from(0) == (songs._ids, "Glass Harbor")  # a double click plays what shows
+    search(lib, qtbot, "year:<2000")  # a field narrows it as in a list
+    assert lib.property("viewCount") == "0 of 2 songs"
+    assert lib.property("emptyText") == "No songs match “year:<2000”"
+    search(lib, qtbot, "")
+    assert lib.property("viewCount") == "" and songs.count == 2  # its own line says how many
+
+
+def test_the_header_searches_an_artists_albums_and_other_songs_together(lib, qtbot):
+    lib.show("artists")
+    lib.openArtist(lib.property("artists").row(1)["artistId"])  # Lumen Drift
+    page = lib.property("artist")
+    albums, others = page.property("albums"), page.property("others")
+    search(lib, qtbot, "ebb")
+    assert albums.count == 0 and [others.row(i)["title"] for i in range(others.count)] == [
+        "ebb & flow"
+    ]
+    assert lib.property("viewCount") == "0 of 1 album · 1 of 2 other songs"
+    assert page.property("othersTitle") == "Other songs"
+    search(lib, qtbot, "tidewater")  # an album a song it finds is on
+    assert [albums.row(i)["title"] for i in range(albums.count)] == ["Glass Harbor"]
+    assert others.count == 0 and page.property("othersTitle") == ""  # none: no title
+    search(lib, qtbot, "zebra")
+    assert lib.property("emptyText") == "No albums or songs match “zebra”"
+    lib.openArtist(lib.property("artists").row(0)["artistId"])  # Iron Arc: no album of their own
+    search(lib, qtbot, "night")
+    assert lib.property("viewCount") == "1 of 1 other song"
+
+
+def test_a_pages_search_is_kept_going_back_to_it_and_cleared_opening_it_anew(lib, qtbot):
+    glass = album_id(lib, "Glass Harbor")
+    lib.openAlbum(glass)
+    search(lib, qtbot, "tide")
+    lib.openArtist(lib.property("album").property("artistId"))
+    assert lib.property("search") == "" and lib.property("artist").property("others").count == 2
+    search(lib, qtbot, "ferry")
+    lib.openAlbum(album_id(lib, "Night Ferry"))  # another album: whole
+    songs = lib.property("album").property("songs")
+    assert lib.property("search") == "" and songs.count == 2
+    with qtbot.waitSignal(lib.changed, check_params_cb=lambda: not lib.property("searching")):
+        lib.back()  # the artist, with their search
+    assert lib.property("search") == "ferry" and lib.property("viewCount") == (
+        "0 of 1 album · 1 of 2 other songs"
+    )
+    with qtbot.waitSignal(lib.changed, check_params_cb=lambda: not lib.property("searching")):
+        lib.back()  # Glass Harbor, with its search
+    assert lib.property("search") == "tide" and lib.property("viewCount") == "1 of 2 songs"
+    assert [songs.row(i)["title"] for i in range(songs.count)] == ["Tidewater"]
+    lib.show("albums")
+    lib.openAlbum(glass)  # the same album opened anew: whole
+    assert lib.property("search") == "" and songs.count == 2
+    assert lib.property("viewCount") == ""
+
+
+def test_a_page_whose_album_went_goes_back_to_its_view_without_the_pages_search(lib, index, qtbot):
+    lib.show("artists")
+    lib.openArtist(lib.property("artists").row(1)["artistId"])
+    search(lib, qtbot, "ebb")
+    lib.openAlbum(album_id(lib, "Glass Harbor"))
+    index.write(lambda c: c.execute("DELETE FROM artist WHERE name = 'Lumen Drift'")).result()
+    lib.back()
+    assert lib.property("view") == "artists" and lib.property("search") == ""
+
+
+def test_the_tour_opens_a_page_with_a_search_typed(lib, qtbot):
+    lib.go({"view": "album", "album": "Glass Harbor", "search": "tide"})
+    assert lib.property("search") == "tide"
+    qtbot.waitUntil(lambda: lib.property("viewCount") == "1 of 2 songs", timeout=5000)
+    lib.go({"view": "artist", "artist": "Lumen Drift", "search": "ebb"})
+    qtbot.waitUntil(
+        lambda: lib.property("viewCount") == "0 of 1 album · 1 of 2 other songs", timeout=5000
+    )
+
+
+def test_a_pages_count_says_what_each_of_its_lists_shows_while_a_search_filters():
+    assert bridges.page_count_text([(6, 10, "song")], False) == ""
+    assert bridges.page_count_text([(6, 10, "song")], True) == "6 of 10 songs"
+    assert bridges.page_count_text([(1, 5, "album"), (1, 1, "other song")], True) == (
+        "1 of 5 albums · 1 of 1 other song"
+    )
+    assert bridges.page_count_text([(0, 0, "album"), (2, 3, "other song")], True) == (
+        "2 of 3 other songs"
+    )
 
 
 def test_a_scan_while_searching_finds_the_search_again(lib, index, qtbot):
@@ -429,6 +524,16 @@ def test_a_page_read_again_after_a_scan_keeps_the_page_open_and_its_list_in_plac
     albums.modelReset.connect(lambda: resets.append(True))
     lib.reload()
     assert lib.property("view") == "artist" and albums.rowCount() == 1 and resets == []
+
+
+def test_a_page_read_again_after_a_scan_keeps_its_search(lib, index, qtbot):
+    lib.openAlbum(album_id(lib, "Glass Harbor"))
+    search(lib, qtbot, "tide")
+    songs = lib.property("album").property("songs")
+    fill(index, [{**SONGS[0], "path": "LD/GH/03.flac", "title": "Tidal Lock", "track": 3}])
+    with qtbot.waitSignal(songs.countChanged, timeout=5000):
+        lib.reload()
+    assert lib.property("search") == "tide" and lib.property("viewCount") == "1 of 3 songs"
 
 
 # ---------- watching (A2.4, R2.4) ----------
@@ -482,6 +587,31 @@ def music(tmp_path):
     wav(root / "A" / "1.wav", 1, "Signal Fires")
     wav(root / "B" / "2.wav", 2, "Undertow")
     return root
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inotify is Linux's (A2.4)")
+def test_a_file_rewritten_in_place_is_rescanned_while_it_runs(index, music, tmp_path, qtbot):
+    """R2.4, A2.4 on Linux: a tag editor (Picard, kid3, puddletag) writes a song's new tags into
+    the file itself, opened for writing, written over and closed, its folder's list of files
+    unchanged; it is read again with no scan asked for."""
+    for song in (music / "A" / "1.wav", music / "B" / "2.wav"):  # settled: not looked at again
+        os.utime(song, (song.stat().st_atime - 3600, song.stat().st_mtime - 3600))
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=SystemClock(),
+                          watching=True)  # fmt: skip
+    scanned(lib, qtbot)
+
+    def title():
+        return index.read().execute("SELECT title FROM song WHERE path = 'A/1.wav'").fetchone()[0]
+
+    assert title() == "Signal Fires"
+    retagged = tmp_path / "retagged.wav"
+    wav(retagged, 1, "Signal Fires (Remastered)")
+    with open(music / "A" / "1.wav", "r+b") as f:
+        f.write(retagged.read_bytes())
+        f.truncate()
+    qtbot.waitUntil(lambda: title() == "Signal Fires (Remastered)", timeout=10_000)
+    lib.close()
 
 
 def test_a_watched_change_rescans_its_folder_only_and_the_list_keeps_its_place(

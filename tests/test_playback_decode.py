@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import av
+import mutagen.mp4
 import numpy as np
 import pytest
 from hypothesis import given
@@ -28,15 +29,23 @@ import demo_library as demo  # noqa: E402
 TONE = 440
 
 
-def write(path, fmt, codec, sample_fmt, rate, layout, seconds=0.5, level=0.5):
-    """A sine of TONE Hz at `level` in every channel, `seconds` long, written by FFmpeg as
-    `codec` in `sample_fmt` (packed, or planar with a "p"), at `rate`, in `layout`."""
-    n = int(rate * seconds)
+def write(path, fmt, codec, sample_fmt, rate, layout, seconds=0.5, level=0.5, frames=None,
+          options=None, vbr=False, silence=0):  # fmt: skip
+    """A sine of TONE Hz at `level` in every channel, `seconds` long (or `frames` samples), then
+    `silence` samples of nothing, written by FFmpeg as `codec` in `sample_fmt` (packed, or planar
+    with a "p"), at `rate`, in `layout`; `options` are the container's (the muxer's), and `vbr`
+    asks the encoder for a variable rate (LAME's -V 4)."""
+    n = frames if frames is not None else int(rate * seconds)
     channels = av.AudioLayout(layout).nb_channels
     x = level * np.sin(2 * np.pi * TONE * np.arange(n) / rate)
-    with av.open(path, "w", format=fmt) as out:
+    x = np.concatenate([x, np.zeros(silence)])
+    n += silence
+    with av.open(path, "w", format=fmt, options=options or {}) as out:
         s = out.add_stream(codec, rate=rate, layout=layout)
         s.codec_context.format = sample_fmt
+        if vbr:
+            s.codec_context.flags |= av.codec.context.Flags.qscale
+            s.codec_context.global_quality = 4 * 118  # FFmpeg's FF_QP2LAMBDA
         step = s.codec_context.frame_size or 1024
         for i in range(0, n, step):
             chunk = np.tile(x[i : i + step], (channels, 1))
@@ -62,8 +71,10 @@ def write(path, fmt, codec, sample_fmt, rate, layout, seconds=0.5, level=0.5):
 
 
 def decoded(path, rate=48000, channels=2, block=960):
-    with decode.Decoder(path, rate, channels) as d:
-        blocks = list(d.blocks(block))
+    """The file played alone at the device's `rate` and `channels`, checked as blocks of `block`
+    frames, and its decoder."""
+    with decode.Decoder(path, channels) as d:
+        blocks = list(decode.played(d, rate, block))
     assert all(len(b) == block for b in blocks[:-1]) and 0 < len(blocks[-1]) <= block
     assert all(b.dtype == np.float32 and b.shape[1] == channels for b in blocks)
     return d, np.concatenate(blocks)
@@ -157,7 +168,8 @@ def test_each_kind_decodes_to_its_length_and_pitch_at_the_devices_rate(kinds, ki
     assert len(samples) == pytest.approx(48000, abs=48000 * 0.01)  # the encoders' padding trimmed
     assert pitch(samples[:, 0], 48000) == pytest.approx(TONE, abs=2)
     assert 0.25 < np.abs(samples).max() < 0.4  # the demo's level, 0.3 and a little noise
-    assert d.skipped == 0 and d.decoded == len(samples)
+    assert d.skipped == 0 and d.decoded == pytest.approx(d.info.rate, abs=d.info.rate * 0.01)
+    assert len(samples) == -(-d.decoded * 48000 // d.info.rate)  # resampled with nothing lost
 
 
 @pytest.mark.parametrize(
@@ -276,20 +288,20 @@ def test_a_file_cut_before_what_it_needs_to_open_cant_be_played(kinds, tmp_path,
     # an MP4's index (moov) is at its end; Ogg's length is read from its last page
     path = cut(kinds[kind], str(tmp_path / ("cut" + os.path.splitext(kinds[kind])[1])))
     with pytest.raises(decode.DecodeError, match="couldn't open"):
-        decode.Decoder(path, 48000, 2)
+        decode.Decoder(path, 2)
 
 
 def test_a_missing_file_an_empty_one_and_one_of_noise_cant_be_played(tmp_path):
     with pytest.raises(decode.DecodeError, match="couldn't open"):
-        decode.Decoder(str(tmp_path / "gone.flac"), 48000, 2)
+        decode.Decoder(str(tmp_path / "gone.flac"), 2)
     noise = tmp_path / "noise.mp3"
     noise.write_bytes(np.random.default_rng(1).bytes(5000))
     with pytest.raises(decode.DecodeError, match="couldn't open"):
-        decode.Decoder(str(noise), 48000, 2)
+        decode.Decoder(str(noise), 2)
     empty = tmp_path / "empty.flac"
     empty.write_bytes(b"")
     with (
-        decode.Decoder(str(empty), 48000, 2) as d,  # FFmpeg opens it, and finds nothing in it
+        decode.Decoder(str(empty), 2) as d,  # FFmpeg opens it, and finds nothing in it
         pytest.raises(decode.DecodeError, match="nothing in .* decodes"),
     ):
         list(d.blocks(960))
@@ -308,4 +320,182 @@ def test_a_file_with_no_audio_in_it_cant_be_played(tmp_path):
         for packet in s.encode(None):
             out.mux(packet)
     with pytest.raises(decode.DecodeError, match="no audio in"):
-        decode.Decoder(path, 48000, 2)
+        decode.Decoder(path, 2)
+
+
+# ---------- the silence encoders add (A4.2, R7.6) ----------
+#
+# FFmpeg trims each of these itself, so MusiKata trims none of them again: the files are made with
+# a known number of samples, and decoding one gives that many, from the tone's first.
+
+N = 12_345  # samples of tone in each file: no whole number of any encoder's frames
+
+
+def samples_of(path):
+    """The file decoded at its own rate, in stereo: (rate, samples)."""
+    with decode.Decoder(path, 2) as d:
+        return d.rate, np.concatenate(list(d.blocks(4096)))
+
+
+def starts_on_the_tone(samples, rate, level=0.5):
+    """Whether the samples are the tone from its first sample: no silence before it, and in
+    step with it (a lossy encoder's own error aside)."""
+    ideal = level * np.sin(2 * np.pi * TONE * np.arange(2000) / rate)
+    return np.abs(samples[100:2000, 0] - ideal[100:2000]).max() < 0.05
+
+
+@pytest.mark.parametrize("vbr", [False, True])
+def test_an_mp3s_start_delay_and_end_padding_from_its_lame_header_are_left_out(tmp_path, vbr):
+    path = write(str(tmp_path / "a.mp3"), "mp3", "libmp3lame", "fltp", 44100, "stereo",
+                 frames=N, vbr=vbr)  # fmt: skip
+    rate, samples = samples_of(path)
+    assert len(samples) == N and starts_on_the_tone(samples, rate)
+
+
+def test_an_mp3_tagged_in_front_keeps_its_lame_header(tmp_path, kinds):
+    # an ID3v2 tag with a cover before the first frame: the header is still found after it
+    path = write(str(tmp_path / "a.mp3"), "mp3", "libmp3lame", "fltp", 44100, "stereo", frames=N)
+    demo.tag(path, demo.Song(path, "mp3", {"title": "Signal Fires"}, cover=(11, 64)))
+    rate, samples = samples_of(path)
+    assert len(samples) == N and starts_on_the_tone(samples, rate)
+
+
+def test_an_mp3_with_no_lame_header_has_nothing_to_say_its_silence(tmp_path):
+    # no Xing or LAME frame (an old encoder's): the encoder's delay and its last frame's padding
+    # play, as nothing in the file says how long they are
+    path = write(str(tmp_path / "a.mp3"), "mp3", "libmp3lame", "fltp", 44100, "stereo", frames=N,
+                 options={"write_xing": "0"})  # fmt: skip
+    _, samples = samples_of(path)
+    assert len(samples) == 12 * 1152 and np.abs(samples[:1000]).max() < 0.01
+
+
+def mp4_aac(path, edit_list, silence=0):
+    return write(path, "ipod", "aac", "fltp", 44100, "stereo", frames=N, silence=silence,
+                 options={} if edit_list else {"use_editlist": "0"})  # fmt: skip
+
+
+def itunsmpb(path, priming, padding, samples):
+    """The `iTunSMPB` tag iTunes writes: its priming, its padding and the song's samples, in
+    hexadecimal among fields of zeros."""
+    f = mutagen.mp4.MP4(path)
+    value = f" 00000000 {priming:08X} {padding:08X} {samples:016X}" + " 00000000" * 8
+    f["----:com.apple.iTunes:iTunSMPB"] = [mutagen.mp4.MP4FreeForm(value.encode())]
+    f.save()
+    return path
+
+
+def test_an_aac_files_priming_and_padding_from_its_edit_list_are_left_out(tmp_path):
+    rate, samples = samples_of(mp4_aac(str(tmp_path / "a.m4a"), edit_list=True))
+    assert len(samples) == N and starts_on_the_tone(samples, rate)
+
+
+def test_an_aac_files_priming_and_padding_from_its_itunsmpb_tag_are_left_out(tmp_path):
+    # no edit list, only the tag: FFmpeg's encoder primes 1024 samples, and 700 samples of
+    # silence after the tone stand for an encoder's padding, which the tag says to leave out
+    path = mp4_aac(str(tmp_path / "a.m4a"), edit_list=False, silence=700)
+    rate, untagged = samples_of(path)
+    assert len(untagged) == 1024 + N + 700  # nothing says what to leave out
+    rate, samples = samples_of(itunsmpb(path, 1024, 700, N))
+    assert len(samples) == N and starts_on_the_tone(samples, rate)
+
+
+def test_an_aac_file_with_both_as_itunes_writes_them_is_trimmed_once(tmp_path):
+    path = itunsmpb(mp4_aac(str(tmp_path / "a.m4a"), edit_list=True), 1024, 0, N)
+    rate, samples = samples_of(path)
+    assert len(samples) == N and starts_on_the_tone(samples, rate)
+
+
+def test_an_opus_files_pre_skip_and_end_are_left_out(tmp_path):
+    path = write(str(tmp_path / "a.opus"), "ogg", "libopus", "s16", 48000, "stereo", frames=N)
+    with av.open(path) as f:
+        assert f.streams.audio[0].codec_context.delay == 312  # the pre-skip its header gives
+    rate, samples = samples_of(path)
+    assert len(samples) == N and starts_on_the_tone(samples, rate)
+
+
+# ---------- seeking (A4.6, R7.4) ----------
+
+
+def test_a_seek_starts_resampling_where_the_files_samples_and_the_devices_frames_meet():
+    assert decode.seek_plan(1000, 48000, 48000) == (1000, 0)  # the device's rate: the sample
+    sample, drop = decode.seek_plan(10_000, 44100, 48000)
+    assert sample % 147 == 0 and (10_000 - drop) * 147 == sample * 160  # an instant both fall on
+    assert decode.LEAD <= drop < decode.LEAD + 160
+    assert decode.seek_plan(10, 44100, 48000) == (0, 10)  # too near the start: from it
+    kept = list(decode.dropped([np.zeros((3, 1)), np.ones((4, 1))], 5))
+    assert len(kept) == 1 and kept[0].tolist() == [[1.0], [1.0]]
+
+
+@given(st.integers(0, 10**7), st.sampled_from([8000, 22050, 44100, 48000, 88200, 96000, 192000]))
+def test_a_seeks_plan_always_lands_on_the_frame_asked_for(frame, rate):
+    sample, drop = decode.seek_plan(frame, rate, 48000)
+    assert sample >= 0 and drop >= 0
+    assert sample * 48000 / rate + drop == frame  # resampled from there, the frame is the one
+
+
+SOUGHT = {  # frames to seek to in a 3 s file: the start, within the preroll, and on
+    "start": 0, "near": 500, "on": 61_234, "late": 3 * 48000 - 2000, "past": 3 * 48000 + 10,
+}  # fmt: skip
+
+
+@pytest.fixture(scope="module")
+def three_seconds(tmp_path_factory):
+    """Three seconds of each kind of R2.2; AAC as a plain tone, whose decoding is the same
+    after a seek (the demo's noise is coded as noise the decoder makes afresh each time)."""
+    d = tmp_path_factory.mktemp("three")
+    out = {}
+    for kind, (ext, *_rest) in demo.KINDS.items():
+        out[kind] = str(d / f"{kind}.{ext}")
+        if kind == "aac":
+            write(out[kind], "ipod", "aac", "fltp", 44100, "stereo", seconds=3.0)
+        else:
+            demo.encode(out[kind], kind, 3.0, TONE)
+    return out
+
+
+# how near a seek's samples come to the song's decoded through: the same, but where a decoder
+# carries state from frame to frame that a seek starts afresh (Opus's, and AAC's last frame);
+# a sample out of place would be off by some 0.02
+NEAR = {"aac": 2e-4, "opus": 2e-4}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("kind", list(demo.KINDS))
+@pytest.mark.parametrize("device", [48000, 44100])
+def test_a_seek_lands_on_the_exact_sample(three_seconds, kind, device):
+    # what follows a seek is what the song decoded through has there, frame for frame, at the
+    # file's rate and resampled to the device's, to its end
+    with decode.Decoder(three_seconds[kind], 2) as d:
+        through = np.concatenate(list(decode.played(d, device, 960)))
+        for where, frame in SOUGHT.items():
+            got = list(decode.played(d, device, 960, start=frame))
+            got = np.concatenate(got) if got else np.zeros((0, 2), np.float32)
+            assert len(got) == len(through[frame:]), where
+            if len(got):
+                assert np.abs(got - through[frame:]).max() < NEAR.get(kind, 1e-6), where
+
+
+@pytest.mark.slow
+def test_a_seek_ffmpeg_cant_make_or_that_lands_past_the_sample_decodes_from_the_start(tmp_path):
+    path = write(str(tmp_path / "a.flac"), "flac", "flac", "s16", 48000, "stereo", seconds=1.0)
+    with decode.Decoder(path, 2) as d:
+        through = np.concatenate(list(d.blocks(960)))
+        d._seek = lambda seconds: False
+        d.seek(30_000)
+        assert np.array_equal(np.concatenate(list(d.blocks(960))), through[30_000:])
+    with decode.Decoder(path, 2) as d:
+        frames = d._frames
+        d._frames = lambda: (setattr(f, "pts", None) or f for f in frames())  # no times
+        d.seek(30_000)
+        assert np.array_equal(np.concatenate(list(d.blocks(960))), through[30_000:])
+    with decode.Decoder(path, 2) as d:
+        frames, calls = d._frames, []
+
+        def past():  # the first time after a seek, from a frame past the sample
+            calls.append(1)
+            return (f for f in frames() if len(calls) > 1 or f.pts > 31_000)
+
+        d._frames = past
+        d.seek(30_000)
+        assert np.array_equal(np.concatenate(list(d.blocks(960))), through[30_000:])
+        assert len(calls) == 2

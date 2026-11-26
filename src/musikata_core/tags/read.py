@@ -13,6 +13,7 @@ from typing import Any
 
 import mutagen
 import mutagen.aiff
+import mutagen.apev2
 import mutagen.flac
 import mutagen.id3
 import mutagen.mp3
@@ -64,6 +65,8 @@ def read(path: str) -> tuple[Tags, AudioInfo]:
     kind, f = _open(path)
     if kind in ("mp3", "wav", "aiff"):
         tags = _id3(f.tags)
+        if kind == "mp3" and (tags.rg_track_gain is None or tags.rg_album_gain is None):
+            tags = parse.with_replaygain(tags, _ape_replaygain(path))
         if kind == "wav":
             tags = parse.merge_info(tags, parse.riff_info(_riff_info_bytes(path)))
     elif kind == "aac" or kind == "alac":
@@ -132,7 +135,25 @@ def _id3(tags: mutagen.id3.ID3 | None) -> Tags:
             raw[fid] += [str(t) for t in frame.text]
     popms = [(f.email, int(f.rating)) for f in tags.getall("POPM")]
     comments = [(f.desc, str(f.text[0]) if f.text else "") for f in tags.getall("COMM")]
-    return parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")))
+    rva2 = [
+        (str(f.desc), float(f.gain), float(f.peak))
+        for f in tags.getall("RVA2")
+        if f.channel == 1  # the master volume: the only one ReplayGain writes
+    ]
+    return parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2)
+
+
+def _ape_replaygain(path: str) -> dict[str, float | None]:
+    """ReplayGain from an MP3's APEv2 tag, where mp3gain and foobar2000 write it; nothing when it
+    has none, or it can't be read (logged)."""
+    try:
+        ape = mutagen.apev2.APEv2(path)
+    except mutagen.apev2.APENoHeaderError:
+        return {}
+    except (mutagen.MutagenError, OSError, struct.error, ValueError) as e:
+        log.warning("couldn't read the APEv2 tag of %s: %s", path, e)
+        return {}
+    return parse.replaygain_of({k: [str(v)] for k, v in ape.items()})
 
 
 def _vorbis(f: mutagen.FileType) -> Tags:
