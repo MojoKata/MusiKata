@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import gc
 import logging
 import os
 import platform
@@ -32,7 +33,7 @@ from musikata_core import __version__, db, nowplaying, rootfiles, roots, setting
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 
-from . import media
+from . import garbage, media
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .firstrun import FirstRun, music_folder
@@ -142,16 +143,41 @@ class Shell:
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
-        system's media controls, the playback thread, the play counts (their file written), the
-        watcher, the scan's thread and the worker processes, and the index."""
+        system's media controls and the bridges (`close_bridges`)."""
         self.window.close()
         Shiboken.delete(self.engine)
-        self.controls.close()
-        self.player.close()
-        if self.counts is not None:
-            self.counts.close()
-        self.library.close()
-        self.index.close()
+        close_bridges(self.player, self.counts, self.library, self.index, self.controls)
+
+
+def close_bridges(
+    player: Player,
+    counts: PlayCounts | None,
+    library: Library,
+    index: db.Index,
+    controls: media.MediaControls | None = None,
+) -> None:
+    """Closes what a window bound to, once it has gone: the system's media controls, the
+    playback thread, the play counts (their file written), the watcher, the scan's thread and the
+    worker processes, and the index; then deletes them (`release`)."""
+    if controls is not None:
+        controls.close()
+    player.close()
+    if counts is not None:
+        counts.close()
+    library.close()
+    index.close()
+    release(controls, counts, player, library)
+
+
+def release(*objects: QObject | None) -> None:
+    """Deletes a closed window's QObjects (each with its children: the models, the pages, the
+    watchers and their timers) here, on the GUI thread, at once, whatever still refers to them:
+    never by a garbage collection on another thread while this one delivers them an event (A1.3).
+    At once, not later (deleteLater): each has closed, its threads ended, and it is deleted from
+    a queued call or after the event loop has ended, never from inside its own signal."""
+    for o in objects:
+        if o is not None and Shiboken.isValid(o):
+            Shiboken.delete(o)
 
 
 def load(
@@ -207,6 +233,8 @@ def load(
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
+        Shiboken.delete(engine)
+        close_bridges(player, counts, library, index)  # none left for a collection (A1.3)
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -307,6 +335,7 @@ class FirstStart:
     def close(self) -> None:
         self.window.close()
         Shiboken.delete(self.engine)
+        release(self.first)
 
 
 def first_start(env: Mapping[str, str]) -> FirstStart:
@@ -335,7 +364,8 @@ class Session(QObject):
     configured root, unless the run's root was given for it only (R2.1.2), and opens in the
     window's place, its library scanned; the one before closes. `opened` says a root opened.
     Once the first root is open, the roots not opened for 180 days are removed, but that one, on
-    the cleanup's thread (A2.9), which closing waits for."""
+    the cleanup's thread (A2.9), which closing waits for. A window closed, its objects deleted,
+    `collect` collects the garbage it may have left (garbage.Collector.full, A1.3)."""
 
     opened = Signal()
 
@@ -348,11 +378,12 @@ class Session(QObject):
         playback: Callable[[], Engine] = Engine,
         controls: Callable[[Player, QQuickWindow, media.Art], media.MediaControls] = media.start,
         keep: bool = True,
+        collect: Callable[[], object] = gc.collect,
     ) -> None:
         super().__init__()
         self._env, self._clock, self.given = env, clock, given
         self._pool, self._playback, self._controls = pool, playback, controls
-        self._keep = keep
+        self._keep, self._collect = keep, collect
         self.shell: Shell | None = None
         self.first: FirstStart | None = None
         self._cleanup: threading.Thread | None = None  # A2.9's, once the first root opened
@@ -417,6 +448,8 @@ class Session(QObject):
         place_like(shell.window, old_window)
         if old is not None:
             old.close()
+            del old
+            self._collect()
         self.opened.emit()
 
     def close(self) -> None:
@@ -426,6 +459,7 @@ class Session(QObject):
             self.first.close()
         if self._cleanup is not None:
             self._cleanup.join()
+        self._collect()
 
 
 NO_DEVICE_STATUS = 3  # --play's status when the file decoded to its end with no device to play on
@@ -492,11 +526,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     opts = options(sys.argv[1:] if argv is None else argv, os.environ)
     app = QGuiApplication(sys.argv[:1])
+    collector = garbage.start(app, SystemClock())  # before any thread starts (A1.3)
     app.setApplicationName("MusiKata")
     app.setApplicationVersion(__version__)
     configured = settings.load(settings.shared_path(os.environ), home_of(os.environ)).root
     root, given = root_for(opts, configured)
-    session = Session(os.environ, SystemClock(), given, keep=not opts.tour)
+    session = Session(os.environ, SystemClock(), given, keep=not opts.tour, collect=collector.full)
     session.start(root)
     once = None
     if opts.tour:

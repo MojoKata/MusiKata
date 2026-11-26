@@ -88,8 +88,10 @@ class PlayCounts(QObject):
         self._keeping.moved()
 
     def close(self) -> None:
-        """Stops watching, writes this computer's file if its plays changed, and waits for it."""
+        """Stops watching, writes this computer's file if its plays changed, and waits for it.
+        The keeping then lets go of this object, so it goes with its window, at once (A1.3)."""
         if self._watcher is not None:
             self._watcher.close()
             self._watcher = None
         self._keeping.close()
+        self._keeping.on_change = None

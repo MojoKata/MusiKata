@@ -228,6 +228,9 @@ class Index:
                 if c.in_transaction:
                     c.execute("ROLLBACK")
                 done.set_exception(e)
+            # let go of the job: a failed one's traceback holds this frame, which would hold its
+            # future, and what the job and its callbacks refer to, in a cycle once it ends
+            del job, fn, done
         c.close()
 
     def write(self, fn: Callable[[sqlite3.Connection], T]) -> Future[T]:

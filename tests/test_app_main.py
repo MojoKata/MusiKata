@@ -5,11 +5,13 @@ import os
 import shutil
 import subprocess
 import sys
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fakes import FakeClock
 from PySide6.QtCore import QUrl
+from shiboken6 import Shiboken
 
 from musikata import app, media, tour
 from musikata_core import roots, settings
@@ -59,10 +61,19 @@ def test_the_covers_are_cached_under_the_roots_key_beside_the_other_roots(tmp_pa
     index.close()
 
 
-def test_a_window_that_doesnt_load_says_so(tmp_path, monkeypatch, qtbot):
+def test_a_window_that_doesnt_load_says_so_and_deletes_what_it_made(tmp_path, monkeypatch, qtbot):
+    """What was made for it is closed and deleted, none left for a collection (A1.3): the play
+    counts' watch (a socket notifier), the Library, the Player."""
+    made = []
+    for name in ("Library", "Player", "PlayCounts"):
+        kind = getattr(app, name)
+        monkeypatch.setattr(
+            app, name, lambda *a, kind=kind, **k: made.append(kind(*a, **k)) or made[-1]
+        )
     monkeypatch.setattr(app, "QML", str(tmp_path / "Missing.qml"))
     with pytest.raises(RuntimeError, match="didn't load"):
         app.load(str(tmp_path), {"MUSIKATA_DATA": str(tmp_path / "d")}, FakeClock())
+    assert len(made) == 3 and not any(Shiboken.isValid(o) for o in made)
 
 
 def run(*args):
@@ -250,6 +261,39 @@ def test_a_root_given_for_the_run_is_named_in_the_title_and_never_kept(tmp_path,
     assert not os.path.exists(settings.shared_path(env))
     qtbot.waitUntil(lambda: not s.library.scanning, timeout=10_000)
     s.close()
+
+
+def test_a_closed_windows_objects_are_deleted_at_its_close_and_gone_without_a_collection(
+    tmp_path, qtbot
+):
+    """A1.3: a window's bridges are deleted as it closes, on the GUI thread, whatever still refers
+    to them, and nothing keeps them in a cycle, so no garbage collection, which another thread may
+    start, ever frees them: after Choose another folder… (R2.10), and at the run's close."""
+    collected = []
+    env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
+    pool = lambda: ThreadPoolExecutor(1)  # noqa: E731
+    s = app.Session(env, FakeClock(), True, pool, collect=lambda: collected.append(2))
+    for name in ("usb", "Other"):
+        (tmp_path / name).mkdir()
+    s.start(str(tmp_path / "usb"))
+    qtbot.waitUntil(lambda: not s.library.scanning, timeout=10_000)
+    old = s.shell
+    held = [old.library, old.player, old.counts, old.controls]  # what a stray reference keeps
+    gone = [weakref.ref(o) for o in (old.library, old.player, old.counts, old.controls)]
+    with qtbot.waitSignal(s.opened):
+        s.library.chooseRoot(str(tmp_path / "Other"))
+    assert not any(Shiboken.isValid(o) for o in held)
+    assert len(collected) == 1  # a whole collection asked for, for what else made cycles
+    del old, held
+    assert [r() for r in gone] == [None] * 4
+    qtbot.waitUntil(lambda: not s.library.scanning, timeout=10_000)
+    shell = s.shell
+    gone = [weakref.ref(o) for o in (shell.library, shell.player, shell.counts, shell.controls)]
+    s.close()
+    assert not Shiboken.isValid(shell.library) and len(collected) == 2
+    s.shell = None
+    del shell
+    assert [r() for r in gone] == [None] * 4
 
 
 def test_the_first_starts_window_that_doesnt_load_says_so(tmp_path, monkeypatch):

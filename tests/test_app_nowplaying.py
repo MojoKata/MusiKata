@@ -1116,7 +1116,8 @@ def test_a_root_opens_with_what_was_playing_when_it_closed_paused_at_its_place(t
     qtbot.waitUntil(lambda: p.property("position") == 37.5, timeout=WAIT)
     p.toggle()
     qtbot.waitUntil(lambda: p.property("paused"), timeout=WAIT)
-    shell.close()
+    playing = p.property("path")
+    shell.close()  # its Player deleted with its window (A1.3)
     env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
     shared = settings.load(settings.shared_path(env), str(tmp_path))
     assert (shared.playback.shuffle, shared.playback.repeat) == (True, ALL)
@@ -1127,7 +1128,7 @@ def test_a_root_opens_with_what_was_playing_when_it_closed_paused_at_its_place(t
         q = again.player
         assert [(e.song, e.added) for e in q.queue.order] == before and q.queue.shuffle
         assert q.queue.repeat == ALL and any(added for _, added in before)
-        assert q.property("path") == p.property("path") and q.property("position") == 37.5
+        assert q.property("path") == playing and q.property("position") == 37.5
         assert q.property("playing") is False and again.engine_.played() == []
     finally:
         again.close()

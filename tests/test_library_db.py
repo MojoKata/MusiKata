@@ -7,6 +7,7 @@ rebuilt, not written by an older one."""
 
 import sqlite3
 import threading
+import weakref
 
 import pytest
 
@@ -71,6 +72,25 @@ def test_a_write_is_one_transaction_kept_whole_or_not_at_all(tmp_path):
         index.write(add_then_fail).result()
     assert [r[0] for r in index.read().execute("SELECT path FROM song")] == ["a.mp3"]
     index.close()
+
+
+def test_a_failed_write_and_what_it_holds_go_once_let_go_without_a_collection(tmp_path):
+    """A1.3: the writer's frame, which a failed job's traceback holds, lets go of the job's
+    future, which would otherwise keep itself, and what the job and its callbacks refer to (a
+    window's Library), in a cycle that only a garbage collection, on any thread, would free."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    held = threading.Event()  # what a job refers to
+
+    def fail(c, held=held):
+        raise ValueError("no")
+
+    done = index.write(fail)
+    done.add_done_callback(lambda f, held=held: None)
+    assert isinstance(done.exception(), ValueError)
+    index.close()
+    gone = weakref.ref(held)
+    del held, done, fail
+    assert gone() is None
 
 
 def test_each_thread_reads_through_a_connection_of_its_own(tmp_path):

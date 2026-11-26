@@ -14,6 +14,7 @@ import json
 import os
 import random
 import threading
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -220,6 +221,10 @@ def test_plays_counted_reach_the_index_and_the_file_written_at_close(tmp_path, i
     counts.close()
     with open(rootfiles.file_of(musikata, "me"), encoding="utf-8") as f:
         assert [s["count"] for s in json.load(f)["songs"]] == [2]
+    # closed, the keeping lets go of it: it goes at once, never in a collection (A1.3)
+    gone = weakref.ref(counts)
+    del counts
+    assert gone() is None and keeping.on_change is None
 
 
 def test_this_computers_id_is_made_once_whichever_thread_asks_first():

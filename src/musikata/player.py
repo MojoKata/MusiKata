@@ -463,19 +463,28 @@ class PlaybackThread:
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
-        self._thread = QThread()
+        self._thread: QThread | None = QThread()
         self._thread.setObjectName("playback")
         engine.moveToThread(self._thread)
         self._thread.started.connect(engine.setup)
 
     def start(self) -> None:
-        self._thread.start(QThread.Priority.TimeCriticalPriority)  # where the system allows it
+        if self._thread is not None:  # never once closed
+            self._thread.start(QThread.Priority.TimeCriticalPriority)  # where the system allows
 
     def close(self) -> None:
-        """Stops the song and the thread, and waits for it to end: for closing."""
+        """Stops the song and the thread, waits for it to end, and deletes the thread and the
+        engine: for closing. Deleted here, on the GUI thread, at once, never by a garbage
+        collection on another thread (A1.3); not later (deleteLater), which needs the engine's
+        thread running, as it isn't once ended or when no song played."""
+        if self._thread is None:
+            return
         if self._thread.isRunning():
             QMetaObject.invokeMethod(
                 self.engine, "shutdown", Qt.ConnectionType.BlockingQueuedConnection
             )
             self._thread.quit()
             self._thread.wait()
+        Shiboken.delete(self.engine)
+        Shiboken.delete(self._thread)
+        self._thread = None

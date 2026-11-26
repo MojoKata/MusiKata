@@ -463,6 +463,21 @@ def sort_text(label: str) -> str:
     return f"Sort: {label}" if label else ""
 
 
+def without_traceback(error: BaseException) -> BaseException:
+    """`error`, and those it was raised from or while handling, without their tracebacks, which
+    were logged: kept (`Library.last`), a traceback holds the frames it passed through, and with
+    them the Library, in a cycle only a garbage collection would free (A1.3)."""
+    seen: set[int] = set()
+    left: list[BaseException | None] = [error]
+    while left:
+        e = left.pop()
+        if e is not None and id(e) not in seen:
+            seen.add(id(e))
+            e.__traceback__ = None
+            left += [e.__cause__, e.__context__]
+    return error
+
+
 class Library(QObject):
     """One root and its index, as the sidebar and the views see them: which view is open and the
     way back from a page (R6.3), Albums and its genre chips, Artists, Songs, and the pages; and
@@ -826,7 +841,7 @@ class Library(QObject):
                 # a worker process died: the next scan starts them anew
                 self._workers.shutdown(wait=False)
                 self._workers = None
-            result = e
+            result = without_traceback(e)
         if isinstance(result, scanner.Result) and not result.missing and self._trim is not None:
             try:  # the cache's thumbnails no row points at any more (A2.7)
                 self._trim(self._index.read())
@@ -1826,6 +1841,7 @@ class Player(QObject):
             self._keeping.close()
             self._keeping = None  # what the engine says as it stops changes nothing kept
         self._thread.close()
+        self._refuse = None  # the Library: let go with its window (app.Shell.close)
 
     # ---------- playing the queue's songs ----------
 

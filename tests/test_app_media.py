@@ -12,6 +12,7 @@ seen on that platform's desktop."""
 import logging
 import os
 import random
+import weakref
 from datetime import timedelta
 from enum import IntEnum
 from types import SimpleNamespace
@@ -294,6 +295,11 @@ def test_a_cover_that_cant_be_found_leaves_the_song_without_one(tmp_path, index,
     assert "the cache can't be read" in caplog.text
     mc.close()
     p.close()
+    # the failure asked of the future, not raised again: nothing holds the controls in a cycle
+    gone = weakref.ref(mc)
+    told.clear()  # the backend, which the controls let go of at close
+    del mc
+    assert gone() is None
 
 
 def test_pause_and_a_seek_are_told_and_a_restart_is_a_seek(made, index, qtbot):

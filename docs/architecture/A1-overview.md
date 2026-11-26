@@ -41,6 +41,16 @@ A1.3. **Threads and processes.** The GUI thread only draws and answers clicks.
   per thread (WAL mode), so a long write never stalls a list scrolling.
 - **Playback** has a thread of its own (A4.1), which decodes a few seconds ahead of the sound
   device, so nothing else running can make the sound stop.
+- **Garbage is collected on the GUI thread only.** Python's cyclic collector starts on whichever
+  thread allocates when a collection is due, and what it frees is destroyed there: a QObject made
+  in Python (a closed window's bridges and models, a watcher's socket notifier) destroyed on a
+  scan's thread while the GUI thread delivers it an event crashes MusiKata. So no thread but the
+  GUI thread starts a collection: MusiKata turns Python's own off as it starts, before any thread
+  does, and a timer on the GUI thread collects instead (`musikata.garbage`): every second, the
+  youngest generation when the counts say a collection is due and the older ones as theirs do, the
+  whole heap at most every ten minutes, and whenever a window closes. And a closed window's
+  objects aren't left for a collection: at its close they are deleted, on the GUI thread, and
+  nothing holds them in a reference cycle.
 
 A1.4. **From a file to the screen and back.**
 
@@ -135,6 +145,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.app` | app | Starting, one MusiKata at a time, opening files (R1.6, R1.7) |
 | `musikata.bridges` | app | `Backend`, `Player` and `Library`, as QML sees them (A1.2) |
 | `musikata.models` | app | The list models (A1.5) |
+| `musikata.garbage` | app | Garbage collected on the GUI thread only: when to collect what, from the counts and the time, and the timer that asks (A1.3) |
 | `musikata.selection` | app | A song list's selection, by song id, with its anchor and current row: clicks and keys as the lists take them, without Qt (R2.6, R7.1) |
 | `musikata.firstrun` | app | The first start: the root dropped, chosen or the platform's music folder (R2.1, X01-first-run) |
 | `musikata.folders` | app | The Folders view: its model, the open folder, the selection (R2.9, A2.7) |

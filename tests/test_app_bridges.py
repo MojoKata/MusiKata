@@ -108,6 +108,27 @@ def test_a_scan_that_fails_is_kept_and_logged_and_the_library_goes_on(
     lib.wait()
     assert isinstance(lib.last, OSError) and "the scan of" in caplog.text
     assert lib.property("scanning") is False and lib.property("line") == "No songs yet"
+    # kept without its traceback, whose frames would keep the Library in a cycle (A1.3)
+    assert lib.last.__traceback__ is None
+
+
+def test_an_error_kept_lets_go_of_its_traceback_and_those_of_the_errors_it_came_from():
+    def raised(make):
+        try:
+            make()
+        except Exception as e:  # noqa: BLE001
+            return e
+
+    def chained():
+        try:
+            raise KeyError("first")
+        except KeyError:
+            raise ValueError("then") from OSError("cause")
+
+    e = raised(chained)
+    assert e.__traceback__ is not None and e.__context__.__traceback__ is not None
+    assert bridges.without_traceback(e) is e
+    assert [x.__traceback__ for x in (e, e.__cause__, e.__context__)] == [None] * 3
 
 
 def test_waiting_with_no_scan_started_returns_at_once(index, tmp_path):
