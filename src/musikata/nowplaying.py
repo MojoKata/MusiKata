@@ -31,6 +31,7 @@ from .models import artist_text, cover_url, length_text, time_text, title_of
 CHUNK = 500  # ids looked up at a time
 PAGE = 200  # Up next's rows read at a time
 RESTART_AFTER = 3.0  # seconds into a song past which Previous starts it again (R6.5)
+SEEK_STEP = 5.0  # seconds ← and → seek (R7.4, R6.9)
 EMPTY = "Nothing is queued. Play a song, or add songs with Add to queue."
 REPEAT_NAMES = {"off": "Repeat off", ALL: "Repeat all", ONE: "Repeat one"}
 

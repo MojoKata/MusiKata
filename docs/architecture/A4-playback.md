@@ -25,16 +25,19 @@ A4.1. **The pipeline.**
   holds two seconds; the device pulls from it on its own schedule, so a busy GUI or a slow disk
   doesn't stop the sound.
 
-A4.2. **The queue and the joins between songs.** The queue lives in `musikata` as a list of song
-ids with a cursor and a shuffle order (R7.2, R7.3). Ten seconds before a song ends, the next one is
-opened and its first blocks decoded, and its samples follow the last samples of the current one
-in the same stream, so there is no gap:
+A4.2. **The queue and the joins between songs.** The queue lives in `musikata_core.audio` as a
+list of song ids with a cursor and a shuffle order (R7.2, R7.3). Ten seconds before a song ends,
+the next one is opened and its first blocks decoded, and its samples follow the last samples of the
+current one in the same stream, so there is no gap:
 
 - Everything is resampled to the one rate the device runs at, so songs of different sample rates
-  and channels join exactly.
+  and channels join exactly. Songs of one rate go through the same resampler one after the other,
+  so their join is what resampling them as one song would give; a song of another rate starts a
+  resampler of its own where the last one's output ends.
 - The silence encoders add is trimmed: an MP3's start delay and end padding from its LAME or Xing
   header, an AAC file's from its `iTunSMPB` tag, an Opus file's pre-skip. Tests check each on
-  generated files with a known number of samples.
+  generated files with a known number of samples. FFmpeg's demuxers read each of these and trim
+  it as they decode, so MusiKata trims nothing again.
 - A change of ReplayGain or equalizer preset at the join (R7.6.1) is ramped over 50 ms.
 
 A4.3. **The analyzer's audio.** Each block handed to the ring buffer is also copied, with its

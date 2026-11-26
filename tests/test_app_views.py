@@ -156,7 +156,7 @@ def test_clicks_open_a_view_an_album_its_artist_and_go_back(shell, qtbot):
     assert lib.property("album").property("title") == "Glass Harbor"
     settle(shell, qtbot)
     played = []
-    shell.player._play.connect(played.append)
+    shell.player._play.connect(lambda path, ticket: played.append(path))
     click(shell, one(shell, "play"))
     qtbot.waitUntil(lambda: bool(played), timeout=WAIT)
     assert played[0].endswith(os.path.join("Lumen Drift", "Glass Harbor", "01.flac"))

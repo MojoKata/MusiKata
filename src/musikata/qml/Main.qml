@@ -8,7 +8,9 @@ import "."
 // another folder… (the platform's folder dialog), and the question of songs gone (R2.10.1). The
 // title names a root given for this run only (R2.1.2). The now-playing bar (R6.5) runs along the
 // bottom, and Up next (R7.2) opens over the view's right side above it. Space plays and pauses,
-// Ctrl+→ and Ctrl+← (⌘ on macOS) go to the next song and the one before (R6.9).
+// Ctrl+→ and Ctrl+← (⌘ on macOS) go to the next song and the one before, and ← and → seek 5 seconds
+// (R6.9, R7.4), unless what has the focus uses them: a text box, the Folders view's grid, the
+// volume.
 Window {
     id: win
     required property var library
@@ -112,7 +114,7 @@ Window {
     Component { id: artists; ArtistsView { library: win.library } }
     Component { id: artist; ArtistPage { library: win.library; player: win.player } }
     Component { id: songs; SongsView { library: win.library; player: win.player } }
-    Component { id: folders; FoldersView { library: win.library; player: win.player } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player } }
 
     UpNext {
         objectName: "upNext"
@@ -139,5 +141,13 @@ Window {
     Shortcut {
         sequence: "Ctrl+Left"
         onActivated: win.player.previous()
+    }
+    Shortcut {
+        sequence: "Left"
+        onActivated: win.player.seekBack()
+    }
+    Shortcut {
+        sequence: "Right"
+        onActivated: win.player.seekAhead()
     }
 }

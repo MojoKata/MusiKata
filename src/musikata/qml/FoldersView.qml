@@ -45,6 +45,8 @@ Item {
     TapHandler { acceptedButtons: Qt.BackButton; onTapped: view.folders.back() }
     Keys.onReturnPressed: if (view.current >= 0) view.folders.activate(view.current)
     Keys.onEnterPressed: if (view.current >= 0) view.folders.activate(view.current)
+    // ← and → move the selection here, rather than seek (R6.9); Alt+← stays Back
+    Keys.onShortcutOverride: (event) => event.accepted = (event.key === Qt.Key_Left || event.key === Qt.Key_Right) && !(event.modifiers & Qt.AltModifier)
     Keys.onLeftPressed: view.step(-1)
     Keys.onRightPressed: view.step(1)
     Keys.onUpPressed: view.step(view.gridMode && view.current < view.folders.folderRows ? -rows.columns : -1)

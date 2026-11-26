@@ -10,7 +10,8 @@ where it is.
 
 Why: the device pulls on its own schedule, on another thread. A sink starved at the start, a song
 whose end is never noticed, a pause that doesn't hold, or a thread left running at close are each
-only seen with a real sink pulling."""
+only seen with a real sink pulling; so is a join the device has to cross without a gap, and a
+seek it has to hear."""
 
 import logging
 import os
@@ -62,11 +63,17 @@ class Tone:
         class Song:
             seconds = tone.seconds_ if tone.length else None
 
+            def __init__(self):
+                self.rate, self.start = rate, 0
+
+            def seek(self, sample):
+                self.start = sample
+
             def blocks(self, frames):
                 n = int(tone.seconds_ * rate)
                 t = np.arange(n) / rate
                 x = (0.1 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
-                for i, at in enumerate(range(0, n, frames)):
+                for i, at in enumerate(range(self.start, n, frames)):
                     if tone.error is not None and i >= tone.good:
                         raise tone.error
                     yield np.repeat(x[at : at + frames, None], channels, axis=1)
@@ -92,6 +99,29 @@ def make(tmp_path, null_output):
     yield make_
     for p in made:
         p.close()
+
+
+@pytest.fixture
+def queued(tmp_path, null_output):
+    """A player over an index of a.flac, b.flac and c.flac (opened by `opener`), closed after the
+    test: queued(opener) gives the player and the songs' ids."""
+    from musikata_core import db
+
+    made = []
+    index = db.Index(str(tmp_path / "musikata.db"))
+    fill(index, [{"path": f"{n}.flac", "title": n} for n in "abc"])
+    ids = [r[0] for r in index.read().execute("SELECT id FROM song ORDER BY path")]
+
+    def make_(opener):
+        engine = player.Engine(opener, null_output)
+        p = bridges.Player(str(tmp_path), engine, read=index.read)
+        made.append(p)
+        return p, ids
+
+    yield make_
+    for p in made:
+        p.close()
+    index.close()
 
 
 def heard(p):
@@ -206,6 +236,57 @@ def test_the_volume_reaches_the_sound_device_at_once_and_the_next_song_keeps_it(
     p.play("b.flac")
     qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
     assert p._engine._sink.volume() == pytest.approx(want, abs=0.01)
+
+
+@pytest.mark.slow
+def test_songs_of_the_queue_join_in_one_stream_the_sink_never_stopped(queued, tmp_path, qtbot):
+    tone = Tone(0.6)
+    p, ids = queued(tone)
+    seen = []  # at each song heard: the sink and stream playing it, and the place before
+
+    def on_now(path):
+        e = p._engine
+        seen.append((path, e._sink, e._feed.stream if e._feed else None, last[0]))
+
+    last = [0.0]
+    p.positionChanged.connect(lambda: last.__setitem__(0, p.property("position")))
+    p.nowPlaying.connect(on_now)
+    p.play_songs(ids, "")
+    qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+    assert [s[0] for s in seen] == ["a.flac", "b.flac", "c.flac", ""]
+    sinks, streams = {id(s[1]) for s in seen[1:3]}, {id(s[2]) for s in seen[1:3]}
+    assert len(sinks) == len(streams) == 1  # the sink and the stream went on from song to song
+    assert seen[1][2].short == 0  # and the device never found the ring empty
+    assert all(s[3] >= 0.45 for s in seen[1:3])  # each heard when the last had played out
+    assert [os.path.basename(x) for x in tone.opened] == ["a.flac", "b.flac", "c.flac"]
+    assert tone.closed == tone.opened
+
+
+@pytest.mark.slow
+def test_a_seek_moves_the_sound_and_the_position_follows_from_there(make, qtbot):
+    p = make(Tone(4.0))
+    log = heard(p)
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("position") > 0.1, timeout=WAIT)
+    p.seek(3.0)
+    assert p.property("position") == 3.0  # at once
+    since = len(log["positions"])
+    qtbot.waitUntil(lambda: p.property("position") > 3.2, timeout=WAIT)
+    assert min(log["positions"][since:]) >= 3.0  # never back to where it was
+    qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_a_seek_into_the_last_seconds_opens_the_next_song_and_joins_it(queued, qtbot):
+    tone = Tone(14.0)  # the next is opened ten seconds before the end is decoded, 2 s ahead
+    p, ids = queued(tone)
+    p.play_songs(ids[:2], "")
+    qtbot.waitUntil(lambda: p.property("position") > 0.1, timeout=WAIT)
+    assert [os.path.basename(x) for x in tone.opened] == ["a.flac"]
+    p.seek(13.6)
+    qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
+    assert [os.path.basename(x) for x in tone.opened] == ["a.flac", "b.flac"]
+    assert p.property("position") < 1.0 and p.property("playing")
 
 
 @pytest.mark.slow

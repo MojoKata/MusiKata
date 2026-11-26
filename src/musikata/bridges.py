@@ -13,6 +13,7 @@ lays out and binds)."""
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import random
@@ -57,6 +58,7 @@ from .models import (
 from .nowplaying import (
     REPEAT_NAMES,
     RESTART_AFTER,
+    SEEK_STEP,
     SongInfo,
     UpNextModel,
     bar_line,
@@ -1226,8 +1228,12 @@ class Player(QObject):
     the first song.
 
     The queue's current song is shown whether or not it plays: cued, it waits paused at its start
-    for play (the tour's, and R1.8's restored queue). A song that ends starts the one after it
-    (R7.1), until the queue has played out; a song that can't play stops there and says why.
+    for play (the tour's, and R1.8's restored queue). The engine is told what follows the song
+    playing, and again whenever that changes, and joins it with no gap (A4.2); the bar, the playing
+    row and Up next move on when the engine hears the next song begin. A song that ends with
+    nothing joined to it starts the one after it (R7.1), until the queue has played out; a song
+    that can't play stops there and says why. Each song asked of the engine carries a ticket, and
+    what the engine says of a ticket no longer asked for is passed over.
     `read` reads the index, where a song's id becomes its path and its words; without it (a test
     of the engine alone) a path plays on its own, outside any queue."""
 
@@ -1236,7 +1242,9 @@ class Player(QObject):
     queueChanged = Signal()  # shuffle, repeat, Up next open
     volumeChanged = Signal()
     nowPlaying = Signal(str)  # the path of the song playing or cued now, "" when none
-    _play = Signal(str)
+    _play = Signal(str, int)
+    _follow = Signal(int, int, str)
+    _seek = Signal(int, float)
     _pause = Signal()
     _resume = Signal()
     _stop = Signal()
@@ -1263,7 +1271,13 @@ class Player(QObject):
         self._up_next_open = False
         self._info: SongInfo | None = None  # the shown song's words, when the index has it
         self._path = ""  # the shown song's path under the root
-        self._requested = ""  # the whole path the engine was last asked to play
+        self._tickets = itertools.count(1)
+        self._requested = 0  # the ticket of the song the engine was last asked to play
+        self._playing_key: int | None = None  # the queue's entry it plays; None: outside the queue
+        self._followed: tuple[int, int | None] | None = None  # the ticket and entry last told to
+        # follow it (0 and None: nothing); None when nothing was told yet
+        self._follows: set[int] = set()  # every ticket told to follow it
+        self._seeking = 0  # seeks asked for and not yet done: the position is the place sought
         self._on = False  # the engine has a song, playing or paused
         self._paused = False
         self._position = self._length = 0.0
@@ -1271,11 +1285,15 @@ class Player(QObject):
         self._volume = 1.0
         self.last = ""  # how the last song stopped: "ended", "stopped" or "failed"
         self._play.connect(self._engine.play)
+        self._follow.connect(self._engine.follow)
+        self._seek.connect(self._engine.seek)
         self._pause.connect(self._engine.pause)
         self._resume.connect(self._engine.resume)
         self._stop.connect(self._engine.stop)
         self._set_gain.connect(self._engine.set_volume)
         self._engine.began.connect(self._on_began)
+        self._engine.joined.connect(self._on_joined)
+        self._engine.sought.connect(self._on_sought)
         self._engine.moved.connect(self._on_moved)
         self._engine.pausedChanged.connect(self._on_paused)
         self._engine.ended.connect(self._on_ended)
@@ -1496,6 +1514,36 @@ class Player(QObject):
             self._set_gain.emit(gain_of(level))
             self.volumeChanged.emit()
 
+    @Slot(float)
+    def seek(self, seconds: float) -> None:
+        """Seeks the song playing, or paused, to `seconds` from its start (R7.4, A4.6); past its
+        length, to its end. The bar shows the place at once; a cued song doesn't move."""
+        if not self._on or not self._requested:
+            return
+        seconds = max(0.0, seconds)
+        if self._length:
+            seconds = min(seconds, self._length)
+        self._position = seconds
+        self._seeking += 1
+        self._seek.emit(self._requested, seconds)
+        self.positionChanged.emit()
+
+    @Slot(float)
+    def seekTo(self, fraction: float) -> None:  # noqa: N802
+        """The seek bar dragged or clicked: to that fraction of the song's length (R7.4)."""
+        if self._length:
+            self.seek(min(1.0, max(0.0, fraction)) * self._length)
+
+    @Slot()
+    def seekBack(self) -> None:  # noqa: N802
+        """←: five seconds back (R7.4, R6.9)."""
+        self.seek(self._position - SEEK_STEP)
+
+    @Slot()
+    def seekAhead(self) -> None:  # noqa: N802
+        """→: five seconds on (R7.4, R6.9)."""
+        self.seek(self._position + SEEK_STEP)
+
     @Slot()
     def pause(self) -> None:
         self._pause.emit()
@@ -1539,7 +1587,7 @@ class Player(QObject):
             return
         self._error = ""
         self._show(info, info.path)
-        self._start_engine(self._whole(info.path))
+        self._start_engine(self._whole(info.path), entry.key)
         self._queue_changed()
 
     def _cue(self) -> None:
@@ -1571,17 +1619,25 @@ class Player(QObject):
             self._path = path
             self.nowPlaying.emit(path)
 
-    def _start_engine(self, path: str) -> None:
+    def _start_engine(self, path: str, key: int | None = None) -> None:
+        """The engine plays `path`, the queue's entry `key` (None: outside the queue), under a new
+        ticket; what follows it is told after."""
         if not self._started:
             self._thread.start()
             self._started = True
-        self._requested = path
-        self._play.emit(path)
+        self._requested = next(self._tickets)
+        self._playing(key)
+        self._play.emit(path, self._requested)
+
+    def _playing(self, key: int | None) -> None:
+        self._playing_key = key
+        self._followed, self._follows = None, set()
 
     def _stop_engine(self) -> None:
         """Stops what the engine plays, if anything; what it says of it is then nothing to act
         on (`_requested` no longer names it)."""
-        self._requested = ""
+        self._requested = 0
+        self._playing(None)
         if self._on or self._started:
             self._stop.emit()
         self._on = self._paused = False
@@ -1604,12 +1660,37 @@ class Player(QObject):
     def _queue_changed(self) -> None:
         self._up_next.refresh()
         self.queueChanged.emit()
+        self._tell_following()
+
+    def _tell_following(self) -> None:
+        """Tells the engine what follows the song playing, when that changed (A4.2): the queue's
+        next song, which it opens ahead and joins with no gap; nothing for a song outside the
+        queue, or when the next one is gone from the index or its root isn't there (its turn
+        then says why)."""
+        if not self._requested or self._playing_key is None:
+            return
+        current = self.queue.current
+        entry = None
+        if current is not None and current.key == self._playing_key:
+            entry = self.queue.following()
+        key = entry.key if entry is not None else None
+        if self._followed is not None and self._followed[1] == key:
+            return
+        path = ""
+        info = self._song(entry.song) if entry is not None else None
+        if info is not None and not (self._refuse is not None and self._refuse(info.path)):
+            path = self._whole(info.path)
+        ticket = next(self._tickets) if path else 0
+        if ticket:
+            self._follows.add(ticket)
+        self._followed = (ticket, key)
+        self._follow.emit(self._requested, ticket, path)
 
     # ---------- what the engine says ----------
 
-    @Slot(str, float)
-    def _on_began(self, path: str, length: float) -> None:
-        if path != self._requested:
+    @Slot(int, str, float)
+    def _on_began(self, ticket: int, path: str, length: float) -> None:
+        if ticket != self._requested:
             return  # one asked for before the last request: another follows
         self._on, self._paused = True, False
         if self._info is None:
@@ -1618,11 +1699,44 @@ class Player(QObject):
         self.changed.emit()
         self.positionChanged.emit()
 
+    @Slot(int, str, float)
+    def _on_joined(self, ticket: int, path: str, length: float) -> None:
+        """The device reached the first sample of the song told to follow (A4.2): the queue
+        moves on to it, and the bar, the playing row and Up next with it. One the queue no longer
+        has next (it changed once the device had the song) gives way to what the queue says."""
+        if ticket not in self._follows:
+            return  # told to follow a song no longer playing
+        told = self._followed
+        self._requested = ticket
+        entry = self.queue.ended()
+        if entry is None or told is None or told[0] != ticket or entry.key != told[1]:
+            if entry is None:
+                self._stop_engine()
+                self._finish("ended")
+            else:
+                self._start(entry)
+            return
+        info = self._song(entry.song)
+        if info is None:
+            self._start(entry)  # gone from the index since: it says so
+            return
+        self._playing(entry.key)
+        self._error = ""
+        self._show(info, info.path)
+        self._on, self._paused = True, False
+        self._length = max(0.0, length)
+        self.changed.emit()
+        self._queue_changed()
+
     @Slot(float)
     def _on_moved(self, seconds: float) -> None:
-        if self._on:
+        if self._on and not self._seeking:
             self._position = seconds
             self.positionChanged.emit()
+
+    @Slot(int)
+    def _on_sought(self, ticket: int) -> None:
+        self._seeking = max(0, self._seeking - 1)
 
     @Slot(bool)
     def _on_paused(self, paused: bool) -> None:
@@ -1630,11 +1744,12 @@ class Player(QObject):
             self._paused = paused
             self.changed.emit()
 
-    @Slot(str)
-    def _on_ended(self, path: str) -> None:
-        if path != self._requested:
+    @Slot(int)
+    def _on_ended(self, ticket: int) -> None:
+        if ticket != self._requested:
             return  # a song stopped for another
-        self._requested = ""
+        self._requested = 0
+        self._playing(None)
         self._on = False
         entry = self.queue.ended() if self._info is not None else None
         if entry is not None:
@@ -1642,17 +1757,23 @@ class Player(QObject):
         else:
             self._finish("ended")
 
-    @Slot(str)
-    def _on_stopped(self, path: str) -> None:
-        if path == self._requested:  # Stop, asked for
-            self._requested = ""
+    @Slot(int)
+    def _on_stopped(self, ticket: int) -> None:
+        if ticket == self._requested:  # Stop, asked for
+            self._requested = 0
+            self._playing(None)
             self._finish("stopped")
 
-    @Slot(str, str)
-    def _on_failed(self, path: str, why: str) -> None:
-        if path != self._requested:
+    @Slot(int, str)
+    def _on_failed(self, ticket: int, why: str) -> None:
+        if ticket in self._follows:  # the next song, failing as the device reached it
+            entry = self.queue.ended()
+            info = self._song(entry.song) if entry is not None else None
+            self._show(info, info.path if info is not None else "")
+        elif ticket != self._requested:
             return
-        self._requested = ""
+        self._requested = 0
+        self._playing(None)
         self._finish("failed", why)
 
     # ---------- what QML reads ----------
@@ -1706,6 +1827,9 @@ class Player(QObject):
     def _get_length_text(self) -> str:
         return time_text(self._length) if self._path and self._length else ""
 
+    def _get_seekable(self) -> bool:
+        return self._on and self._length > 0
+
     def _get_progress(self) -> float:
         return min(1.0, self._position / self._length) if self._length else 0.0
 
@@ -1745,6 +1869,7 @@ class Player(QObject):
     positionText = QtProperty(str, _get_position_text, notify=positionChanged)  # 1:38
     lengthText = QtProperty(str, _get_length_text, notify=changed)  # 4:18; "" when unknown
     progress = QtProperty(float, _get_progress, notify=positionChanged)  # 0 to 1
+    seekable = QtProperty(bool, _get_seekable, notify=changed)  # a song plays or is paused
     shuffle = QtProperty(bool, _get_shuffle, notify=queueChanged)
     repeat = QtProperty(str, _get_repeat, notify=queueChanged)  # off, all, one
     repeatName = QtProperty(str, _get_repeat_name, notify=queueChanged)  # Repeat all

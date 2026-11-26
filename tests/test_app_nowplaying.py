@@ -40,29 +40,59 @@ SONGS = [
 
 class FakeEngine(QObject):
     """The engine's signals and slots, playing nothing: a song begins as soon as it is asked
-    for, and ends, fails or moves when a test says so (`end`, `fail`, `move`)."""
+    for, and ends, fails, moves or joins the song told to follow when a test says so (`join`).
+    `ticket` is the song playing's, `follower` the ticket and path told to follow it (`told`, each
+    in turn)."""
 
-    began = Signal(str, float)
+    began = Signal(int, str, float)
+    joined = Signal(int, str, float)
     moved = Signal(float)
+    sought = Signal(int)
     pausedChanged = Signal(bool)
-    ended = Signal(str)
-    stopped = Signal(str)
-    failed = Signal(str, str)
+    ended = Signal(int)
+    stopped = Signal(int)
+    failed = Signal(int, str)
 
     def __init__(self):
         super().__init__()
         self.asked = []  # what it was asked, in order: ("play", path), ("pause",), …
         self.path = ""
+        self.ticket = 0
+        self.follower = (0, "")
+        self.told = []  # the songs told to follow, by file name ("" for nothing), in order
+        self.holding = False
 
     @Slot()
     def setup(self):
         pass
 
-    @Slot(str)
-    def play(self, path):
+    @Slot(str, int)
+    def play(self, path, ticket):
         self.asked.append(("play", path))
-        self.path = path
-        self.began.emit(path, 42.0)
+        self.path, self.ticket, self.follower = path, ticket, (0, "")
+        self.began.emit(ticket, path, 42.0)
+
+    @Slot(int, int, str)
+    def follow(self, after, ticket, path):
+        self.told.append(os.path.basename(path))
+        if after == self.ticket:
+            self.follower = (ticket, path)
+
+    def join(self):
+        """The device reaches the song told to follow."""
+        ticket, path = self.follower
+        self.path, self.ticket, self.follower = path, ticket, (0, "")
+        self.joined.emit(ticket, path, 42.0)
+
+    @Slot(int, float)
+    def seek(self, ticket, seconds):
+        """Says it is done at once, unless `holding`: then when the test says (`sought`)."""
+        self.asked.append(("seek", round(seconds, 3)))
+        if not self.holding:
+            self.sought.emit(ticket)
+
+    def seeks(self):
+        return [a[1] for a in self.asked if a[0] == "seek"]
 
     @Slot()
     def pause(self):
@@ -78,8 +108,8 @@ class FakeEngine(QObject):
     def stop(self):
         self.asked.append(("stop",))
         if self.path:
-            path, self.path = self.path, ""
-            self.stopped.emit(path)
+            self.path = ""
+            self.stopped.emit(self.ticket)
 
     @Slot(float)
     def set_volume(self, gain):
@@ -180,11 +210,11 @@ def test_a_song_that_ends_starts_the_next_until_the_queue_has_played_out(made, q
     p, engine, songs = made
     p.playFrom(songs, 2)
     wait_playing(qtbot, p, engine, 1)
-    engine.ended.emit(engine.path)
+    engine.ended.emit(engine.ticket)
     wait_playing(qtbot, p, engine, 2)
     assert engine.played() == ["03.flac", "Kindling.mp3"]
     assert p.property("title") == "Kindling" and p.property("line") == "Unknown artist"
-    engine.ended.emit(engine.path)
+    engine.ended.emit(engine.ticket)
     qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
     assert p.property("path") == "" and p.property("title") == "" and p.queue.current is None
     assert p.property("timeName") == "" and p.property("lengthText") == ""
@@ -194,7 +224,7 @@ def test_an_end_heard_after_another_song_was_asked_for_moves_nothing(made, qtbot
     p, engine, songs = made
     p.playFrom(songs, 0)
     wait_playing(qtbot, p, engine, 1)
-    first = engine.path
+    first = engine.ticket
     p.next()
     wait_playing(qtbot, p, engine, 2)
     engine.ended.emit(first)  # the first song's end, crossing the Next
@@ -203,6 +233,137 @@ def test_an_end_heard_after_another_song_was_asked_for_moves_nothing(made, qtbot
     qtbot.wait(50)  # the one fixed wait: nothing moves
     assert p.property("path") == "LD/GH/02.flac" and p.property("error") == ""
     assert engine.played() == ["01.flac", "02.flac"]
+
+
+# ---------- one song into the next (A4.2) and seeking (R7.4) ----------
+
+
+def test_the_engine_is_told_what_follows_and_told_again_when_the_queue_changes(made, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    qtbot.waitUntil(lambda: engine.told == ["02.flac"], timeout=WAIT)
+    p.cycleRepeat()  # All: the same song follows, so nothing is told
+    p.playNext(songs, 3)
+    qtbot.waitUntil(lambda: engine.told[-1] == "Kindling.mp3", timeout=WAIT)
+    p.toggleShuffle()  # the song added stays first
+    p.removeRow(1)  # Up next's ×, on the song added
+    qtbot.waitUntil(lambda: engine.told[-1] == "02.flac", timeout=WAIT)
+    p.cycleRepeat()  # One: the song follows itself
+    qtbot.waitUntil(lambda: engine.told[-1] == "01.flac", timeout=WAIT)
+    p.toggleUpNext()  # nothing that changes what follows
+    assert engine.told == ["02.flac", "Kindling.mp3", "02.flac", "01.flac"]
+    assert engine.follower[1].endswith("01.flac")
+
+
+def test_a_next_song_gone_or_out_of_reach_is_told_as_nothing_and_says_why_in_its_turn(made, qtbot):
+    p, engine, songs = made
+    p.refused["LD/GH/02.flac"] = "Its music folder isn't there"
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    qtbot.waitUntil(lambda: engine.told == [""], timeout=WAIT)
+    engine.ended.emit(engine.ticket)
+    qtbot.waitUntil(lambda: p.property("error") == "Its music folder isn't there", timeout=WAIT)
+    assert p.property("path") == "LD/GH/02.flac" and engine.played() == ["01.flac"]
+
+
+def test_a_song_outside_the_queue_has_nothing_told_to_follow_it(made, tmp_path, qtbot):
+    p, engine, _ = made
+    p.play("elsewhere.flac")  # not in the index: played as a file
+    qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+    assert engine.told == []
+
+
+def test_a_join_heard_moves_the_queue_the_bar_and_the_playing_row_not_a_new_play(
+    made, index, qtbot
+):
+    p, engine, songs = made
+    now = []
+    p.nowPlaying.connect(now.append)
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    engine.moved.emit(199.5)
+    qtbot.waitUntil(lambda: engine.told == ["02.flac"], timeout=WAIT)
+    engine.join()
+    assert p.property("path") == "LD/GH/02.flac" and p.property("title") == "Glass Harbor"
+    assert p.property("playing") and p.property("position") == 0 and p.property("length") == 42
+    assert [e.song for e in p.queue.played] == ids(index, "LD/GH/01.flac")
+    assert now == ["LD/GH/01.flac", "LD/GH/02.flac"] and engine.played() == ["01.flac"]
+    qtbot.waitUntil(lambda: engine.told == ["02.flac", "03.flac"], timeout=WAIT)
+    engine.ended.emit(engine.ticket)  # what was joined ends as any song does
+    wait_playing(qtbot, p, engine, 2)
+    assert engine.played() == ["01.flac", "03.flac"]
+
+
+def test_a_join_the_queue_changed_after_gives_way_to_what_the_queue_says(made, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    qtbot.waitUntil(lambda: engine.told == ["02.flac"], timeout=WAIT)
+    told_first = engine.follower
+    p.playNext(songs, 3)  # too late: the device has the first song told already
+    qtbot.waitUntil(lambda: engine.told[-1] == "Kindling.mp3", timeout=WAIT)
+    engine.joined.emit(told_first[0], told_first[1], 42.0)
+    wait_playing(qtbot, p, engine, 2)
+    assert engine.played() == ["01.flac", "Kindling.mp3"]
+    assert p.property("path") == "MO/Kindling.mp3"
+    engine.joined.emit(told_first[0], told_first[1], 42.0)  # again, and one never told: nothing
+    engine.joined.emit(999, "elsewhere.flac", 1.0)
+    qtbot.wait(50)  # the one fixed wait: nothing moves
+    assert p.property("path") == "MO/Kindling.mp3" and len(engine.played()) == 2
+
+
+def test_a_join_with_nothing_left_in_the_queue_stops(made, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 2)
+    wait_playing(qtbot, p, engine, 1)
+    qtbot.waitUntil(lambda: engine.told == ["Kindling.mp3"], timeout=WAIT)
+    told = engine.follower
+    p.removeRow(1)  # Kindling out of the queue, once the device had it
+    qtbot.waitUntil(lambda: engine.told[-1] == "", timeout=WAIT)
+    engine.joined.emit(told[0], told[1], 42.0)
+    qtbot.waitUntil(lambda: p.last == "ended" and ("stop",) in engine.asked, timeout=WAIT)
+    assert p.property("path") == ""
+
+
+def test_a_next_song_failing_as_the_device_reaches_it_is_shown_with_why(made, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    qtbot.waitUntil(lambda: engine.told == ["02.flac"], timeout=WAIT)
+    engine.failed.emit(engine.follower[0], "nothing in 02.flac decodes")
+    qtbot.waitUntil(lambda: p.last == "failed", timeout=WAIT)
+    assert p.property("path") == "LD/GH/02.flac" and p.property("playing") is False
+    assert p.property("error") == "nothing in 02.flac decodes"
+
+
+def test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there(made, qtbot):
+    p, engine, songs = made
+    p.cue([songs.queue_from(0)[0][0]], "Songs")
+    p.seek(10.0)  # a cued song doesn't move
+    assert engine.seeks() == [] and p.property("seekable") is False
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    assert p.property("seekable") is True
+    engine.holding = True
+    p.seek(10.0)
+    assert p.property("position") == 10.0 and p.property("positionText") == "0:10"
+    engine.moved.emit(1.0)  # from before the seek was done: passed over
+    qtbot.waitUntil(lambda: engine.seeks() == [10.0], timeout=WAIT)
+    assert p.property("position") == 10.0
+    engine.sought.emit(engine.ticket)
+    engine.moved.emit(10.1)
+    qtbot.waitUntil(lambda: p.property("position") == 10.1, timeout=WAIT)
+    engine.holding = False
+    p.seekAhead()
+    p.seekBack()
+    p.seekBack()
+    p.seekBack()
+    p.seekBack()  # not before the start
+    p.seekTo(0.5)
+    p.seekTo(3.0)  # not past the end
+    qtbot.waitUntil(lambda: len(engine.seeks()) == 8, timeout=WAIT)
+    assert engine.seeks() == [10.0, 15.1, 10.1, 5.1, 0.1, 0.0, 21.0, 42.0]
 
 
 def test_play_on_an_album_plays_it_from_its_first_song_and_shuffle_from_any(made, index, qtbot):
@@ -302,7 +463,7 @@ def test_shuffle_and_repeat_buttons_say_their_state(made, qtbot):
     assert p.property("repeat") == ONE and len(changed) == 3
     p.playFrom(songs, 0)
     wait_playing(qtbot, p, engine, 1)
-    engine.ended.emit(engine.path)  # repeat One: the same song again
+    engine.ended.emit(engine.ticket)  # repeat One: the same song again
     wait_playing(qtbot, p, engine, 2)
     assert engine.played() == ["01.flac", "01.flac"]
 
@@ -341,7 +502,7 @@ def test_a_song_that_fails_stays_cued_with_why(made, qtbot):
     p, engine, songs = made
     p.playFrom(songs, 0)
     wait_playing(qtbot, p, engine, 1)
-    engine.failed.emit(engine.path, "nothing in 01.flac decodes")
+    engine.failed.emit(engine.ticket, "nothing in 01.flac decodes")
     qtbot.waitUntil(lambda: p.last == "failed", timeout=WAIT)
     assert p.property("path") == "LD/GH/01.flac" and p.property("playing") is False
     assert p.property("line") == "nothing in 01.flac decodes"
@@ -502,6 +663,23 @@ def find(shell, name):
     return found[0]
 
 
+def find_all(shell, name):
+    found = []
+
+    def walk(item):
+        if item.objectName() == name:
+            found.append(item)
+        for child in item.childItems():
+            walk(child)
+
+    walk(shell.window.contentItem())
+    return found
+
+
+def type_of(item):
+    return item.metaObject().className() if item is not None else ""
+
+
 def click(shell, item, button=Qt.MouseButton.LeftButton):
     at = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
     QTest.mouseClick(shell.window, button, Qt.KeyboardModifier(0), at)
@@ -539,6 +717,59 @@ def test_the_bar_shows_the_song_and_its_buttons_play_it(shell, qtbot, qtlog):
     qtbot.waitUntil(lambda: not find(shell, "upNext").isVisible(), timeout=WAIT)
     assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
     assert layout.faults(shell.window) == []
+
+
+@pytest.mark.slow
+def test_the_seek_bar_seeks_where_it_is_clicked_and_dragged(shell, qtbot):
+    p, engine = shell.player, shell.engine_
+    p.go({"queue": "Glass Harbor"})
+    qtbot.waitExposed(shell.window)
+    bar = find(shell, "seekBar")
+    assert bar.property("enabled") is False  # cued: nothing to seek in
+    click(shell, find(shell, "playPause"))
+    qtbot.waitUntil(lambda: bar.property("enabled"), timeout=WAIT)
+    width = bar.width()
+
+    def at(fraction):
+        return bar.mapToScene(QPointF(fraction * width, bar.height() / 2)).toPoint()
+
+    QTest.mouseClick(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at(0.25))
+    qtbot.waitUntil(lambda: len(engine.seeks()) >= 1, timeout=WAIT)
+    assert engine.seeks()[-1] == pytest.approx(0.25 * 42, abs=1)
+    QTest.mousePress(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at(0.3))
+    for f in (0.4, 0.5, 0.6, 0.75):
+        QTest.mouseMove(shell.window, at(f))
+    QTest.mouseRelease(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at(0.75))
+    qtbot.waitUntil(lambda: engine.seeks()[-1] == pytest.approx(0.75 * 42, abs=1), timeout=WAIT)
+    assert p.property("progress") == pytest.approx(0.75, abs=0.03)
+    assert shell.window.activeFocusItem() is not bar  # it never takes the focus
+
+
+@pytest.mark.slow
+def test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them(shell, qtbot):
+    p, engine = shell.player, shell.engine_
+    p.go({"queue": "Glass Harbor"})
+    shell.library.show("songs")
+    qtbot.waitExposed(shell.window)
+    click(shell, find(shell, "playPause"))
+    qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+    QTest.keyClick(shell.window, Qt.Key.Key_Right)
+    QTest.keyClick(shell.window, Qt.Key.Key_Right)
+    QTest.keyClick(shell.window, Qt.Key.Key_Left)
+    qtbot.waitUntil(lambda: engine.seeks() == [5.0, 10.0, 5.0], timeout=WAIT)
+    QTest.keyClick(shell.window, Qt.Key.Key_Slash)  # the search box, typed in
+    qtbot.waitUntil(lambda: "TextField" in type_of(shell.window.activeFocusItem()), timeout=WAIT)
+    QTest.keyClick(shell.window, Qt.Key.Key_Left)
+    QTest.keyClick(shell.window, Qt.Key.Key_Escape)
+    shell.library.show("folders")  # a grid that moves its selection with them
+    qtbot.waitUntil(lambda: bool(find_all(shell, "foldersView")), timeout=WAIT)
+    find_all(shell, "foldersView")[0].forceActiveFocus()
+    QTest.keyClick(shell.window, Qt.Key.Key_Right)
+    volume = find(shell, "volume")
+    volume.forceActiveFocus()
+    QTest.keyClick(shell.window, Qt.Key.Key_Left)  # the volume, down
+    qtbot.waitUntil(lambda: p.property("volume") < 1.0, timeout=WAIT)
+    assert engine.seeks() == [5.0, 10.0, 5.0]
 
 
 @pytest.mark.slow

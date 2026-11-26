@@ -1,22 +1,27 @@
-"""The playback thread and the sound device (A4.1). `Engine` lives on a thread of its own, which
-runs its own event loop: it decodes a song a block at a time into the ring buffer
+"""The playback thread and the sound device (A4.1, A4.2, A4.6). `Engine` lives on a thread of its
+own, which runs its own event loop: it decodes songs a block at a time into the ring buffer
 (musikata_core.audio.stream) until two seconds are held, and a `QAudioSink` in pull mode, living
 on the same thread, reads the ring through `RingDevice` on the device's schedule. So a busy GUI
 thread or a slow disk never starves the device, and the device's pull only copies samples out
 (docs/process/coding.md, "Threads and processes").
 
+One song runs into the next in the same stream, the sink never stopped (A4.2): the GUI tells the
+engine what follows the song playing (`follow`), and the engine's `Feed`
+(musikata_core.audio.join) opens it ten seconds before the end and feeds its samples after the
+last ones. The engine says the next song began (`joined`) when the device has played up to its
+first sample, so the GUI changes then, not when it was decoded. A seek (A4.6) replaces what the
+ring holds with the song from the place sought.
+
 The GUI thread talks to the engine by queued signals only (the `Player` bridge, bridges.py), and
-hears back the same way. What opens a song and which device it plays on are given to the engine,
-so a test can hand in generated audio and Qt's device of its choice. The engine plays one song at a
-time; the queue (musikata_core.audio.queue) is the Player bridge's, which hands it the next song
-when one ends. Gapless joins, seeking, gain, the equalizer and devices that come and go are the
-rest of slice 4's (A4.2 to A4.6)."""
+hears back the same way; each song asked for carries a ticket of the bridge's, which comes back
+with what the engine says of it. What opens a song and which device it plays on are given to the
+engine, so a test can hand in generated audio and Qt's device of its choice. Gain, the equalizer
+and devices that come and go are the rest of slice 4's (A4.4 to A4.6)."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
-from typing import Protocol
+from collections.abc import Callable
 
 from PySide6.QtCore import (
     QCoreApplication,
@@ -34,7 +39,8 @@ from shiboken6 import Shiboken
 
 from musikata_core.audio import stream
 from musikata_core.audio.decode import DecodeError, Decoder
-from musikata_core.audio.stream import Block, Stream
+from musikata_core.audio.join import Feed, Playing, Song
+from musikata_core.audio.stream import Stream
 
 log = logging.getLogger(__name__)
 
@@ -43,33 +49,13 @@ NO_DEVICE = "there is no sound device"  # why a song failed when no device was t
 MOVED_STEP = 0.1  # the position is reported when it moves by this much (seconds)
 
 
-class Song(Protocol):
-    """A song open for playing, as `Decoder` is: its length, and its blocks at the device's rate
-    and channels."""
-
-    @property
-    def seconds(self) -> float | None: ...
-
-    def blocks(self, frames: int) -> Iterator[Block]: ...
-
-    def close(self) -> None: ...
-
-
-class DecodedSong:
-    """A song's file through PyAV (musikata_core.audio.decode)."""
+class DecodedSong(Decoder):
+    """A song's file through PyAV (musikata_core.audio.decode), opened as the engine opens a song:
+    in the device's channels, at the file's own rate, which the engine's feed resamples to the
+    device's."""
 
     def __init__(self, path: str, rate: int, channels: int) -> None:
-        self._decoder = Decoder(path, rate, channels)
-
-    @property
-    def seconds(self) -> float | None:
-        return self._decoder.info.seconds
-
-    def blocks(self, frames: int) -> Iterator[Block]:
-        return self._decoder.blocks(frames)
-
-    def close(self) -> None:
-        self._decoder.close()
+        super().__init__(path, channels)
 
 
 Opener = Callable[[str, int, int], Song]  # (path, rate, channels): raises DecodeError
@@ -123,15 +109,18 @@ class RingDevice(QIODevice):
 
 
 class Engine(QObject):
-    """One song at a time, on the playback thread: its slots are called there, by queued
-    signals, and what it says goes back the same way."""
+    """The songs playing, on the playback thread: its slots are called there, by queued signals,
+    and what it says goes back the same way, each song named by the ticket it was asked for
+    with."""
 
-    began = Signal(str, float)  # the path, its length in seconds (-1: unknown)
+    began = Signal(int, str, float)  # the ticket, the path, its length in seconds (-1: unknown)
+    joined = Signal(int, str, float)  # the next song began, the one before played to its end
     moved = Signal(float)  # where the song is, in what the device has played
+    sought = Signal(int)  # a seek asked for with this ticket was done, or couldn't be
     pausedChanged = Signal(bool)
-    ended = Signal(str)  # the path, played to its end
-    stopped = Signal(str)  # the path, stopped before its end
-    failed = Signal(str, str)  # the path, and why it couldn't play
+    ended = Signal(int)  # the ticket, played to its end with nothing after it
+    stopped = Signal(int)  # the ticket, stopped before its end
+    failed = Signal(int, str)  # the ticket, and why it couldn't play
 
     def __init__(
         self,
@@ -143,10 +132,7 @@ class Engine(QObject):
         self._timer: QTimer | None = None
         self._sink: QAudioSink | None = None
         self._io: RingDevice | None = None
-        self._stream: Stream | None = None
-        self._song: Song | None = None
-        self._blocks: Iterator[Block] | None = None
-        self._path = ""
+        self._feed: Feed | None = None
         self._paused = False
         self._reported = -1.0
         self._gain = 1.0  # the volume, as the sink's linear gain (R6.5)
@@ -160,38 +146,55 @@ class Engine(QObject):
 
     # ---------- what the GUI asks ----------
 
-    @Slot(str)
-    def play(self, path: str) -> None:
+    @Slot(str, int)
+    def play(self, path: str, ticket: int) -> None:
         """Plays the file at `path` from its start, in place of what was playing."""
         self._halt()
         device = self._output()
         if device.isNull():
-            self._failed(path, NO_DEVICE)
+            self._failed(ticket, path, NO_DEVICE)
             return
         fmt = output_format(device)
         rate, channels = fmt.sampleRate(), fmt.channelCount()
         try:
-            self._song = self._opener(path, rate, channels)
+            song = self._opener(path, rate, channels)
         except DecodeError as e:
-            self._failed(path, str(e))
+            self._failed(ticket, path, str(e))
             return
-        self._path = path
-        self._stream = Stream(rate, channels)
-        self._blocks = self._song.blocks(self._stream.block)
-        if not self._fill(self._stream.ring.capacity):  # the whole ring before the first pull
+        ring = Stream(rate, channels)
+        self._feed = Feed(ring, lambda p: self._opener(p, rate, channels))
+        self._feed.start(ticket, path, song)
+        if not self._fill(ring.ring.capacity):  # the whole ring before the first pull
             return
         self._sink = QAudioSink(device, fmt)
         self._sink.setVolume(self._gain)
         self._sink.setBufferSize(stream.frames_of(stream.DEVICE_SECONDS, rate) * 4 * channels)
-        self._io = RingDevice(self._stream)
+        self._io = RingDevice(ring)
         self._sink.start(self._io)
         if self._sink.error() != QtAudio.Error.NoError:
             self._fail(f"the sound device didn't open ({self._sink.error().name})")
             return
-        seconds = self._song.seconds
-        self.began.emit(path, -1.0 if seconds is None else seconds)
+        self.began.emit(ticket, path, self._length(song))
         assert self._timer is not None  # setup ran as the thread started
         self._timer.start()
+
+    @Slot(int, int, str)
+    def follow(self, after: int, ticket: int, path: str) -> None:
+        """The song asked for with `after` is to be followed by `path`, asked for with `ticket`
+        (0: by nothing), joined to it with no gap (A4.2)."""
+        if self._feed is not None:
+            self._feed.follow(after, ticket, path)
+
+    @Slot(int, float)
+    def seek(self, ticket: int, seconds: float) -> None:
+        """The song asked for with `ticket`, if the device plays it, goes on from `seconds`
+        (A4.6); says `sought` either way."""
+        if self._feed is not None:
+            frame = round(max(0.0, seconds) * self._feed.stream.rate)
+            if self._feed.seek(ticket, frame):
+                self._reported = -1.0
+                self._fill()
+        self.sought.emit(ticket)
 
     @Slot()
     def pause(self) -> None:
@@ -217,13 +220,13 @@ class Engine(QObject):
 
     @Slot()
     def stop(self) -> None:
-        path = self._path
-        if self._halt():
-            self.stopped.emit(path)
+        heard = self._feed.heard if self._feed is not None else None
+        if self._halt() and heard is not None:
+            self.stopped.emit(heard.ticket)
 
     @Slot()
     def shutdown(self) -> None:
-        """Before the thread ends: the song closed, the sink gone, and this object handed back
+        """Before the thread ends: the songs closed, the sink gone, and this object handed back
         to the GUI thread, so it is deleted there."""
         self._halt()
         if self._timer is not None:
@@ -235,29 +238,31 @@ class Engine(QObject):
 
     # ---------- the playback thread's own work ----------
 
+    @staticmethod
+    def _length(song: Song) -> float:
+        seconds = song.seconds
+        return -1.0 if seconds is None else seconds
+
     def _fill(self, step: int = stream.STEP_BLOCKS) -> bool:
         """Decodes as many blocks as the ring has room for, `step` at most. False when the song
-        failed (and has been stopped)."""
-        assert self._stream is not None and self._blocks is not None
-        for _ in range(self._stream.wants(step)):
-            try:
-                block = next(self._blocks)
-            except StopIteration:
-                self._stream.finish()
-                break
-            except DecodeError as e:
-                self._fail(str(e))
-                return False
-            except Exception as e:  # noqa: BLE001  (a decoder's own fault stops the song, not the thread)
-                log.exception("decoding %s failed", self._path)
-                self._fail(f"decoding failed ({type(e).__name__})")
-                return False
-            self._stream.feed(block)
+        playing failed (and has been stopped)."""
+        assert self._feed is not None
+        failure = self._feed.fill(step)
+        if failure is not None:
+            self._fail(failure.why, failure.ticket)
+            return False
         return True
+
+    def _heard(self) -> int:
+        """The place in the stream the device has played up to."""
+        assert self._sink is not None and self._feed is not None
+        ring = self._feed.stream
+        played = self._sink.processedUSecs() * ring.rate // 1_000_000
+        return min(played, ring.taken)
 
     @Slot()
     def _tick(self) -> None:
-        if self._sink is None or self._stream is None:
+        if self._sink is None or self._feed is None:
             return
         if not self._fill():
             return
@@ -265,32 +270,48 @@ class Engine(QObject):
         if error not in (QtAudio.Error.NoError, QtAudio.Error.UnderrunError):
             self._fail(f"the sound device stopped ({error.name})")
             return
-        position = self._sink.processedUSecs() / 1_000_000  # what the device has played
-        if abs(position - self._reported) >= MOVED_STEP:
-            self._reported = position
-            self.moved.emit(position)
+        ring = self._feed.stream
         # the end: every frame taken, and the device has played what it held (it goes idle when
         # it finds nothing more; suspended, it is only paused)
-        if self._stream.drained and self._sink.state() == QtAudio.State.IdleState:
-            path = self._path
+        end = ring.drained and self._sink.state() == QtAudio.State.IdleState
+        self._report(ring.taken if end else self._heard())
+        if end:
+            heard = self._feed.heard
+            assert heard is not None
             self._halt()
-            self.ended.emit(path)
+            self.ended.emit(heard.ticket)
 
-    def _fail(self, why: str) -> None:
-        path = self._path
+    def _report(self, frame: int) -> None:
+        """Says each song the device has reached by place `frame`, and where it is."""
+        assert self._feed is not None
+        reached: list[Playing] = self._feed.hear(frame)
+        for playing in reached:
+            self.joined.emit(playing.ticket, playing.path, self._length(playing.song))
+        position = self._feed.position(frame)
+        if reached or abs(position - self._reported) >= MOVED_STEP:
+            self._reported = position
+            self.moved.emit(position)
+
+    def _fail(self, why: str, ticket: int | None = None) -> None:
+        heard = self._feed.heard if self._feed is not None else None
+        path = heard.path if heard is not None else ""
+        if ticket is None:
+            ticket = heard.ticket if heard is not None else 0
+        elif self._feed is not None:
+            path = next((p.path for p in self._feed.flight if p.ticket == ticket), path)
         self._halt()
-        self._failed(path, why)
+        self._failed(ticket, path, why)
 
-    def _failed(self, path: str, why: str) -> None:
+    def _failed(self, ticket: int, path: str, why: str) -> None:
         """Says why a song couldn't play: in the log, and to the GUI (R14)."""
         log.warning("couldn't play %s: %s; nothing plays now", path, why)
-        self.failed.emit(path, why)
+        self.failed.emit(ticket, why)
 
     def _halt(self) -> bool:
         """Stops what plays, if anything, and lets go of it; whether something was playing."""
         if self._timer is not None:
             self._timer.stop()
-        was = bool(self._path)
+        was = self._feed is not None
         if self._sink is not None:
             self._sink.stop()
             Shiboken.delete(self._sink)
@@ -299,11 +320,9 @@ class Engine(QObject):
             self._io.close()
             Shiboken.delete(self._io)
             self._io = None
-        if self._song is not None:
-            self._song.close()
-            self._song = None
-        self._blocks = self._stream = None
-        self._path = ""
+        if self._feed is not None:
+            self._feed.close()
+            self._feed = None
         self._reported = -1.0
         if self._paused:
             self._paused = False

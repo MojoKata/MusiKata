@@ -5,8 +5,9 @@ import "."
 // The now-playing bar (R6.5, L01-albums), the full width along the bottom: on the left the song's
 // cover, title, artist and album and its rating (set there with slice 5, R10.2); in the centre
 // shuffle, previous, play/pause, next and repeat (R7.3), and under them the time played, the seek
-// bar and the length (a plain bar: the waveform is R11.2's, and dragging it seeks with seeking,
-// R7.4); on the right the queue button, which opens Up next (R7.2), and the volume. The sleep
+// bar and the length (a plain bar until R11.2's waveform; clicking or dragging it seeks there,
+// R7.4, and it never takes the focus, so ← and → seek whatever has it but a list or a box that
+// uses them); on the right the queue button, which opens Up next (R7.2), and the volume. The sleep
 // timer's moon (R7.10), the mini player's button (R15) and Now Playing's (R11.4) take their places
 // on the right with their slices. What each says is the player's.
 Rectangle {
@@ -183,28 +184,47 @@ Rectangle {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 11; features: { "tnum": 1 } }
     }
-    Item {
+    Slider {
         id: seek
         objectName: "seekBar"
         anchors.horizontalCenter: parent.horizontalCenter
         y: 56
         width: Math.min(460, Math.max(160, bar.width - 2 * 400))
         height: 16
-        Accessible.role: Accessible.ProgressBar
+        padding: 0
+        from: 0
+        to: 1
+        value: bar.player.progress
+        enabled: bar.player.seekable
+        focusPolicy: Qt.NoFocus
+        onMoved: bar.player.seekTo(value)
         Accessible.name: bar.player.timeName
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width
-            height: 4
-            radius: 2
-            color: Theme.borderStrong
+        background: Item {
+            width: seek.width
+            height: seek.height
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                height: 4
+                radius: 2
+                color: Theme.borderStrong
+            }
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: seek.visualPosition * parent.width
+                height: 4
+                radius: 2
+                color: Theme.cell
+            }
         }
-        Rectangle {
+        handle: Rectangle {
+            x: seek.visualPosition * (seek.width - width)
             anchors.verticalCenter: parent.verticalCenter
-            width: parent.width * bar.player.progress
-            height: 4
-            radius: 2
-            color: Theme.cell
+            width: 12
+            height: 12
+            radius: 6
+            color: Theme.text
+            visible: seek.enabled && (seek.hovered || seek.pressed)
         }
     }
     Text {
@@ -249,6 +269,8 @@ Rectangle {
             value: bar.player.volume
             onMoved: bar.player.setVolume(value)
             Accessible.name: qsTr("Volume")
+            // focused, it keeps ← and → for itself rather than seek (R6.9)
+            Keys.onShortcutOverride: (event) => event.accepted = event.key === Qt.Key_Left || event.key === Qt.Key_Right
             background: Item {
                 x: volume.leftPadding
                 width: volume.availableWidth

@@ -286,11 +286,11 @@ def outcome(last: str, error: str, scan: object, decoded: float | None = None) -
 
 
 def decode_through(path: str, opener: Opener = DecodedSong) -> float:
-    """Decodes the file at `path` to its end, as playing it would, at the fallback rate in stereo;
-    the seconds it held. Raises DecodeError when it can't."""
+    """Decodes the file at `path` to its end, as playing it would, in stereo; the seconds it
+    held. Raises DecodeError when it can't."""
     song = opener(path, FALLBACK_RATE, 2)
     try:
-        return sum(len(block) for block in song.blocks(4096)) / FALLBACK_RATE
+        return sum(len(block) for block in song.blocks(4096)) / song.rate
     finally:
         song.close()
 

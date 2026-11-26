@@ -152,3 +152,18 @@ A table row is traced whole, its cells as written.
 | R7.3 | Shuffle plays the queue in a random order without repeating a song until all have played | test_shuffle_plays_every_song_once_before_any_plays_again, test_a_seeded_shuffle_gives_the_same_order_every_time, test_shuffle_keeps_the_songs_added_first_and_off_puts_the_rest_back_in_order, test_a_shuffled_lap_with_repeat_all_never_starts_with_the_song_that_just_ended, test_shuffled_play_of_a_list_starts_from_the_song_chosen_or_one_at_random, test_shuffle_and_repeat_buttons_say_their_state, test_the_bar_shows_the_song_and_its_buttons_play_it |
 | R7.3 | Repeat cycles Off, All and One | test_repeat_cycles_off_all_one_and_off, test_repeat_all_plays_the_queue_again_from_its_start, test_repeat_one_plays_the_song_again_when_it_ends_and_next_still_moves_on, test_shuffle_and_repeat_buttons_say_their_state, test_the_bar_shows_the_song_and_its_buttons_play_it |
 | R7.3 | Both are kept across restarts | later: #0 |
+
+## 7.4. Seeking
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #0 |
+
+## 7.6. Between songs
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.6 | Playback is gapless | test_a_song_runs_into_the_next_with_no_frame_lost_or_added, test_any_songs_join_frame_for_frame_whatever_the_device_reads, test_songs_of_one_rate_join_as_if_they_were_one_song, test_songs_of_the_queue_join_in_one_stream_the_sink_never_stopped, test_a_next_song_changed_before_the_device_reached_it_is_replaced_with_no_gap, test_a_seek_into_the_last_seconds_opens_the_next_song_and_joins_it, test_an_mp3s_start_delay_and_end_padding_from_its_lame_header_are_left_out, test_an_aac_files_priming_and_padding_from_its_itunsmpb_tag_are_left_out, test_an_aac_files_priming_and_padding_from_its_edit_list_are_left_out |
+| R7.6 | This holds across songs of different sample rates and kinds | test_songs_of_other_rates_and_channels_join_each_at_its_exact_length, test_each_kind_decodes_to_its_length_and_pitch_at_the_devices_rate, test_an_opus_files_pre_skip_and_end_are_left_out |
+| R7.6 | Crossfading is | statement |
+| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | later: #0 |
