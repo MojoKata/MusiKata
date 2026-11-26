@@ -102,13 +102,13 @@ class Gh:
         if args[:2] == ["run", "view"] and "--json" in args:
             coverage = "failure" if int(args[2]) in self.unmeasured else "success"
             jobs = [
-                {"name": "pages", "conclusion": "failure"},
-                {"name": "coverage", "conclusion": coverage},
+                {"name": "pages", "conclusion": "failure", "databaseId": 90},
+                {"name": "coverage", "conclusion": coverage, "databaseId": 100 + int(args[2])},
             ]
             return json.dumps({"jobs": jobs})
-        if args[:2] == ["run", "view"]:
-            body = MASTER if args[2] == "1" else BRANCH
-            return "tier1\tRun\tt | library | 1 | 1.0% | 1 of 100 | 1.0% | 1 of 100 |\n" + log(body)
+        if args[:3] == ["run", "view", "--job"]:  # the coverage job's log alone
+            body = MASTER if args[3] == "101" else BRANCH
+            return log(body)
         raise AssertionError(args)
 
 
@@ -119,7 +119,9 @@ def test_for_a_pr_it_compares_masters_last_green_run_with_the_pr_heads(capsys):
     assert out.startswith(
         "Before: master at aaaaaaaa (run 1). After: this branch at bbbbbbbb (run 2).\n\n| Area"
     )
-    assert "| library | 97.2% / 93.2% |" in out  # the coverage job's row, not tier 1's
+    assert "| library | 97.2% / 93.2% |" in out
+    # each run's coverage job's own log, not the run's: a job cancelled unstarted has none
+    assert ["run", "view", "--job", "101", "--repo", ci.REPO, "--log"] in fake.calls
     listed = [c for c in fake.calls if c[:2] == ["run", "list"]]
     assert listed[1][-2:] == ["--commit", "b" * 40] and "completed" in listed[0]
 
@@ -146,8 +148,11 @@ def test_no_green_run_or_no_table_stops_it_saying_why():
         ci.main(["--pr", "44"], gh=Gh(master_runs=[]))
     with pytest.raises(SystemExit, match="whose coverage job passed"):
         ci.main(["--pr", "44"], gh=Gh(unmeasured={1}))
+    fake = Gh()
     with pytest.raises(SystemExit, match="no coverage table"):
-        ci.run_areas(lambda args: "coverage\tRun\tt nothing here\n", "3")
+        ci.run_areas(lambda a: fake(a) if "--json" in a else "coverage\tRun\tt none\n", "3")
+    with pytest.raises(SystemExit, match="coverage job didn't pass"):
+        ci.main(["1", "2"], gh=Gh(unmeasured={2}))  # a run given by id whose job failed
 
 
 def test_it_wants_a_pr_or_two_runs():

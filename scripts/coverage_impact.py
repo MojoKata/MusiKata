@@ -117,11 +117,16 @@ def gh(args: list[str]) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
 
-def _measured(gh: Gh, run: int) -> bool:
-    """Whether the run's coverage job passed: what the table needs, whatever else failed (a
-    Pages deploy GitHub couldn't finish fails master's run, with its coverage measured)."""
+def _coverage_job(gh: Gh, run: int | str) -> str | None:
+    """The id of the run's coverage job when it passed: what the table needs, whatever else
+    failed (a Pages deploy GitHub couldn't finish, a build that never got a runner)."""
     jobs = json.loads(gh(["run", "view", str(run), "--repo", REPO, "--json", "jobs"]))["jobs"]
-    return any(j["name"] == JOB and j["conclusion"] == "success" for j in jobs)
+    passed = [j for j in jobs if j["name"] == JOB and j["conclusion"] == "success"]
+    return str(passed[0]["databaseId"]) if passed else None
+
+
+def _measured(gh: Gh, run: int) -> bool:
+    return _coverage_job(gh, run) is not None
 
 
 def _green(gh: Gh, filters: list[str]) -> dict[str, str]:
@@ -163,8 +168,12 @@ def runs_for_pr(gh: Gh, pr: int) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def run_areas(gh: Gh, run: str) -> dict[str, Area]:
-    """The areas the run's coverage job measured, from its log."""
-    log = gh(["run", "view", run, "--repo", REPO, "--log"])
+    """The areas the run's coverage job measured, from that job's log alone (a run's whole log
+    can't be had while one of its jobs has none, as one cancelled before it started)."""
+    job = _coverage_job(gh, run)
+    if job is None:
+        raise SystemExit(f"coverage_impact: run {run}'s {JOB} job didn't pass")
+    log = gh(["run", "view", "--job", job, "--repo", REPO, "--log"])
     found = areas("\n".join(line for line in log.splitlines() if line.startswith(JOB + "\t")))
     if not found:
         raise SystemExit(f"coverage_impact: run {run} has no coverage table in its {JOB} job")
