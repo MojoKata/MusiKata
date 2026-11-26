@@ -21,7 +21,8 @@ from shiboken6 import Shiboken
 from musikata_core import __version__, db, roots, workers
 from musikata_core.clock import Clock, SystemClock
 
-from .bridges import Library
+from .bridges import Library, Player
+from .player import Engine
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
 
@@ -63,13 +64,15 @@ class Shell:
     engine: QQmlApplicationEngine
     window: QQuickWindow
     library: Library
+    player: Player
     index: db.Index
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
-        scan's thread and the index."""
+        playback thread, the scan's thread and the index."""
         self.window.close()
         Shiboken.delete(self.engine)
+        self.player.close()
         self.library.wait()
         self.index.close()
 
@@ -79,17 +82,21 @@ def load(
     env: Mapping[str, str],
     clock: Clock,
     pool: Callable[[], Executor] = workers.pool,
+    playback: Callable[[], Engine] = Engine,
 ) -> Shell:
-    """The window over the root's index, not yet shown."""
+    """The window over the root's index, not yet shown. `playback` makes the playback thread's
+    engine (a test's plays generated audio on a device it chooses)."""
     index = open_index(root, env, clock)
     library = Library(root, index, home_of(env), pool)
+    player = Player(root, playback())
+    player.nowPlaying.connect(library.show_playing)
     engine = QQmlApplicationEngine()
-    engine.setInitialProperties({"library": library})
+    engine.setInitialProperties({"library": library, "player": player})
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
         raise RuntimeError(f"{QML} didn't load")
-    return Shell(engine, objects[0], library, index)
+    return Shell(engine, objects[0], library, player, index)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

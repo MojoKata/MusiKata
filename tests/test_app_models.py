@@ -64,7 +64,7 @@ def test_the_roles_give_each_field_as_text_genres_joined_in_their_order(index):
     got = {n: m.data(at, r) for n, r in names.items()}
     assert got == {"title": "Neap Tide", "artist": "Lumen Drift", "album": "Tide Tables",
                    "genre": "Electronic; Ambient", "year": "2022", "track": "7", "rating": 4,
-                   "time": "4:18", "path": "a.flac"}  # fmt: skip
+                   "time": "4:18", "path": "a.flac", "playing": False}  # fmt: skip
     assert m.data(at, int(Qt.ItemDataRole.DisplayRole)) is None
     assert m.data(m.index(5, 0), names["title"]) is None
     assert m.rowCount(at) == 0 and m.row(-1) is None

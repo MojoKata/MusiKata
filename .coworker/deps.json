@@ -119,6 +119,12 @@
       "platform": "rocky-10*",
       "min": "0.3.10",
       "why": "libxcb-render-util.so.0: Qt's xcb platform plugin; Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
+    },
+    {
+      "package": "pulseaudio-libs",
+      "platform": "rocky-10*",
+      "min": "17.0",
+      "why": "libpulse.so.0, which Qt Multimedia links: playback (QAudioSink, A4.1); Qt (PySide6 in .venv) loads it: running MusiKata from source and its Qt tests in .venv (docs/process/development.md)"
     }
   ],
   "network": [

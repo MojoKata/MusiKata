@@ -35,10 +35,16 @@ export FAKETIME MUSIKATA_TZ="${MUSIKATA_TZ:-}" MUSIKATA_COVERAGE="${MUSIKATA_COV
 OUT="$HERE/build/tier1"
 mkdir -p "$OUT"
 [ -z "$MUSIKATA_COVERAGE" ] || { rm -rf "$OUT/coverage" && mkdir "$OUT/coverage"; }
+# The sound device the playback tests play into (docs/process/testing.md, "What tier 1 covers"):
+# PulseAudio with a null sink and nothing else, as there is no sound card, started before the
+# clock is moved and ended with the container. norewinds: without it the null sink sleeps up to two
+# seconds before each new stream plays.
 exec docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e QT_QPA_PLATFORM=offscreen -e PYTHONDONTWRITEBYTECODE=1 \
     -e MUSIKATA_SKIPS="${MUSIKATA_SKIPS-tier1}" -e FAKETIME -e MUSIKATA_TZ -e MUSIKATA_COVERAGE \
     -v "$HERE:/src:ro" -v "$SITE:/site:ro" -v "$OUT:/out" "$IMG" sh -c \
-    'if [ -n "$FAKETIME" ]; then export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1; else unset FAKETIME; fi
+    'export XDG_RUNTIME_DIR="$(mktemp -d)" && pulseaudio --daemonize=yes -n --exit-idle-time=-1 --use-pid-file=no --log-level=error \
+        --load=module-native-protocol-unix --load="module-null-sink sink_name=musikata_null norewinds=1" || exit 1
+    if [ -n "$FAKETIME" ]; then export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1; else unset FAKETIME; fi
     if [ -n "$MUSIKATA_TZ" ]; then export TZ="$MUSIKATA_TZ"; fi
     run="-m pytest"
     if [ -n "$MUSIKATA_COVERAGE" ]; then run="-m coverage run -m pytest" && export COVERAGE_FILE=/out/coverage/.coverage; fi

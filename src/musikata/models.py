@@ -2,7 +2,8 @@
 view, so QML never holds the whole library; sorting is SQL, not a proxy model.
 
 What a row shows is decided here, as text (`docs/process/coding.md`: QML only lays out and binds):
-the title, or the file's name when the song has none; the genres joined; the length as m:ss."""
+the title, or the file's name when the song has none; the genres joined; the length as m:ss; and
+whether it is the song playing."""
 
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ KEEP = 16  # pages held; the one read longest ago goes first
 # what a row of the Songs list holds, in the roles' order
 COLUMNS = ("title", "artist", "album", "genre", "year", "track", "rating", "time", "path")
 ROLES = {int(Qt.ItemDataRole.UserRole) + i: name for i, name in enumerate(COLUMNS)}
+PLAYING = int(Qt.ItemDataRole.UserRole) + len(COLUMNS)  # the role: whether it's the song playing
 
 # the Songs list's orders (R2.6): by album artist, then album, disc and track, so an album's songs
 # stay together; by title. A missing value sorts last, and case doesn't count.
@@ -94,6 +96,7 @@ class SongsModel(QAbstractListModel):
         self._read = read
         self._sort = sort
         self._count = 0
+        self._playing = ""  # the path of the song playing
         self._pages: OrderedDict[int, list[dict[str, Any]]] = OrderedDict()
         self.pages_read = 0  # how many times a page was read: what the paging saves, for tests
 
@@ -110,6 +113,14 @@ class SongsModel(QAbstractListModel):
             raise ValueError(f"no such order: {sort}")
         self._sort = sort
         self.reload()
+
+    def set_playing(self, path: str) -> None:
+        """Marks the song at `path` as the one playing ("": none), for the rows that show it."""
+        if path == self._playing:
+            return
+        self._playing = path
+        if self._count:
+            self.dataChanged.emit(self.index(0), self.index(self._count - 1), [PLAYING])
 
     def row(self, n: int) -> dict[str, Any] | None:
         """Row n, reading its page when it isn't held."""
@@ -135,12 +146,15 @@ class SongsModel(QAbstractListModel):
         return 0 if parent.isValid() else self._count
 
     def roleNames(self) -> dict[int, QByteArray]:
-        return {k: QByteArray(v.encode()) for k, v in ROLES.items()}
+        names = {k: QByteArray(v.encode()) for k, v in ROLES.items()}
+        return names | {PLAYING: QByteArray(b"playing")}
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role: int = 0) -> Any:
-        name = ROLES.get(role)
+        name = "path" if role == PLAYING else ROLES.get(role)
         row = self.row(index.row()) if name else None
-        return None if row is None or name is None else row[name]
+        if row is None or name is None:
+            return None
+        return row["path"] == self._playing if role == PLAYING else row[name]
 
     def _get_count(self) -> int:
         return self._count

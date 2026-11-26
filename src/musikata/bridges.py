@@ -1,6 +1,6 @@
 """The objects QML sees (A1.2). `Library`: the root, its card's line, the Songs list, and the scan,
-run on a thread of its own with the worker processes reading the files (A1.3, A2.2). `Player` comes
-with playback (A4).
+run on a thread of its own with the worker processes reading the files (A1.3, A2.2). `Player`: the
+song playing, played on the playback thread (player.py, A4.1).
 
 What the root's card says is decided here, as text (`docs/process/coding.md`: QML only lays out and
 binds)."""
@@ -20,6 +20,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from musikata_core import db, scanner, workers
 
 from .models import SongsModel
+from .player import Engine, PlaybackThread
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +134,11 @@ class Library(QObject):
         self.scanningChanged.emit()
         self.changed.emit()
 
+    @Slot(str)
+    def show_playing(self, path: str) -> None:
+        """Marks the song at `path` as playing in the Songs list ("": none)."""
+        self._songs.set_playing(path)
+
     def wait(self) -> None:
         """Until the scan's thread has ended (its result still to be delivered): for closing."""
         if self._thread is not None:
@@ -168,3 +174,138 @@ class Library(QObject):
     line = QtProperty(str, _get_line, notify=changed)
     countText = QtProperty(str, _get_count_text, notify=changed)
     emptyText = QtProperty(str, _get_empty_text, notify=changed)  # what the Songs list says
+
+
+class Player(QObject):
+    """The song playing, as QML sees it: its path under the root, whether it plays or is paused,
+    where it is and how long it is, and why the last one couldn't play. The engine does the work
+    on the playback thread (player.py); the two hear each other only by queued signals, so
+    nothing here waits on it. The thread starts with the first song."""
+
+    changed = Signal()  # the path, playing, paused, the length, the error
+    positionChanged = Signal()
+    nowPlaying = Signal(str)  # the path of the song playing now, "" when none
+    _play = Signal(str)
+    _pause = Signal()
+    _resume = Signal()
+    _stop = Signal()
+
+    def __init__(
+        self, root: str, engine: Engine | None = None, parent: QObject | None = None
+    ) -> None:
+        super().__init__(parent)
+        self._root = root
+        self._engine = engine if engine is not None else Engine()
+        self._thread = PlaybackThread(self._engine)
+        self._started = False
+        self._path = ""
+        self._paused = False
+        self._position = self._length = 0.0
+        self._error = ""
+        self.last = ""  # how the last song stopped: "ended", "stopped" or "failed"
+        self._play.connect(self._engine.play)
+        self._pause.connect(self._engine.pause)
+        self._resume.connect(self._engine.resume)
+        self._stop.connect(self._engine.stop)
+        self._engine.began.connect(self._on_began)
+        self._engine.moved.connect(self._on_moved)
+        self._engine.pausedChanged.connect(self._on_paused)
+        self._engine.ended.connect(self._on_ended)
+        self._engine.stopped.connect(self._on_stopped)
+        self._engine.failed.connect(self._on_failed)
+
+    def _under_root(self, path: str) -> str:
+        return os.path.relpath(path, self._root).replace(os.sep, "/")
+
+    # ---------- what QML asks ----------
+
+    @Slot(str)
+    def play(self, path: str) -> None:
+        """Plays the song at `path` under the root (the index's path) from its start (R7.1)."""
+        if not self._started:
+            self._thread.start()
+            self._started = True
+        self._play.emit(os.path.join(self._root, *path.split("/")))
+
+    @Slot()
+    def pause(self) -> None:
+        self._pause.emit()
+
+    @Slot()
+    def resume(self) -> None:
+        self._resume.emit()
+
+    @Slot()
+    def stop(self) -> None:
+        self._stop.emit()
+
+    def close(self) -> None:
+        """Stops the song and ends the playback thread: for closing."""
+        self._thread.close()
+
+    # ---------- what the engine says ----------
+
+    @Slot(str, float)
+    def _on_began(self, path: str, length: float) -> None:
+        self._path, self._paused, self._error = self._under_root(path), False, ""
+        self._length, self._position = max(0.0, length), 0.0
+        self.changed.emit()
+        self.positionChanged.emit()
+        self.nowPlaying.emit(self._path)
+
+    @Slot(float)
+    def _on_moved(self, seconds: float) -> None:
+        self._position = seconds
+        self.positionChanged.emit()
+
+    @Slot(bool)
+    def _on_paused(self, paused: bool) -> None:
+        self._paused = paused
+        self.changed.emit()
+
+    def _done(self, how: str, error: str = "") -> None:
+        self.last, self._error = how, error
+        self._path, self._paused = "", False
+        self._position = self._length = 0.0
+        self.changed.emit()
+        self.positionChanged.emit()
+        self.nowPlaying.emit("")
+
+    @Slot(str)
+    def _on_ended(self, path: str) -> None:
+        self._done("ended")
+
+    @Slot(str)
+    def _on_stopped(self, path: str) -> None:
+        self._done("stopped")
+
+    @Slot(str, str)
+    def _on_failed(self, path: str, why: str) -> None:
+        self._done("failed", why)
+
+    # ---------- what QML reads ----------
+
+    def _get_path(self) -> str:
+        return self._path
+
+    def _get_playing(self) -> bool:
+        return bool(self._path) and not self._paused
+
+    def _get_paused(self) -> bool:
+        return self._paused
+
+    def _get_position(self) -> float:
+        return self._position
+
+    def _get_length(self) -> float:
+        return self._length
+
+    def _get_error(self) -> str:
+        return self._error
+
+    path = QtProperty(str, _get_path, notify=changed)  # the song's path under the root; "": none
+    playing = QtProperty(bool, _get_playing, notify=changed)  # a song plays, not paused
+    paused = QtProperty(bool, _get_paused, notify=changed)
+    position = QtProperty(float, _get_position, notify=positionChanged)  # seconds
+    length = QtProperty(float, _get_length, notify=changed)  # seconds; 0 when unknown
+    error = QtProperty(str, _get_error, notify=changed)  # why the last song couldn't play

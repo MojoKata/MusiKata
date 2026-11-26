@@ -2,11 +2,13 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "."
 
-// Songs (R2.6): every song of the library, paged from the index as it scrolls (A1.5). Its search,
-// sort and selection come with slice 3, the Edit tags panel with slice 5 (L03-songs-bulk-edit).
+// Songs (R2.6): every song of the library, paged from the index as it scrolls (A1.5); a double
+// click plays a song (R7.1). Its search, sort and selection come with slice 3, the queue with
+// slice 4, the Edit tags panel with slice 5 (L03-songs-bulk-edit).
 Item {
     id: view
     required property var library
+    required property var player
 
     Text {
         id: title
@@ -77,7 +79,11 @@ Item {
             reuseItems: true
             boundsBehavior: Flickable.StopAtBounds
             model: view.library.songs
-            delegate: SongRow { width: list.width; columns: table.columns }
+            delegate: SongRow {
+                width: list.width
+                columns: table.columns
+                onActivated: view.player.play(path)
+            }
             ScrollBar.vertical: ScrollBar { }
         }
         Text {
