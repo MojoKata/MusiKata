@@ -7,7 +7,8 @@ folder (R1.5) under its name, a hash of the cover's path, size and modification 
 (musikata_core.art.thumb_id): a changed cover is a new name. A cover that can't be read, or isn't
 an image Qt can decode, gives an empty image, which the views show as no cover (R5.7), and the App
 log says which. A thumbnail's cover is found by its name in the album rows, else in the folder rows
-(a folder's own cover, R5.8).
+(a folder's own cover, R5.8), else among the songs on no album whose covers make a folder's mosaic
+(folders.loose_cover).
 
 A folder's mosaic (R5.8, A2.7) is `image://covers/mosaic/<name>+<name>…`, its pieces' thumbnails by
 name: drawn with QPainter from those thumbnails at the size asked for, each a centre crop in R5.8's
@@ -138,6 +139,8 @@ class Covers(QQuickImageProvider):
                 "SELECT cover_kind, cover FROM folder WHERE thumb = ? LIMIT 1", (name,)
             ).fetchone()
         )
+        if row is None and (song := folders.loose_cover(c, name)) is not None:
+            row = ("embedded", song)  # a mosaic's piece from a song on no album (R5.8)
         if row is None:
             return QImage()
         data = self._source(*row)

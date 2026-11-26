@@ -165,6 +165,43 @@ def _image(
     return (f"{path}/{found.name}" if path else found.name, found.size, found.mtime_ns)
 
 
+def embedded_covers(c: sqlite3.Connection, path: str) -> list[tuple[str, str]]:
+    """The front covers embedded in a folder's own songs (R5.8), each by its thumbnail's name and
+    the song it is in, in name order: an album's cover once for its songs here (its row's, which
+    the songs of an album share), and each of the songs on no album its own."""
+    found = [
+        (str(key), str(song), str(thumb))
+        for thumb, song, key in c.execute(
+            "SELECT album.thumb, min(song.path), min(song.name_key) FROM song"
+            " JOIN album ON album.id = song.album_id WHERE song.folder = ? AND song.has_cover"
+            " AND album.cover_kind = 'embedded' AND album.thumb IS NOT NULL GROUP BY album.thumb",
+            (path,),
+        )
+    ]
+    found += [
+        (str(key), str(song), art.thumb_id(song, size, mtime_ns))
+        for song, size, mtime_ns, key in c.execute(
+            "SELECT path, size, mtime_ns, name_key FROM song"
+            " WHERE folder = ? AND has_cover AND album_id IS NULL",
+            (path,),
+        )
+    ]
+    return [(thumb, song) for _key, song, thumb in sorted(found)]
+
+
+def loose_cover(c: sqlite3.Connection, thumb: str) -> str | None:
+    """The song on no album whose embedded cover has the thumbnail `thumb`, found through the
+    folders whose mosaics hold it (`embedded_covers`); None when none has."""
+    for song, size, mtime_ns in c.execute(
+        "SELECT song.path, song.size, song.mtime_ns FROM folder JOIN song ON song.folder ="
+        " folder.path WHERE instr(folder.mosaic, ?) AND song.has_cover AND song.album_id IS NULL",
+        (thumb,),
+    ):
+        if art.thumb_id(song, size, mtime_ns) == thumb:
+            return str(song)
+    return None
+
+
 def refresh_one(
     c: sqlite3.Connection, path: str, images: Mapping[str, Sequence[art.Image]] | None = None
 ) -> None:
@@ -181,16 +218,10 @@ def refresh_one(
     if not songs and not children:
         c.execute("DELETE FROM folder WHERE path = ?", (path,))
         return
-    embedded = c.execute(
-        "SELECT album.thumb, min(song.path) FROM song JOIN album ON album.id = song.album_id"
-        " WHERE song.folder = ? AND song.has_cover AND album.cover_kind = 'embedded'"
-        " AND album.thumb IS NOT NULL GROUP BY album.thumb ORDER BY min(song.name_key), 2",
-        (path,),
-    ).fetchall()
     image = _image(c, path, images)
     shown = picture(
         image,
-        [(str(t), str(s)) for t, s in embedded],
+        embedded_covers(c, path),
         [Child(r[0], r[1], r[2], r[8], tuple((r[9] or "").split())) for r in children],
     )
     row = {

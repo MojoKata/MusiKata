@@ -507,6 +507,7 @@ def write_batch(
         written.append(song_id)
     search.index_songs(c, written)
     albums.refresh(c, touched, images)
+    places |= albums.folders_of(c, touched.albums)  # an album's cover changed through another
     folders.refresh(c, places, images)
     return res
 
@@ -603,6 +604,7 @@ def _remove(
     c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
     albums.refresh(c, touched, images)
     places = {albums.folder_of(p) for p in [*remove, *taken, *taken.values()]}
+    places |= albums.folders_of(c, touched.albums)
     if images is not None:
         albums.refresh_folders(c, images)  # covers added or changed beside unchanged songs
         places |= set(folders.stale_images(c, images))

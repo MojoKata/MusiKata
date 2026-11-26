@@ -249,6 +249,19 @@ def place(c: sqlite3.Connection, song_id: int, touched: Touched) -> None:
     )
 
 
+def folders_of(c: sqlite3.Connection, album_ids: Iterable[int]) -> set[str]:
+    """The folders the songs of these albums are in: what an album's row shows (its cover) is
+    shown by each of them (A2.7)."""
+    ids = sorted(album_ids)
+    found: set[str] = set()
+    for i in range(0, len(ids), 500):
+        chunk = ids[i : i + 500]
+        marks = ", ".join("?" * len(chunk))
+        sql = f"SELECT DISTINCT folder FROM song WHERE album_id IN ({marks})"
+        found.update(str(f) for (f,) in c.execute(sql, chunk))
+    return found
+
+
 def forget(c: sqlite3.Connection, paths: Iterable[str], touched: Touched) -> None:
     """Notes the albums and artists of songs about to be removed, in `touched`."""
     for p in paths:

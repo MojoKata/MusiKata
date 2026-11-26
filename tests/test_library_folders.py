@@ -223,6 +223,39 @@ def test_a_folders_songs_sharing_an_embedded_cover_give_it_theirs(index):
     assert row(index, "S", "thumb, mosaic") == (None, " ".join(singles))  # a.mp3's first
 
 
+def test_an_album_changed_through_another_folder_brings_each_of_its_folders_up_to_date(index):
+    """A folder shows its album's cover, which can come from a song in another folder (an album
+    over Disc 1 and Disc 2): a change there changes what this folder shows (A2.7)."""
+    disc = [{"path": f"X/Disc {n}/1.m4a", "album": "Velvet Hours", "albumartist": "J",
+             "disc": n, "has_cover": True} for n in (1, 2)]  # fmt: skip
+    fill(index, disc)
+    c = index.read()
+
+    def album_thumb():
+        return c.execute("SELECT thumb FROM album").fetchone()[0]
+
+    assert row(index, "X/Disc 2", "thumb") == (album_thumb(),)
+    fill(index, [{**disc[0], "size": 2000}])  # its cover's song, changed
+    assert album_thumb() == art.thumb_id("X/Disc 1/1.m4a", 2000, 1)
+    assert row(index, "X/Disc 2", "thumb") == (album_thumb(),)
+
+
+def test_loose_songs_on_no_album_give_their_folder_their_embedded_covers(index):
+    """R5.8: a folder's cover is the front cover embedded in its songs when they share one, and
+    loose songs whose covers differ make a mosaic, whether or not they name an album."""
+    fill(index, [
+        {"path": "S/b.mp3", "has_cover": True}, {"path": "S/a.mp3", "has_cover": True},
+        {"path": "S/c.mp3"}, {"path": "S/d.mp3", "album": "One", "has_cover": True},
+        {"path": "T/x.mp3", "has_cover": True},
+    ])  # fmt: skip
+    one = index.read().execute("SELECT thumb FROM album").fetchone()[0]
+    loose = [art.thumb_id(f"S/{n}.mp3", 1000, 1) for n in "ab"]
+    assert row(index, "S", "thumb, mosaic") == (None, " ".join([*loose, one]))
+    assert row(index, "T", "cover_kind, cover, thumb") == (
+        "embedded", "T/x.mp3", art.thumb_id("T/x.mp3", 1000, 1)
+    )  # fmt: skip
+
+
 def test_an_index_of_slice_3_3_gains_folders_filled_from_its_rows(tmp_path):
     """Version 4 (A2.7): the folders and each song's place come from the rows there, the songs
     not read again; a folder's cover image is the one its album's row names."""

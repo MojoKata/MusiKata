@@ -248,6 +248,26 @@ def test_a_mosaic_is_drawn_from_its_pieces_thumbnails_and_kept_under_a_hash_of_t
     assert p.image(covers.mosaic_id(["gone", "nothing"]), 256).isNull()
 
 
+def test_a_mosaics_piece_from_a_loose_song_on_no_album_is_found_and_drawn(tmp_path, index, qapp):
+    """R5.8: a mosaic of loose songs' covers, and its parent's, whose first piece it gives."""
+    root, cache = tmp_path / "Music", tmp_path / "cache"
+    fill(
+        index, [{"path": "P/S/a.mp3", "has_cover": True}, {"path": "P/S/b.mp3", "has_cover": True}]
+    )
+    mosaic = index.read().execute("SELECT mosaic FROM folder WHERE path = 'P/S'").fetchone()[0]
+    first = mosaic.split()[0]
+    assert index.read().execute("SELECT mosaic FROM folder WHERE path = 'P'").fetchone() == (first,)
+    asked = []
+
+    def pictures(path):
+        asked.append(os.path.relpath(path, root))
+        return [Picture(3, "image/png", encoded(300, 300, "PNG", color="#ff0000"))]
+
+    image = provider(root, index, cache, pictures).image(first, 256)
+    assert image.pixelColor(5, 5).red() > 200 and asked == [os.path.join("P", "S", "a.mp3")]
+    assert provider(root, index, cache, pictures).image("nothing", 256).isNull()
+
+
 def test_a_root_that_isnt_there_shows_its_covers_from_the_cache(qapp, tmp_path, index):
     """R2.10: browsing a library whose drive is unplugged shows the covers already made."""
     root, cache = tmp_path / "Music", tmp_path / "cache"
