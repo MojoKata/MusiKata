@@ -14,6 +14,7 @@ only seen with a real sink pulling."""
 
 import logging
 import os
+import subprocess
 import sys
 
 import numpy as np
@@ -271,6 +272,69 @@ def test_closing_while_a_song_plays_stops_it_and_ends_the_thread(make, qtbot):
     qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
     p.close()
     assert tone.closed == tone.opened and not p._thread._thread.isRunning()
+
+
+# ---------- --play FILE: the builds' start test ----------
+
+
+def test_play_once_plays_the_file_and_says_how_it_ended(make, tmp_path, qtbot):
+    tone = Tone()
+    p = make(tone)
+    done = []
+    once = app.PlayOnce(p, str(tmp_path / "elsewhere" / "a.flac"), lambda: done.append(1))
+    qtbot.waitUntil(lambda: done == [1], timeout=WAIT)
+    assert (once.last, once.error) == ("ended", "")
+    assert tone.opened == [str(tmp_path / "elsewhere" / "a.flac")]
+
+
+def test_play_once_of_a_file_that_cant_play_says_why(make, tmp_path, qtbot):
+    p = make(Tone())
+    done = []
+    once = app.PlayOnce(p, str(tmp_path / "missing.flac"), lambda: done.append(1))
+    qtbot.waitUntil(lambda: done == [1], timeout=WAIT)
+    assert once.last == "failed" and once.error.startswith("couldn't open")
+
+
+def test_decoding_through_reads_every_block_and_closes_the_song():
+    tone = Tone(0.25)
+    assert app.decode_through("a.flac", tone) == pytest.approx(0.25, abs=1 / 48_000)
+    assert tone.closed == ["a.flac"]
+    with pytest.raises(DecodeError):
+        app.decode_through("missing.flac", tone)
+
+
+@pytest.mark.slow
+def test_play_once_with_no_sound_device_decodes_the_file_instead(make, qtbot):
+    tone = Tone(0.25)
+    p = make(tone, output=QAudioDevice)
+    done = []
+    once = app.PlayOnce(p, "a.flac", lambda: done.append(1), opener=tone)
+    qtbot.waitUntil(lambda: done == [1], timeout=WAIT)
+    assert (once.last, once.error) == ("failed", player.NO_DEVICE)
+    assert once.decoded == pytest.approx(0.25, abs=1 / 48_000)
+    once = app.PlayOnce(p, "missing.flac", lambda: done.append(2), opener=tone)
+    qtbot.waitUntil(lambda: done == [1, 2], timeout=WAIT)
+    assert once.decoded is None and once.error.startswith("there is no sound device, and couldn't")
+
+
+@pytest.mark.slow
+def test_play_starts_musikata_plays_a_file_to_its_end_and_quits(tmp_path, null_output):
+    """`python -m musikata --play FILE`, as each build's start test runs it: the window, the scan
+    of the root, and the file decoded by PyAV and played to its end; the null sink is the only
+    device, so the default."""
+    root = tmp_path / "Music"
+    root.mkdir()
+    song = root / "tone.mp3"
+    demo.encode(str(song), "mp3", 0.5, 440)
+    path = os.pathsep.join(
+        p for p in (os.path.join(ROOT, "src"), os.environ.get("PYTHONPATH")) if p
+    )
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", HOME=str(tmp_path),
+               MUSIKATA_DATA=str(tmp_path / "data"), PYTHONPATH=path)  # fmt: skip
+    r = subprocess.run([sys.executable, "-m", "musikata", "--root", str(root), "--play", str(song)],
+                       env=env, capture_output=True, text=True, timeout=120)  # fmt: skip
+    assert (r.returncode, r.stdout) == (0, f"{song}: played to its end\n"), r.stderr
+    assert "added=1" in r.stderr  # the scan ran, in the worker processes
 
 
 # ---------- the Songs list ----------

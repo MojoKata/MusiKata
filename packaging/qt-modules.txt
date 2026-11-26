@@ -1,0 +1,92 @@
+# The Qt every build carries (A6.2): the parts of PySide6 MusiKata uses, and nothing else of it.
+# scripts/qt_trim.py removes what isn't here from the PySide6 a build installed, before it packs it,
+# and stops when a line names nothing there, a QML module kept needs one left out, or a library kept
+# links one left out. Each build's start test then plays a file in the packed app.
+#
+#   module NAME      a Qt module: its library (libQt6NAME.so.6, Qt6NAME.dll, QtNAME.framework) and
+#                    its Python binding (QtNAME)
+#   plugin TYPE/NAME a plugin, named without "lib" and its extension
+#   qml PATH         a QML module: a folder of Qt's qml folder with a qmldir, without the modules
+#                    below it
+#   keep PATTERN     any other path in the PySide6 folder (a shell pattern, `*` within a part)
+#
+# A line ending in platforms (linux, windows, macos) is for those only. A part joins with the code
+# that uses it; Qt Multimedia's FFmpeg plugin and libraries never do, as PyAV carries the FFmpeg
+# that decodes (A4.1).
+
+# The modules the code imports (src/musikata: QtCore, QtGui, QtQml, QtQuick, QtMultimedia), and
+# those they and the QML modules below link
+module Concurrent
+module Core
+module Gui
+module Network
+module OpenGL
+module Qml
+module QmlMeta
+module QmlModels
+module QmlWorkerScript
+module Quick
+module QuickControls2
+module QuickControls2Basic
+module QuickControls2BasicStyleImpl
+module QuickControls2Impl
+module QuickTemplates2
+module QuickShapes
+module Multimedia
+module DBus             linux macos
+module XcbQpa           linux
+module WaylandClient    linux
+module WlShellIntegration linux
+
+# The QML modules the views import (QtQuick, QtQuick.Controls.Basic, QtQuick.Shapes), with those
+# they import
+qml QtQml
+qml QtQml/Models
+qml QtQml/WorkerScript
+qml QtQuick
+qml QtQuick/Controls
+qml QtQuick/Controls/impl
+qml QtQuick/Controls/Basic
+qml QtQuick/Controls/Basic/impl
+qml QtQuick/Templates
+qml QtQuick/Shapes
+
+# Each desktop's own platform, and offscreen, which the tests and the tour draw on
+plugin platforms/qoffscreen
+plugin platforms/qminimal
+plugin platforms/qxcb                                   linux
+plugin platforms/qwayland                               linux
+plugin platforms/qwindows                               windows
+plugin platforms/qcocoa                                 macos
+# X11's OpenGL, and Wayland's windows, decorations and OpenGL
+plugin xcbglintegrations/qxcb-glx-integration           linux
+plugin xcbglintegrations/qxcb-egl-integration           linux
+plugin wayland-shell-integration/xdg-shell              linux
+plugin wayland-decoration-client/bradient               linux
+plugin wayland-graphics-integration-client/qt-plugin-wayland-egl linux
+# typing in another script or with dead keys (search, R2.7): the compose table and IBus
+plugin platforminputcontexts/composeplatforminputcontextplugin linux
+plugin platforminputcontexts/ibusplatforminputcontextplugin    linux
+# the desktop's fonts, colours and dialogs, through its portal or GTK
+plugin platformthemes/qxdgdesktopportal                 linux
+plugin platformthemes/qgtk3                             linux
+# album covers, mostly JPEG (R5); PNG is built in
+plugin imageformats/qjpeg
+
+# PySide6's own files a run needs: the package, its libraries, and Qt's ICU (Linux) and the C++
+# runtime (Windows)
+keep __init__.py
+keep _config.py
+keep _git_pyside_version.py
+keep py.typed
+keep support
+keep libpyside6.abi3.so.*                               linux
+keep libpyside6qml.abi3.so.*                            linux
+keep libpyside6.abi3.*.dylib                            macos
+keep libpyside6qml.abi3.*.dylib                         macos
+keep pyside6.abi3.dll                                   windows
+keep pyside6qml.abi3.dll                                windows
+keep Qt/lib/libicu*                                     linux
+keep msvcp140*.dll                                      windows
+keep vcruntime140*.dll                                  windows
+keep concrt140.dll                                      windows

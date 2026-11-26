@@ -2,9 +2,10 @@
 # master: the checks of scripts/check.sh, tier 1 in its container measured by coverage.py, the
 # coverage report against the floors and the 80 % each module of src/ needs, the tour on the demo
 # library with its layout check, and the Pages site with the tour's screens, which a push to master
-# publishes. A v* tag: its version checked against __version__. The `ci` job is the one check the
-# master ruleset requires, once it has passed (docs/process/genesis.md, 4). The builds join with
-# slice 2.5 (DEVELOP.md).
+# publishes. The builds (docs/process/build-and-release.md, "The builds"): the AppImage, the Windows
+# installer and the two .dmgs, each started once and kept with its .sha256, unsigned (signing is the
+# release's). A v* tag: its version checked against __version__. The `ci` job is the one check the
+# master ruleset requires, once it has passed (docs/process/genesis.md, 4).
 # Each action is pinned by its commit SHA, as the repository requires (genesis.md, 5).
 name: CI
 on:
@@ -208,6 +209,117 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
 
+  # the AppImage (A6.3), built in its Ubuntu 22.04 container and started once in an Ubuntu 24.04 one:
+  # a demo file played to its end on X11 into PulseAudio's null sink (scripts/test-appimage.sh)
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/appimage-cache
+          key: appimage-${{ hashFiles('packaging/versions.env') }}
+      - run: COWORKER_UNATTENDED=1 coworker/bin/coworker status --no-network   # the coworker protocol, unattended
+      - run: |
+          mkdir -p build
+          { sh scripts/build-appimage.sh && sh scripts/test-appimage.sh; } 2>&1 | tee build/ci-appimage.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-appimage.log appimage
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-x86_64.AppImage.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: appimage
+          path: build/release/MusiKata-*-x86_64.AppImage*
+          if-no-files-found: error
+
+  # the Windows installer (A6.4), built under Wine in its containers and started once there: installed
+  # silently, its file kinds checked, and a demo file decoded to its end, as Qt finds no sound device
+  # under Wine (scripts/test-windows.sh)
+  windows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/wine-cache
+          key: windows-${{ hashFiles('packaging/versions.env', 'packaging/windows/icuuc-stub.c') }}
+      - run: COWORKER_UNATTENDED=1 coworker/bin/coworker status --no-network   # the coworker protocol, unattended
+      - run: |
+          mkdir -p build
+          { sh scripts/build-windows.sh && sh scripts/test-windows.sh; } 2>&1 | tee build/ci-windows.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-windows.log windows
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-setup.exe.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: windows
+          path: build/release/MusiKata-*-setup.exe*
+          if-no-files-found: error
+
+  # the two .dmgs (A6.5), each built with PyInstaller on an Apple silicon runner (macos-15, the
+  # oldest Apple silicon image GitHub has) and started once there: the Intel one under Rosetta
+  # (scripts/build-macos.sh, scripts/test-macos.sh)
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/macos-cache
+          key: macos-arm64-${{ hashFiles('packaging/versions.env') }}
+      - run: |
+          mkdir -p build
+          { sh scripts/build-macos.sh arm64 && sh scripts/test-macos.sh arm64; } 2>&1 | tee build/ci-macos.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-macos.log macos-arm64
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-arm64.dmg.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: macos-arm64
+          path: build/release/MusiKata-*-arm64.dmg*
+          if-no-files-found: error
+
+  macos-x86_64:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true      # coworker/
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: github.ref_type != 'tag'
+        with:
+          path: build/macos-cache
+          key: macos-x86_64-${{ hashFiles('packaging/versions.env') }}
+      - run: arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license   # Rosetta, if the image lacks it
+      - run: |
+          mkdir -p build
+          { sh scripts/build-macos.sh x86_64 && sh scripts/test-macos.sh x86_64; } 2>&1 | tee build/ci-macos.log
+      - if: failure()
+        run: sh scripts/ci-tail.sh build/ci-macos.log macos-x86_64
+      - run: sed 's/^/::notice title=sha256::/' build/release/MusiKata-*-x86_64.dmg.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: macos-x86_64
+          path: build/release/MusiKata-*-x86_64.dmg*
+          if-no-files-found: error
+
   # a v* tag: the tag is __version__ (docs/process/release.md)
   version:
     if: github.ref_type == 'tag'
@@ -224,13 +336,13 @@ jobs:
 
   # the one check the master ruleset requires: everything above passed
   ci:
-    needs: [tier1, coverage, tour]
+    needs: [tier1, coverage, tour, appimage, windows, macos-arm64, macos-x86_64]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - env:
-          RESULTS: ${{ needs.tier1.result }} ${{ needs.coverage.result }} ${{ needs.tour.result }}
+          RESULTS: ${{ needs.tier1.result }} ${{ needs.coverage.result }} ${{ needs.tour.result }} ${{ needs.appimage.result }} ${{ needs.windows.result }} ${{ needs.macos-arm64.result }} ${{ needs.macos-x86_64.result }}
         run: |
-          echo "tier1, coverage, tour: $RESULTS"
-          test "$RESULTS" = "success success success"
+          echo "tier1, coverage, tour, appimage, windows, macos-arm64, macos-x86_64: $RESULTS"
+          test "$RESULTS" = "success success success success success success success"

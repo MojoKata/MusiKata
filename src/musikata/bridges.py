@@ -222,10 +222,14 @@ class Player(QObject):
     @Slot(str)
     def play(self, path: str) -> None:
         """Plays the song at `path` under the root (the index's path) from its start (R7.1)."""
+        self.play_file(os.path.join(self._root, *path.split("/")))
+
+    def play_file(self, path: str) -> None:
+        """Plays the file at `path`, a whole path, from its start."""
         if not self._started:
             self._thread.start()
             self._started = True
-        self._play.emit(os.path.join(self._root, *path.split("/")))
+        self._play.emit(path)
 
     @Slot()
     def pause(self) -> None:

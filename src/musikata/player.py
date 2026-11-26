@@ -37,6 +37,7 @@ from musikata_core.audio.stream import Block, Stream
 log = logging.getLogger(__name__)
 
 FALLBACK_RATE = 48_000  # when a device doesn't say which rate it prefers
+NO_DEVICE = "there is no sound device"  # why a song failed when no device was there to play it
 MOVED_STEP = 0.1  # the position is reported when it moves by this much (seconds)
 
 
@@ -153,7 +154,7 @@ class Engine(QObject):
         self._halt()
         device = self._output()
         if device.isNull():
-            self._failed(path, "there is no sound device")
+            self._failed(path, NO_DEVICE)
             return
         fmt = output_format(device)
         rate, channels = fmt.sampleRate(), fmt.channelCount()

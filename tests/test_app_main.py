@@ -19,6 +19,8 @@ def test_the_root_is_given_or_the_homes_music_folder(tmp_path):
     got = app.options(["--root", str(tmp_path / "x" / ".." / "Songs"), "--tour", "out",
                        "--tour-only", "L03-songs"], env)  # fmt: skip
     assert got == app.Options(str(tmp_path / "Songs"), "out", "L03-songs")
+    got = app.options(["--play", str(tmp_path / "a" / ".." / "x.mp3")], env)
+    assert got.play == str(tmp_path / "x.mp3") and got.tour is None
     assert app.home_of({"USERPROFILE": "C:\\Users\\ana"}) == "C:\\Users\\ana"
     assert app.home_of({}) == os.path.expanduser("~")
 
@@ -64,3 +66,26 @@ def test_a_whole_run_scans_the_root_and_tours_it(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "added=1" in r.stderr and "the tour: 1 screens, 0 texts past their boxes" in r.stdout
     assert (tmp_path / "tour" / "L03-songs.png").exists()
+
+
+def test_play_ends_with_0_only_when_the_song_played_to_its_end_and_the_scan_went_well():
+    ok = object()  # a scan's Result
+    assert app.outcome("ended", "", ok) == (0, "played to its end")
+    assert app.outcome("ended", "", None) == (0, "played to its end")
+    assert app.outcome("failed", "there is no sound device", ok) == (
+        1,
+        "couldn't play: there is no sound device",
+    )
+    assert app.outcome("stopped", "", ok) == (1, "closed before the song ended")
+    assert app.outcome("", "", ok) == (1, "closed before the song ended")
+    assert app.outcome("ended", "", OSError("gone")) == (1, "the scan failed: OSError: gone")
+
+
+def test_play_with_no_sound_device_ends_with_3_when_the_file_decoded_to_its_end():
+    nothing = "there is no sound device"
+    assert app.outcome("failed", nothing, None, 3.04) == (
+        3,
+        "decoded to its end (3.0 s); there is no sound device to play it on",
+    )
+    assert app.outcome("failed", nothing, None) == (1, f"couldn't play: {nothing}")
+    assert app.outcome("failed", nothing, OSError("gone"), 3.0)[0] == 1
