@@ -548,6 +548,45 @@ def test_one_scan_at_a_time_what_comes_meanwhile_waits_for_the_scan_to_end(
     lib.close()
 
 
+class Meddling:
+    """Worker processes that add a file to a folder the walk has been through while the first
+    batch is read: a change made while a scan goes on."""
+
+    def __init__(self, path):
+        self._path, self._pool = path, ThreadPoolExecutor(1)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._pool.shutdown()
+
+    def map(self, fn, *args):
+        if self._path is not None:
+            wav(self._path, 9)
+            self._path = None
+        return self._pool.map(fn, *args)
+
+
+def test_a_change_made_while_the_first_scan_goes_on_is_rescanned_after_it(
+    index, music, tmp_path, qtbot, monkeypatch
+):
+    """A2.4: the folders are watched as the walk reaches them, not once the scan has ended."""
+    clock, added = FakeClock(), [music / "A" / "9.wav"]
+    lib = bridges.Library(str(music), index, str(tmp_path),
+                          lambda: Meddling(added.pop() if added else None), clock=clock,
+                          watching=True)  # fmt: skip
+    scopes = scopes_of(monkeypatch)
+    scanned(lib, qtbot)
+    assert lib.last.added == 2
+    clock.advance(seconds=1)
+    lib.watcher.ready.emit()
+    qtbot.waitUntil(lambda: lib.property("songs").rowCount() == 3, timeout=5000)
+    lib.wait()
+    assert scopes == [None, {"A"}]
+    lib.close()
+
+
 def test_where_watching_stopped_gaining_focus_rescans_and_the_log_says_so(
     index, music, tmp_path, qtbot, monkeypatch, caplog
 ):

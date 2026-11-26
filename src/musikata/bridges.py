@@ -407,6 +407,7 @@ class Library(QObject):
     rootChosen = Signal(str)  # Choose another folder… (R2.10): the folder chosen, a whole path
     _progress = Signal(int, int)
     _finished = Signal(object)
+    _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
 
     def __init__(
         self,
@@ -461,6 +462,7 @@ class Library(QObject):
         self.last: scanner.Result | BaseException | None = None  # the last scan's outcome
         self._progress.connect(self._on_progress)
         self._finished.connect(self._on_finished)
+        self._reached.connect(self._on_reached)
         self._counts = (0, 0, 0)
         self._given = given
         self._missing = missing  # the root isn't there (R2.10)
@@ -718,6 +720,7 @@ class Library(QObject):
                     expected=expected,
                     copied=copied,
                     keep=keep,
+                    reached=self._reached.emit if self._watching else None,
                 )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
@@ -892,13 +895,25 @@ class Library(QObject):
 
     # ---------- watching (A2.4, R2.4) ----------
 
+    def _watcher_now(self) -> watch.Watcher:
+        """The root's watcher, made when first needed."""
+        if self._watcher is None:
+            self._watcher = watch.Watcher(self._root, watch.Gatherer(self._clock), parent=self)
+            self._watcher.ready.connect(self._next)
+        return self._watcher
+
+    @Slot(str, str, object)
+    def _on_reached(self, folder: str, real: str, listed: int) -> None:
+        """A folder a scan's walk listed: watched from then on, so what changes while the scan
+        goes on is rescanned after it (A2.4)."""
+        if self._watching and not self._closed and not self._missing:
+            self._watcher_now().reached(folder, real, listed)
+
     def _watch(self, whole: bool, result: scanner.Result) -> None:
         """After a scan: the folders it walked watched, those it found gone not."""
         if not self._watching:
             return
-        if self._watcher is None:
-            self._watcher = watch.Watcher(self._root, watch.Gatherer(self._clock), parent=self)
-            self._watcher.ready.connect(self._next)
+        self._watcher = self._watcher_now()
         if whole:
             self._watcher.watch(result.folders)
         else:
@@ -907,7 +922,7 @@ class Library(QObject):
 
     @property
     def watcher(self) -> watch.Watcher | None:
-        """The root's watcher, once a scan of the root has started it (None before, or without
+        """The root's watcher, once a scan's walk has started it (None before, or without
         watching)."""
         return self._watcher
 

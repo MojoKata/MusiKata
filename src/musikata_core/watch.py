@@ -1,6 +1,7 @@
 """Watching the root (A2.4, R2.4): while MusiKata runs, a QFileSystemWatcher on every folder under
-the root that the scan walks, the changes it reports gathered for a second before a partial rescan
-of the folders they were in (scanner.Scope), and folders added and removed as the tree changes.
+the root that the scan walks, each watched as the walk reaches it, the changes it reports gathered
+for a second before a partial rescan of the folders they were in (scanner.Scope), and folders
+added and removed as the tree changes.
 When the system refuses a watch (Linux's fs.inotify.max_user_watches), watching stops, the log says
 so, and MusiKata rescans when its window gains focus instead.
 
@@ -182,6 +183,24 @@ class Watcher(QObject):
         for path, f in paths.items():
             if path not in refused:
                 self._known[f], self._watched[path] = new[f], f
+
+    def reached(self, folder: str, real: str, listed: int) -> None:
+        """A scan's walk listed `folder` (path under the root, and its real path), modified at
+        `listed` just before: watched from now on, so a change made while the scan goes on is
+        gathered for the rescan after it. Its watch comes after the listing, so a folder whose
+        modification time has moved since (or that has gone) is gathered too. Nothing for a folder
+        watched already, or once watching has stopped."""
+        if self.why or folder in self._known:
+            return
+        self.update({folder: real}, ())
+        if self.why:
+            return
+        try:
+            now: int | None = os.stat(full_path(self._root, folder)).st_mtime_ns
+        except OSError:
+            now = None
+        if now != listed:
+            self.changed(folder)
 
     def stop(self, why: str) -> None:
         """Stops watching for good, logs why, and says so with `stopped`."""

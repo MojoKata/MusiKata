@@ -38,6 +38,8 @@ log = logging.getLogger(__name__)
 BATCH = 200  # files read and written at a time (A2.2)
 HASHED = 64 * 1024  # bytes of audio at each end the audio hash reads (A2.3)
 IGNORE = ".musikataignore"  # a folder holding one is skipped (R2.3.1)
+# told of each folder a walk lists: its path under the root, its real path, its modification time
+Reached = Callable[[str, str, int], None]
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,7 @@ def walk(
     start: str = "",
     known: Collection[str] = (),
     tree: Tree | None = None,
+    reached: Reached | None = None,
 ) -> Iterator[Seen]:
     """Every audio file under root (R2.2's kinds), skipping hidden files and folders, folders
     holding .musikataignore, the folders the settings skip (paths under the root), and the root's
@@ -157,7 +160,9 @@ def walk(
 
     A partial scan (A2.4) walks from `start`, a folder under the root, and passes by the folders
     `known` under it; `tree`, when given, gets the folders walked and passed, and its real paths
-    count as walked already."""
+    count as walked already. `reached`, when given, is told of each folder as it is listed: its
+    path under the root, its real path, and its modification time just before (for watching it,
+    A2.4)."""
     skipped = {s.strip("/") for s in skip}
     tree = tree if tree is not None else Tree()
 
@@ -168,6 +173,7 @@ def walk(
             return
         tree.reals.add(real)
         try:
+            listed = os.stat(folder).st_mtime_ns
             entries = sorted(os.scandir(folder), key=lambda e: e.name)
         except OSError as e:
             if rel and _link(folder):  # a share behind a link, gone to sleep (R2.10)
@@ -179,6 +185,8 @@ def walk(
         if any(entry.name == IGNORE for entry in entries):
             return
         tree.folders[rel] = real
+        if reached is not None:
+            reached(rel, real, listed)
         if images is not None:
             images.setdefault(rel, [])
         for entry in entries:
@@ -252,10 +260,12 @@ def walk_scope(
     skip: Iterable[str] = (),
     images: dict[str, list[art.Image]] | None = None,
     tree: Tree | None = None,
+    reached: Reached | None = None,
 ) -> Iterator[Seen]:
     """The audio files a partial scan sees (A2.4): each named folder's own files and those of the
     folders new under it, each named folder walked once, whether named or found new under another.
-    A named folder out of the library now (`outside`) is walked not at all."""
+    A named folder out of the library now (`outside`) is walked not at all. `reached`: as for
+    `walk`."""
     tree = tree if tree is not None else Tree()
     named = sorted(scope.folders)
     # the known folders count as walked (R2.3.2), but for the named ones, walked again here
@@ -267,7 +277,9 @@ def walk_scope(
             continue
         if folder in tree.folders or outside(root, folder, skip):
             continue
-        yield from walk(root, skip, images, start=folder, known=scope.known, tree=tree)
+        yield from walk(
+            root, skip, images, start=folder, known=scope.known, tree=tree, reached=reached
+        )
     tree.passed -= set(tree.folders)
 
 
@@ -633,12 +645,14 @@ def scan(
     copied: Mapping[str, str] | None = None,
     keep: Collection[str] = (),
     hold: bool = True,
+    reached: Reached | None = None,
 ) -> Result:
     """One scan of the root into its index (A2.2), or, given a `scope`, of the folders it names
     (A2.4). progress(done, of) after each batch, for the root's card (R2.3). `expected`: files
     MusiKata wrote itself, not read again (`plan`). `copied`: copies made while watching, by audio
     hash, which a song whose file went takes over (`take_over`); the result's are those still
-    standing, with the new ones.
+    standing, with the new ones. `reached`: each folder as the walk lists it (`walk`), so that
+    watching it starts then, not once the scan has ended (A2.4).
 
     A root that isn't there changes nothing (`Result.missing`), and the songs beneath a link that
     leads nowhere stay (`Result.unreachable`) (R2.10). When the songs gone are more than a quarter
@@ -653,9 +667,9 @@ def scan(
         log.warning("didn't scan %s: it isn't there", root)
         return Result(missing=True)
     if scope is None:
-        seen = list(walk(root, skip, images, tree=tree))
+        seen = list(walk(root, skip, images, tree=tree, reached=reached))
     else:
-        seen = list(walk_scope(root, scope, skip, images, tree))
+        seen = list(walk_scope(root, scope, skip, images, tree, reached))
     rows = _rows(c, scope, tree)
     indexed = {p: (s, m) for p, s, m, _h in rows}
     hashes = {p: h for p, _s, _m, h in rows if h is not None}

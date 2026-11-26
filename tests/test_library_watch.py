@@ -114,6 +114,27 @@ def test_a_change_in_a_watched_folder_is_gathered_and_ready_when_due(tree, qtbot
     assert w.known() == {}
 
 
+def test_a_folder_the_walk_reaches_is_watched_and_gathered_if_it_changed_since(tree, qtbot):
+    """A2.4: a scan's folders are watched as its walk reaches them, so a change made while it goes
+    on is rescanned after it; one made between the walk's listing and the watch shows in the
+    folder's modification time."""
+    root, folders = tree
+    clock = FakeClock()
+    w = watch.Watcher(str(root), watch.Gatherer(clock))
+    listed = {f: os.stat(real).st_mtime_ns for f, real in folders.items()}
+    w.reached("A", folders["A"], listed["A"])
+    assert w.known() == {"A": folders["A"]} and w._gatherer.due_in() is None
+    w.reached("B", folders["B"], listed["B"] - 1)  # changed since it was listed
+    w.reached("A", folders["A"], listed["A"] - 1)  # watched already: its watch saw it
+    w.reached("Gone", str(root / "Gone"), 1)  # gone since: its rows are looked at again
+    clock.advance(seconds=1)
+    assert set(w.known()) == {"A", "B"} and w.take() == {"B", "Gone"}
+    w.stop("refused")
+    w.reached("B/Deep", folders["B/Deep"], 1)
+    assert w.known() == {} and w._gatherer.due_in() is None
+    w.close()
+
+
 def test_a_ready_that_comes_early_waits_on_until_the_clock_says_so(tree, qtbot):
     root, folders = tree
     clock = FakeClock()
