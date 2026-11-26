@@ -348,16 +348,8 @@ class FolderModel(PagedModel):
 
     def folder_rows(self) -> int:
         """How many of its rows are folders: they come first."""
-        if self._ids is not None:
-            return next((i for i, k in enumerate(self._ids) if k % 2), len(self._ids))
-        if not self.searching():
-            r = (
-                self._read()
-                .execute("SELECT COUNT(*) FROM folder WHERE parent = ?", (self._folder,))
-                .fetchone()
-            )
-            return min(int(r[0]), self.rowCount())
-        return 0
+        ids = self._ids or []  # none before its rows are first found
+        return next((i for i, k in enumerate(ids) if k % 2), len(ids))
 
     def set_playing(self, path: str) -> None:
         """Marks the song at `path` and the folders holding it as playing ("": none)."""
