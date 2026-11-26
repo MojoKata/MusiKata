@@ -216,3 +216,19 @@ def test_a_reader_failing_in_a_way_no_one_expected_is_a_row_not_a_failed_scan(
     r = scanner.read_one(str(tmp_path), scanner.Seen("a.m4a", 1, 1))
     assert r.error == "TypeError: 'bool' object is not subscriptable" and r.tags is None
     assert "a.m4a" in caplog.text
+
+
+def test_an_unreadable_file_that_goes_takes_its_row_with_it(tmp_path):
+    """A file that couldn't be read has no audio hash, so nothing can be a move of it: when it
+    goes, its row goes too (A2.2, step 4), and never stays in the library as a song that isn't
+    there."""
+    music = tmp_path / "Music"
+    _touch(str(music / "Broken.flac"), b"fLaC" + b"\xff" * 30)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    with ThreadPoolExecutor(1) as pool:
+        first = scanner.scan(str(music), index, pool)
+        os.remove(music / "Broken.flac")
+        second = scanner.scan(str(music), index, pool)
+    assert first.unreadable == 1 and second.removed == 1
+    assert _rows(index) == {}
+    index.close()

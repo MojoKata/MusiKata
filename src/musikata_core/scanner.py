@@ -347,7 +347,9 @@ def scan(
             setattr(total, k, getattr(total, k) + getattr(res, k))
         if progress:
             progress(min(i + BATCH, len(work.read)), len(work.read))
-    moved_from = set(work.gone) - set(moves.values())
+    # a gone row with a hash that a new file took is a move; every other gone row goes, those with
+    # no hash (a file that couldn't be read) included
+    moved_from = {p for p in work.gone if p in hashes} - set(moves.values())
     remove = [p for p in work.gone if p not in moved_from]
 
     def delete(c: sqlite3.Connection) -> int:
