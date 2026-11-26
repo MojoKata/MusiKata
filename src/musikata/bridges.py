@@ -416,7 +416,8 @@ class Library(QObject):
     is for this run only (R2.1.2), and the window's title names it. Choose another folder… says
     which with `rootChosen`, for app.Session to open it. `pool` makes the worker processes
     (A1.3), once, when a scan first needs them; they end with `close`, or are made anew when one
-    has died."""
+    has died. `trim` is given the scan thread's connection to the index after each scan that found
+    the root, to trim the cover cache (covers.trim_cache, A2.7)."""
 
     changed = Signal()  # the card's line, the counts, the genre chips, the empty texts
     scanningChanged = Signal()
@@ -441,9 +442,11 @@ class Library(QObject):
         given: bool = False,
         looking: Callable[[str, frozenset[str]], tuple[bool, frozenset[str]]] = watch.there,
         look_every: float = watch.LOOK,
+        trim: Callable[[sqlite3.Connection], object] | None = None,
     ) -> None:
         super().__init__(parent)
         self._root, self._index, self._home, self._pool = root, index, home, pool
+        self._trim = trim
         self._workers: Executor | None = None  # the worker processes, once a scan needs them
         self._clock = clock if clock is not None else SystemClock()
         self._watching = watching
@@ -737,6 +740,11 @@ class Library(QObject):
                 self._workers.shutdown(wait=False)
                 self._workers = None
             result = e
+        if isinstance(result, scanner.Result) and not result.missing and self._trim is not None:
+            try:  # the cache's thumbnails no row points at any more (A2.7)
+                self._trim(self._index.read())
+            except OSError, sqlite3.Error:
+                log.exception("trimming the cover cache of %s failed", self._root)
         self.last = result
         self._finished.emit((scope is None, result))
 

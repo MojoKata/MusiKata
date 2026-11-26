@@ -11,6 +11,7 @@ first root opened starts the cleanup of A2.9 on a thread of its own."""
 from __future__ import annotations
 
 import argparse
+import functools
 import logging
 import os
 import platform
@@ -32,7 +33,7 @@ from musikata_core.clock import Clock, SystemClock
 
 from . import media
 from .bridges import Library, Player
-from .covers import Covers
+from .covers import Covers, trim_cache
 from .firstrun import FirstRun, music_folder
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 
@@ -158,9 +159,11 @@ def load(
     system's media controls over the player, the window and the cover cache (A4.5)."""
     index = open_index(root, env, clock)
     missing = not os.path.isdir(root)
+    cache = cache_of(index, env)
     library = Library(
-        root, index, home_of(env), pool, clock=clock, watching=True, missing=missing, given=given
-    )
+        root, index, home_of(env), pool, clock=clock, watching=True, missing=missing, given=given,
+        trim=functools.partial(trim_cache, cache),
+    )  # fmt: skip
     shared = settings.load(settings.shared_path(env), home_of(env))  # Playback's (R13.7)
     player = Player(
         root, playback(), refuse=library.unplayable, read=index.read, playback=shared.playback
@@ -168,7 +171,7 @@ def load(
     player.nowPlaying.connect(library.show_playing)
     library.property("folders").play.connect(player.play_songs)
     engine = QQmlApplicationEngine()
-    covers = Covers(root, index.read, cache_of(index, env))
+    covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
     engine.setInitialProperties({"library": library, "player": player})
     engine.load(QUrl.fromLocalFile(QML))

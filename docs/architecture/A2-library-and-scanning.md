@@ -69,7 +69,10 @@ of a large library is one indexed query on `parent`, not a walk of the disk.
   sources' thumbnails, at the two sizes the views use, and kept in the cache folder (R1.5) under
   a hash of its sources' identities and modification times. A changed cover changes the hash of
   every mosaic it is in, and they are redrawn when next shown; stale ones are removed with the
-  thumbnail cache's trimming.
+  thumbnail cache's trimming. That trimming runs after each scan that finds the root, on the
+  scan's thread: each thumbnail and mosaic in the cache that no album or folder row points at any
+  more, as its cover, a piece of its mosaic or the mosaic itself, is removed; a file of any other
+  name is left.
 - **The models.** Folders binds to one `FolderModel` for every mode, folders then files (R2.9.2);
   the mode is the QML delegate, not a different model, so switching modes keeps the selection
   and the scroll position.

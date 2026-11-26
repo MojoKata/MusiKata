@@ -9,14 +9,16 @@ and a thumbnail made again on every scroll would keep the disk busy for nothing.
 import logging
 import os
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fakes import fill
+from fakes import FakeClock, fill, wav
 from PySide6.QtCore import QBuffer, QSize
 from PySide6.QtGui import QColor, QImage
 
-from musikata import covers
-from musikata_core import albums, art, db
+from musikata import bridges, covers
+from musikata_core import albums, art, db, scanner
 from musikata_core.tags import Picture, TagReadError
 
 
@@ -287,3 +289,123 @@ def test_a_root_that_isnt_there_shows_its_covers_from_the_cache(qapp, tmp_path, 
     first = p.image("T", 256)
     shutil.rmtree(root)
     assert not p.image("T", 256).isNull() and p.image("T", 256).size() == first.size()
+
+
+# ---------- trimming the cache (A2.7) ----------
+
+
+def hexname(n):
+    return f"{n:032x}"
+
+
+def test_the_cache_is_trimmed_of_what_no_row_points_at_and_keeps_every_other_file(
+    tmp_path, index, caplog
+):
+    album, own, piece, loose, alone = (hexname(n) for n in range(1, 6))
+    old = "ab" * 16
+    fill(index, [{"path": "A/1.flac", "album": "A", "artist": "X"}, {"path": "B/C/1.flac"},
+                 {"path": "D/1.flac"}])  # fmt: skip
+    index.write(lambda c: (
+        c.execute("UPDATE album SET thumb = ?", (album,)),
+        c.execute("UPDATE folder SET thumb = ? WHERE path = 'A'", (own,)),
+        c.execute("UPDATE folder SET mosaic = ? WHERE path = 'B'", (f"{album} {piece} {loose}",)),
+        c.execute("UPDATE folder SET mosaic = ? WHERE path = 'D'", (alone,)),
+    )).result()  # fmt: skip
+    mosaic = covers.mosaic_name([album, piece, loose])
+    assert covers.live(index.read()) == {album, own, piece, loose, alone, mosaic}
+    cache = tmp_path / "cache"
+    live = [
+        f"{album}-256.jpg",
+        f"{album}-512.png",
+        f"{own}-256.jpg",
+        f"{piece}-256.png",
+        f"{loose}-512.jpg",
+        f"{alone}-256.jpg",
+        f"{mosaic}-256.png",
+        f"{mosaic}-512.png",
+    ]
+    stale = [
+        f"{old}-256.jpg",
+        f"{old}-512.png",
+        covers.mosaic_name([album, old]) + "-256.png",
+        covers.mosaic_name([alone]) + "-256.png",
+    ]  # a mosaic of one piece is never drawn
+    stray = ["tmpk2x_9qa.jpg", "notes.txt", f"{old}.jpg", f"{old}-256.webp", "T-256.jpg",
+             f"{old.upper()}-256.jpg"]  # fmt: skip
+    cache.mkdir()
+    for name in live + stale + stray:
+        (cache / name).write_bytes(b"x")
+    (cache / f"{old}-256.dir.jpg").mkdir()
+    caplog.set_level(logging.INFO)
+    assert covers.trim_cache(str(cache), index.read()) == sorted(stale)
+    assert sorted(os.listdir(cache)) == sorted([*live, *stray, f"{old}-256.dir.jpg"])
+    assert "removed 4 stale thumbnails and mosaics" in caplog.text
+    assert covers.trim(str(cache), set()) == sorted(live)  # nothing left in the index
+    assert covers.trim(str(tmp_path / "none"), set()) == []  # no cache yet
+
+
+def test_a_cache_that_cant_be_trimmed_costs_only_room_and_says_so(tmp_path, caplog, monkeypatch):
+    stale = [f"{hexname(1)}-256.jpg", f"{hexname(2)}-256.jpg", f"{hexname(3)}-256.jpg"]
+    for name in stale:
+        (tmp_path / name).write_bytes(b"x")
+    real = os.remove
+
+    def remove(path):
+        if path.endswith(stale[0]):
+            raise PermissionError(13, "Permission denied", path)
+        if path.endswith(stale[1]):
+            real(path)  # gone meanwhile: another trim, or the user
+            raise FileNotFoundError(2, "No such file or directory", path)
+        real(path)
+
+    monkeypatch.setattr(covers.os, "remove", remove)
+    assert covers.trim(str(tmp_path), set()) == [stale[2]]
+    assert f"{stale[0]} couldn't be removed" in caplog.text
+    (tmp_path / "file").write_bytes(b"")
+    assert covers.trim(str(tmp_path / "file"), set()) == []  # not a folder
+    assert "couldn't be trimmed" in caplog.text
+
+
+def test_after_each_scan_the_cache_is_trimmed_on_the_scans_thread(tmp_path, index, qtbot, caplog):
+    music, cache = tmp_path / "Music", tmp_path / "cache"
+    wav(music / "A" / "1.wav", 1)
+    (music / "A" / "cover.png").write_bytes(encoded(300, 300, "PNG"))
+    stale = f"{hexname(9)}-256.jpg"
+    trimmed = []
+
+    def trim(c):
+        trimmed.append(threading.current_thread().name)
+        return covers.trim_cache(str(cache), c)
+
+    def scanned(lib):
+        with qtbot.waitSignal(lib.scanningChanged):
+            lib.rescan()
+        qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=10_000)
+
+    lib = bridges.Library(str(music), index, str(tmp_path), lambda: ThreadPoolExecutor(1),
+                          clock=FakeClock(), trim=trim)  # fmt: skip
+    scanned(lib)
+    thumb = index.read().execute("SELECT thumb FROM folder WHERE path = 'A'").fetchone()[0]
+    cache.mkdir()
+    for name in (f"{thumb}-256.png", stale):
+        (cache / name).write_bytes(b"x")
+    scanned(lib)
+    assert os.listdir(cache) == [f"{thumb}-256.png"] and trimmed == ["scan", "scan"]
+    os.remove(music / "A" / "1.wav")  # the folder goes, and its thumbnail with it
+    scanned(lib)
+    assert os.listdir(cache) == []
+    shutil.rmtree(music)  # a root that isn't there: nothing is trimmed
+    (cache / stale).write_bytes(b"x")
+    scanned(lib)
+    assert os.listdir(cache) == [stale] and len(trimmed) == 3
+    lib.close()
+
+    def broken(c):
+        raise OSError(5, "Input/output error")
+
+    music.mkdir()
+    lib = bridges.Library(str(music), index, str(tmp_path), lambda: ThreadPoolExecutor(1),
+                          clock=FakeClock(), trim=broken)  # fmt: skip
+    scanned(lib)
+    assert isinstance(lib.last, scanner.Result) and "trimming the cover cache" in caplog.text
+    lib.close()
