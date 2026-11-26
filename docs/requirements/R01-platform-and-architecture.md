@@ -39,7 +39,7 @@ R1.5. **Local data,** in three places:
 
 - **The root's own folder,** `<root>/.musikata/`: what belongs to the library and goes with it to
   any computer: the root's settings (`settings.json`), play counts (`<computer id>/plays.json`, a
-  file per computer, R7.9), ratings that can't go in a file (`ratings.json`, R10.3), Needs attention dismissals
+  file per computer, R7.9), what was playing (`<computer id>/now-playing.json`, R1.8), ratings that can't go in a file (`ratings.json`, R10.3), Needs attention dismissals
   (`ignored.json`, R2.8) and the change history (`history/`, R4.9). Plain files, each replaced whole
   when it changes, so two computers sharing a root never hold a lock and neither loses the other's
   changes (A2.8).
