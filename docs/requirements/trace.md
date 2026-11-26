@@ -133,18 +133,18 @@ A table row is traced whole, its cells as written.
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
-| R7.1 | Double-clicking a song, or pressing Enter on a selection | test_playing_a_song_puts_the_rest_of_its_list_after_it, test_a_double_click_plays_the_song_and_queues_the_rest_of_its_list, test_a_right_click_on_a_song_offers_play_next_and_add_to_queue, test_double_clicking_a_song_plays_it_and_marks_its_row, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back, test_an_albums_page_says_what_it_holds, later: #0 |
-| R7.1 | Play on an album, artist, genre or playlist does the same from its first song | test_play_on_an_album_plays_from_its_first_song, test_play_on_an_album_plays_it_from_its_first_song_and_shuffle_from_any, test_clicks_open_a_view_an_album_its_artist_and_go_back, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, later: #0 |
+| R7.1 | Double-clicking a song, or pressing Enter on a selection | test_playing_a_song_puts_the_rest_of_its_list_after_it, test_a_double_click_plays_the_song_and_queues_the_rest_of_its_list, test_a_right_click_on_a_song_offers_play_next_and_add_to_queue, test_double_clicking_a_song_plays_it_and_marks_its_row, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back, test_an_albums_page_says_what_it_holds, later: #22 |
+| R7.1 | Play on an album, artist, genre or playlist does the same from its first song | test_play_on_an_album_plays_from_its_first_song, test_play_on_an_album_plays_it_from_its_first_song_and_shuffle_from_any, test_clicks_open_a_view_an_album_its_artist_and_go_back, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, later: #23 |
 
 ## 7.2. The queue
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
 | R7.2 | The queue button in the now-playing bar opens Up next | test_the_queue_button_opens_up_next_and_closes_it_again, test_the_bar_shows_the_song_and_its_buttons_play_it, test_play_next_and_add_to_queue_put_a_rows_songs_where_they_say, test_up_next_lists_the_songs_played_last_the_latest_first, test_an_empty_up_next_says_so_and_a_song_gone_says_that, test_the_bar_and_up_next_keep_their_text_in_their_boxes_at_both_sizes |
-| R7.2 | Now Playing with No visualization shows the same queue at full size | later: #0 |
-| R7.2 | Songs can be reordered and removed there, and dropped onto it | test_a_row_of_up_next_plays_moves_or_goes_at_a_click, test_a_song_to_come_moves_where_it_is_dropped, test_remove_takes_a_song_to_come_or_played_out_and_the_current_one_stays, test_a_move_while_shuffling_leaves_the_order_shuffle_off_returns_to, later: #0 |
-| R7.2 | Every song list's context menu has Play next and Add to queue | test_play_next_goes_right_after_the_current_song_ahead_of_songs_added_before, test_add_to_queue_goes_after_the_songs_added_before_and_ahead_of_the_rest_of_the_list, test_songs_added_to_an_empty_or_played_out_queue_are_cued_there, test_play_next_and_add_to_queue_put_a_rows_songs_where_they_say, test_a_right_click_on_a_song_offers_play_next_and_add_to_queue, test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title, later: #0 |
-| R7.2 | The queue is kept across restarts | later: #0 |
+| R7.2 | Now Playing with No visualization shows the same queue at full size | later: #25 |
+| R7.2 | Songs can be reordered and removed there, and dropped onto it | test_a_row_of_up_next_plays_moves_or_goes_at_a_click, test_a_song_to_come_moves_where_it_is_dropped, test_remove_takes_a_song_to_come_or_played_out_and_the_current_one_stays, test_a_move_while_shuffling_leaves_the_order_shuffle_off_returns_to, later: #24 |
+| R7.2 | Every song list's context menu has Play next and Add to queue | test_play_next_goes_right_after_the_current_song_ahead_of_songs_added_before, test_add_to_queue_goes_after_the_songs_added_before_and_ahead_of_the_rest_of_the_list, test_songs_added_to_an_empty_or_played_out_queue_are_cued_there, test_play_next_and_add_to_queue_put_a_rows_songs_where_they_say, test_a_right_click_on_a_song_offers_play_next_and_add_to_queue, test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title, later: #23 |
+| R7.2 | The queue is kept across restarts | later: #21 |
 
 ## 7.3. Shuffle and repeat
 
@@ -152,19 +152,19 @@ A table row is traced whole, its cells as written.
 |---|---|---|
 | R7.3 | Shuffle plays the queue in a random order without repeating a song until all have played | test_shuffle_plays_every_song_once_before_any_plays_again, test_a_seeded_shuffle_gives_the_same_order_every_time, test_shuffle_keeps_the_songs_added_first_and_off_puts_the_rest_back_in_order, test_a_shuffled_lap_with_repeat_all_never_starts_with_the_song_that_just_ended, test_shuffled_play_of_a_list_starts_from_the_song_chosen_or_one_at_random, test_shuffle_and_repeat_buttons_say_their_state, test_the_bar_shows_the_song_and_its_buttons_play_it |
 | R7.3 | Repeat cycles Off, All and One | test_repeat_cycles_off_all_one_and_off, test_repeat_all_plays_the_queue_again_from_its_start, test_repeat_one_plays_the_song_again_when_it_ends_and_next_still_moves_on, test_shuffle_and_repeat_buttons_say_their_state, test_the_bar_shows_the_song_and_its_buttons_play_it |
-| R7.3 | Both are kept across restarts | later: #0 |
+| R7.3 | Both are kept across restarts | later: #21 |
 
 ## 7.4. Seeking
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
-| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #0 |
+| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #25 |
 
 ## 7.5. ReplayGain
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
-| R7.5 | Track, Album (the default) or Off, a setting (R13) | test_album_is_the_album_gain_in_order_and_the_track_gain_otherwise, test_track_off_and_the_pre_amp_are_the_settings, test_a2_10s_playback_gives_the_device_replaygain_and_its_pre_amp, test_playback_values_broken_in_another_case_or_as_text, later: #0 |
+| R7.5 | Track, Album (the default) or Off, a setting (R13) | test_album_is_the_album_gain_in_order_and_the_track_gain_otherwise, test_track_off_and_the_pre_amp_are_the_settings, test_a2_10s_playback_gives_the_device_replaygain_and_its_pre_amp, test_playback_values_broken_in_another_case_or_as_text, later: #26 |
 | R7.5 | Album uses the album gain when the album is played in order and the track gain otherwise | test_album_is_the_album_gain_in_order_and_the_track_gain_otherwise, test_a_song_with_one_gain_uses_it_whichever_is_asked_for, test_an_album_is_in_order_from_any_of_its_songs_on_and_a_song_alone_isnt, test_an_album_played_in_order_plays_at_its_album_gain_song_after_song, test_an_album_from_its_second_song_on_is_in_order_and_one_song_alone_isnt, test_songs_out_of_their_albums_order_play_at_their_track_gains, test_a_song_repeated_keeps_its_gain_and_a_file_outside_the_index_has_the_pre_amp, test_a_gain_is_held_under_the_peak_so_it_never_clips, test_no_gain_takes_a_peak_past_full_scale, test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join |
 | R7.5 | Songs without ReplayGain tags play at a pre-amp of −6 dB so they aren't louder than those with them | test_a_song_without_replaygain_plays_at_the_pre_amp, test_songs_out_of_their_albums_order_play_at_their_track_gains, test_track_off_and_the_pre_amp_are_the_settings, test_a_song_plays_at_the_replaygain_it_was_asked_with |
 | R7.5 | MusiKata reads ReplayGain | test_each_kind_gives_its_replaygain_as_its_taggers_write_it, test_an_mp3s_replaygain_in_rva2_frames_or_an_apev2_tag, test_opus_r128_gains_win_over_its_replaygain_keys_and_carry_no_peak, test_replaygain_reads_db_and_peaks_in_their_written_forms |
@@ -176,10 +176,10 @@ A table row is traced whole, its cells as written.
 | R7.6 | Playback is gapless | test_a_song_runs_into_the_next_with_no_frame_lost_or_added, test_any_songs_join_frame_for_frame_whatever_the_device_reads, test_songs_of_one_rate_join_as_if_they_were_one_song, test_songs_of_the_queue_join_in_one_stream_the_sink_never_stopped, test_a_next_song_changed_before_the_device_reached_it_is_replaced_with_no_gap, test_a_seek_into_the_last_seconds_opens_the_next_song_and_joins_it, test_an_mp3s_start_delay_and_end_padding_from_its_lame_header_are_left_out, test_an_aac_files_priming_and_padding_from_its_itunsmpb_tag_are_left_out, test_an_aac_files_priming_and_padding_from_its_edit_list_are_left_out |
 | R7.6 | This holds across songs of different sample rates and kinds | test_songs_of_other_rates_and_channels_join_each_at_its_exact_length, test_a_tone_going_on_across_songs_of_other_rates_doesnt_click_at_the_seam, test_each_kind_decodes_to_its_length_and_pitch_at_the_devices_rate, test_an_opus_files_pre_skip_and_end_are_left_out |
 | R7.6 | Crossfading is | statement |
-| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join, test_a_change_of_gain_across_rates_ramps_from_the_seam_too, test_no_frame_of_a_ramp_steps_more_than_its_slope_allows, test_a_join_with_no_change_of_gain_isnt_ramped_and_a_song_alone_has_its_gain, test_a_song_shorter_than_the_ramp_hands_on_the_gain_it_reached, later: #0 |
+| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join, test_a_change_of_gain_across_rates_ramps_from_the_seam_too, test_no_frame_of_a_ramp_steps_more_than_its_slope_allows, test_a_join_with_no_change_of_gain_isnt_ramped_and_a_song_alone_has_its_gain, test_a_song_shorter_than_the_ramp_hands_on_the_gain_it_reached, later: #26 |
 
 ## 7.7. Output
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
-| R7.7 | The output device is the system's default unless one is chosen in Settings (R13) | test_the_device_chosen_is_played_on_when_it_is_there_else_the_default, test_the_engine_plays_on_the_device_chosen_in_settings, test_a_device_that_goes_away_pauses_and_moves_to_the_default_from_the_same_sample, test_another_device_going_away_changes_nothing, test_a_new_device_goes_on_from_the_frame_the_old_one_had_played, test_a_new_device_of_another_rate_hears_the_song_on_from_the_same_instant, tier 3: on each platform headphones or a USB DAC unplugged while a song plays pause it and play goes on from the same place on the default device, later: #0 |
+| R7.7 | The output device is the system's default unless one is chosen in Settings (R13) | test_the_device_chosen_is_played_on_when_it_is_there_else_the_default, test_the_engine_plays_on_the_device_chosen_in_settings, test_a_device_that_goes_away_pauses_and_moves_to_the_default_from_the_same_sample, test_another_device_going_away_changes_nothing, test_a_new_device_goes_on_from_the_frame_the_old_one_had_played, test_a_new_device_of_another_rate_hears_the_song_on_from_the_same_instant, tier 3: on each platform headphones or a USB DAC unplugged while a song plays pause it and play goes on from the same place on the default device, later: #26 |
