@@ -419,8 +419,11 @@ Item {
 
     SelectionBar {
         objectName: "selectionBar"
-        folders: view.folders
+        text: view.folders.selectionText
+        laterActions: view.folders.laterActions
         playNote: view.library.playNote
+        onPlay: view.folders.playSelection()
+        onClear: view.rowsModel.clearSelection()
         visible: view.folders.selectionCount > 0
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom

@@ -14,6 +14,8 @@ And every test's own home, below: `own_home`, and the check of MusiKata's files 
 
 import contextlib
 import functools
+import gc
+import itertools
 import os
 import re
 import stat
@@ -175,6 +177,31 @@ OWN = {
     "LOCALAPPDATA": "AppData/Local",
     "MUSIKATA_DATA": ".local/share/musikata",
 }
+
+
+FULL_EVERY = 50  # tests between whole collections (`garbage_collected`)
+_tests = itertools.count(1)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _collected_on_the_main_thread():
+    """The garbage collector never starts on its own while the tests run (`garbage_collected`)."""
+    gc.disable()
+    yield
+    gc.enable()
+
+
+@pytest.fixture(autouse=True)
+def garbage_collected():
+    """What a test left in reference cycles is collected after it, here, on the main thread, and
+    never by a collection another thread happens to start. A window's bridges (a Library, a Player,
+    their models) are Python-made QObjects that a closed run can leave in cycles; freed by a scan's,
+    a search's or the index writer's collection while the GUI thread delivers an event to one, they
+    crash the run (A1.3: no object is changed from two threads). Nothing collects during a test, so
+    all it made is in the youngest generation, and collecting that is quick; every FULL_EVERY tests,
+    the rest too."""
+    yield
+    gc.collect(2 if next(_tests) % FULL_EVERY == 0 else 0)
 
 
 @pytest.fixture(autouse=True)

@@ -135,6 +135,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.app` | app | Starting, one MusiKata at a time, opening files (R1.6, R1.7) |
 | `musikata.bridges` | app | `Backend`, `Player` and `Library`, as QML sees them (A1.2) |
 | `musikata.models` | app | The list models (A1.5) |
+| `musikata.selection` | app | A song list's selection, by song id, with its anchor and current row: clicks and keys as the lists take them, without Qt (R2.6, R7.1) |
 | `musikata.firstrun` | app | The first start: the root dropped, chosen or the platform's music folder (R2.1, X01-first-run) |
 | `musikata.folders` | app | The Folders view: its model, the open folder, the selection (R2.9, A2.7) |
 | `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |

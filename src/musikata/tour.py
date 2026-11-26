@@ -34,7 +34,8 @@ SIZES = (SHOT, DESIGN)
 
 # (screen, what the window shows, as Library.go takes it): a screen is named for its mockup
 # (docs/mockups/README.md); one that shows only part of its mockup yet says so (L03 without the
-# Edit tags panel, which comes with slice 5); one with no mockup takes the next number of its area
+# Edit tags panel, which comes with slice 5: its search, and four songs selected where the first
+# screen shows them, with the selection bar); one with no mockup takes the next number of its area
 # (Artists, R2.6, is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08); an album's
 # page and an artist's show a search typed into the header over them, as their mockups do (L02,
 # L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of
@@ -46,7 +47,14 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
     ("L10-artists", {"view": "artists"}),
     ("L11-artist", {"view": "artist", "artist": "Lumen Drift", "search": "ebb"}),
-    ("L03-songs", {"view": "songs"}),
+    (
+        "L03-songs",
+        {
+            "view": "songs",
+            "search": "electronic",
+            "select": ["Undertow", "Parallax", "Lowlight", "Salt in the Wires"],
+        },
+    ),
     ("L04-folders", {"view": "folders", "folder": "", "mode": "small"}),
     ("L05-folders-large", {"view": "folders", "folder": "Lumen Drift", "mode": "large"}),
     (

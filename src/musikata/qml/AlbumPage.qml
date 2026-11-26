@@ -8,13 +8,30 @@ import "."
 // and Album art, which come with later slices (the Edit tags panel, album art); the album's state
 // chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
 // rest shuffled (R7.1, R7.3); a song's double click plays it and the rest after it, its right click
-// opens its menu (R7.2).
+// opens its menu (R7.2). Its songs are selected as the Songs list's are (R2.6), clicks and keys
+// forwarded to the model; Enter plays the selection from its first song, the rest of the album after
+// it (R7.1), and the menu acts on the selection when the row is in it.
 Item {
     id: page
     required property var library
     required property var player
     readonly property var album: library.album
+    readonly property var tracks: album.songs
     readonly property bool loading: art.loading
+    focus: true
+
+    function tapped(index, modifiers) {
+        page.forceActiveFocus()
+        page.tracks.click(index, (modifiers & Qt.ControlModifier) !== 0, (modifiers & Qt.ShiftModifier) !== 0)
+    }
+    Keys.onReturnPressed: page.player.playSelection(page.tracks)
+    Keys.onEnterPressed: page.player.playSelection(page.tracks)
+    Keys.onPressed: (event) => {
+        const row = page.tracks.press(event.key, event.modifiers, Math.max(1, Math.floor(songs.height / 42)))
+        event.accepted = row !== -2
+        if (row >= 0)
+            songs.positionViewAtIndex(row, ListView.Contain)
+    }
 
     Cover {
         id: art
@@ -164,8 +181,10 @@ Item {
                 required property int index
                 width: songs.width
                 columns: table.columns
-                onActivated: page.player.playFrom(page.album.songs, index)
-                onMenu: songMenu.openFor(page.album.songs, index)
+                focused: page.activeFocus
+                onTapped: (modifiers) => page.tapped(index, modifiers)
+                onActivated: page.player.playFrom(page.tracks, index)
+                onMenu: songMenu.openFor(page.tracks, index)
             }
             ScrollBar.vertical: ScrollBar { }
         }

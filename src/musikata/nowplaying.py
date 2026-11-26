@@ -22,13 +22,15 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     Qt,
     Signal,
+    Slot,
 )
 
 from musikata_core.albums import ALBUM_ORDER
 from musikata_core.audio.gain import AlbumPlace, Loudness
 from musikata_core.audio.queue import ALL, ONE, Entry, Queue
 
-from .models import artist_text, cover_url, length_text, time_text, title_of
+from .models import artist_text, cover_url, key_name, length_text, time_text, title_of
+from .selection import NOT_MINE, Selection
 
 CHUNK = 500  # ids looked up at a time
 PAGE = 200  # Up next's rows read at a time
@@ -137,15 +139,23 @@ def section_of(entry: Entry, kind: str, source: str) -> str:
     return f"Next from {source}" if source else "Next"
 
 
-ROLES = ("key", "kind", "section", "first", "title", "line", "time", "cover", "path")
+ROLES = (
+    "key", "kind", "section", "first", "title", "line", "time", "cover", "path", "selected",
+    "current",
+)  # fmt: skip
 
 
 class UpNextModel(QAbstractListModel):
     """Up next (R7.2): a row per song of the queue, the song playing first, then those to come,
     then those played, the latest first. Each row: its entry's key, its kind ("now", "next",
     "played"), the heading it falls under and whether it is the first under it, its title, the
-    line under it, its length and cover. The songs' rows are read from the index a page at a
-    time, as they are shown."""
+    line under it, its length and cover, and whether it is selected and the current row. The
+    songs' rows are read from the index a page at a time, as they are shown.
+
+    Its rows are selected as every song list's are (R2.6, selection.Selection), by their entries'
+    keys, so the selection stays with its songs as the queue changes: Enter plays the first song
+    selected, Delete takes them out of the queue (the Player bridge's `playSelected` and
+    `removeSelected`)."""
 
     changed = Signal()  # the line over the list
 
@@ -159,6 +169,7 @@ class UpNextModel(QAbstractListModel):
         self._lengths: dict[int, float] = {}  # every queued song's length, for the line
         self._line = ""
         self._note = ""  # why the songs up next can't play now (R2.10)
+        self._selection: Selection[int] = Selection()
 
     def set_note(self, note: str) -> None:
         """Why the song after the current one can't play now ("" when it can), shown in place of
@@ -176,6 +187,7 @@ class UpNextModel(QAbstractListModel):
             + [(e, "played") for e in reversed(q.played)]
         )
         self._info.clear()
+        self._selection.keep(self._keys())
         self.endResetModel()
         upcoming = q.upcoming
         missing = [e.song for e in upcoming if e.song not in self._lengths]
@@ -209,7 +221,45 @@ class UpNextModel(QAbstractListModel):
             "key": entry.key, "kind": kind, "section": section, "first": first,
             "title": shown.title, "line": row_line(shown) if info else "",
             "time": time_text(shown.length), "cover": shown.cover, "path": shown.path,
+            "selected": entry.key in self._selection,
+            "current": entry.key == self._selection.current,
         }  # fmt: skip
+
+    # ---------- the selection (R2.6) ----------
+
+    def _keys(self) -> list[int]:
+        return [e.key for e, _ in self._rows]
+
+    def selected(self) -> list[tuple[Entry, str]]:
+        """The rows selected, each its entry and kind, in Up next's order."""
+        return [r for r in self._rows if r[0].key in self._selection]
+
+    def first_selected(self) -> int:
+        """The first row selected; -1 for none."""
+        return self._selection.first(self._keys())
+
+    def _selection_changed(self) -> None:
+        if self._rows:
+            changed = [self._role("selected"), self._role("current")]
+            self.dataChanged.emit(self.index(0), self.index(len(self._rows) - 1), changed)
+
+    def _role(self, name: str) -> int:
+        return int(Qt.ItemDataRole.UserRole) + ROLES.index(name)
+
+    @Slot(int, bool, bool)
+    def click(self, row: int, ctrl: bool, shift: bool) -> None:
+        """A click on row `row`, as on any song list's (SongsModel.click)."""
+        if self._selection.click(self._keys(), row, ctrl, shift):
+            self._selection_changed()
+
+    @Slot(int, int, int, result=int)
+    def press(self, key: int, modifiers: int, page: int) -> int:
+        """A key pressed while Up next has the focus, as on any song list's (SongsModel.press)."""
+        name, shift = key_name(key, modifiers)
+        row = self._selection.press(self._keys(), name, shift, page)
+        if row != NOT_MINE:
+            self._selection_changed()
+        return row
 
     # ---------- QAbstractListModel ----------
 

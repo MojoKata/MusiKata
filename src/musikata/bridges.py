@@ -714,7 +714,8 @@ class Library(QObject):
         {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}, {"view": "artist",
         "artist": "Lumen Drift"}; or Folders at a
         folder, in a mode, with rows selected: {"view": "folders", "folder": "Lumen Drift",
-        "mode": "large", "select": ["Lumen Drift/Remixes"]}."""
+        "mode": "large", "select": ["Lumen Drift/Remixes"]}; or Songs with songs selected, by
+        their titles: {"view": "songs", "select": ["Neap Tide", "Moonpull"]}."""
         view = step["view"]
         c = self._index.read()
         if view == "folders":
@@ -736,6 +737,11 @@ class Library(QObject):
         else:
             self.show(view)
             self.setSearch(step.get("search", ""))
+            titles = list(step.get("select", []))
+            if view == "songs" and titles:
+                marks = ", ".join("?" * len(titles))
+                found = c.execute(f"SELECT id FROM song WHERE title IN ({marks})", titles)
+                self._songs.select_songs([r[0] for r in found])
 
     # ---------- Albums' genre chips ----------
 
@@ -1360,7 +1366,8 @@ class Queueable(Protocol):
         ...
 
     def songs_at(self, row: int) -> list[int]:
-        """The songs row `row` stands for: its own, or those beneath a folder."""
+        """The songs a right click on row `row` stands for: its own, those beneath a folder, or,
+        in a list of songs, the whole selection when the row is in it."""
         ...
 
 
@@ -1524,6 +1531,15 @@ class Player(QObject):
         ids, source = songs.queue_from(row)
         self.play_songs(ids, source)
 
+    @Slot(QObject)
+    def playSelection(self, songs: SongsModel) -> None:  # noqa: N802
+        """Enter on a list's selection (R7.1, R6.9): its first song plays, and the rest of the
+        list after it is the queue, so every song selected plays, in the list's order; with
+        nothing selected, nothing."""
+        ids, source = songs.queue_from_selection()
+        if ids:
+            self.play_songs(ids, source)
+
     @Slot(int)
     def playAlbum(self, album_id: int) -> None:  # noqa: N802
         """Play on an album: its songs by disc and track, from its first (R7.1)."""
@@ -1620,6 +1636,12 @@ class Player(QObject):
         """A song list's Add to queue: the row's songs after those added before."""
         self._added(self.queue.add(songs.songs_at(row)))
 
+    @Slot(QObject)
+    def playNextSelection(self, songs: SongsModel) -> None:  # noqa: N802
+        """The Songs selection bar's Play next (L03-songs-bulk-edit): the songs selected, in the
+        list's order, right after the current one."""
+        self._added(self.queue.play_next(songs.selected_songs()))
+
     def _added(self, entries: list[Entry]) -> None:
         """Songs went into the queue: shown at once when nothing was there (cued, not started)."""
         if entries and self.queue.current is entries[0]:
@@ -1641,6 +1663,18 @@ class Player(QObject):
         """Up next's ×: the song out of the queue; the song playing stays."""
         found = self._up_next.entry(row)
         if found is not None and self.queue.remove(found[0].key):
+            self._queue_changed()
+
+    @Slot()
+    def playSelected(self) -> None:  # noqa: N802
+        """Enter on Up next's selection: its first song plays, as a double click on it would."""
+        self.playRow(self._up_next.first_selected())
+
+    @Slot()
+    def removeSelected(self) -> None:  # noqa: N802
+        """Delete on Up next's selection: its songs out of the queue; the song playing stays."""
+        removed = [self.queue.remove(entry.key) for entry, _ in self._up_next.selected()]
+        if any(removed):
             self._queue_changed()
 
     @Slot(int, int)

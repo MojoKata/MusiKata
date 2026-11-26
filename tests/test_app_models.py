@@ -1,5 +1,7 @@
 """The Songs list's model (src/musikata/models.py; A1.5): rows paged from the index, ordered by
-SQL, and what each row shows decided in Python, not in QML."""
+SQL, and what each row shows decided in Python, not in QML; its selection (R2.6), kept by song id
+through paging, sorting, searches and scans, and what Enter and the right-click menu take from it
+(R7.1, R7.2)."""
 
 import os
 import threading
@@ -76,7 +78,8 @@ def test_the_roles_give_each_field_as_text_genres_joined_in_their_order(index):
     got = {n: m.data(at, r) for n, r in names.items()}
     assert got == {"title": "Neap Tide", "artist": "Lumen Drift", "album": "Tide Tables",
                    "genre": "Electronic; Ambient", "year": "2022", "track": "7", "rating": 4,
-                   "plays": "", "time": "4:18", "path": "a.flac", "playing": False}  # fmt: skip
+                   "plays": "", "time": "4:18", "path": "a.flac", "playing": False,
+                   "selected": False, "current": False}  # fmt: skip
     assert m.data(at, int(Qt.ItemDataRole.DisplayRole)) is None
     assert m.data(m.index(5, 0), names["title"]) is None
     assert m.rowCount(at) == 0 and m.row(-1) is None
@@ -490,3 +493,150 @@ def test_a_search_that_fails_finds_nothing_and_says_why_in_the_log(
     monkeypatch.setattr(models.search, "condition", lambda q: ("no such column", ()))
     searched(m, qtbot, "x")
     assert m.count == 0 and m.total() == 0 and "a search failed" in caplog.text
+
+
+# ---------- the selection (R2.6) ----------
+
+
+def by_title(m):
+    return [m.row(i)["title"] for i in range(m.rowCount())]
+
+
+def chosen_titles(m, index):
+    found = dict(index.read().execute("SELECT id, title FROM song"))
+    return [found[i] for i in m.property("selection")]
+
+
+def test_a_rows_roles_say_whether_it_is_selected_and_the_current_row(index, qtbot):
+    fill(index, [{"path": f"{n}.flac", "title": f"Song {n}"} for n in range(3)])
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    with qtbot.waitSignal(m.selectionChanged):
+        m.click(1, False, False)
+    m.click(2, True, False)
+    assert [(roles(m, n)["selected"], roles(m, n)["current"]) for n in range(3)] == [
+        (False, False), (True, False), (True, True)
+    ]  # fmt: skip
+    assert roles(m, 5)["selected"] is None and roles(m, 5)["current"] is None
+    assert m.property("selectionCount") == 2 and m.property("selectionText") == "2 selected"
+    assert m.property("selectionState") == "some"
+    m.toggle(1)  # its checkbox: taken away
+    m.click(0, False, True)  # Shift: from the anchor, Song 1, to it
+    assert chosen_titles(m, index) == ["Song 0", "Song 1"]
+    m.toggleAll()
+    assert m.property("selectionState") == "none"
+    m.toggleAll()
+    assert m.property("selectionState") == "all" and m.property("selectionCount") == 3
+    m.clearSelection()
+    m.selectAll()
+    assert m.property("selectionCount") == 3
+    m.click(9, False, False)  # past the rows: nothing
+    assert m.property("selectionCount") == 3
+
+
+def test_keys_move_select_and_clear_and_a_key_the_list_doesnt_use_goes_on(index):
+    fill(index, [{"path": f"{n}.flac", "title": f"Song {n}"} for n in range(5)])
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    k, mod = Qt.Key, Qt.KeyboardModifier
+    shift, ctrl = int(mod.ShiftModifier.value), int(mod.ControlModifier.value)
+    assert m.press(int(k.Key_Down.value), 0, 3) == 0
+    assert m.press(int(k.Key_Down.value), shift, 3) == 1
+    assert chosen_titles(m, index) == ["Song 0", "Song 1"]
+    assert m.press(int(k.Key_PageDown.value), 0, 3) == 4 and chosen_titles(m, index) == ["Song 4"]
+    assert m.press(int(k.Key_Home.value), shift, 3) == 0 and m.property("selectionCount") == 5
+    assert m.press(int(k.Key_Escape.value), 0, 3) == -1 and m.property("selectionCount") == 0
+    assert m.press(int(k.Key_Escape.value), 0, 3) == models.NOT_MINE  # nothing left to clear
+    assert m.press(int(k.Key_A.value), ctrl, 3) == -1 and m.property("selectionCount") == 5
+    assert m.press(int(k.Key_Space.value), 0, 3) == models.NOT_MINE
+
+
+def test_which_keys_are_the_lists_and_with_which_modifiers():
+    k, mod = Qt.Key, Qt.KeyboardModifier
+    shift, ctrl = int(mod.ShiftModifier.value), int(mod.ControlModifier.value)
+    alt, keypad = int(mod.AltModifier.value), int(mod.KeypadModifier.value)
+    up, a = int(k.Key_Up.value), int(k.Key_A.value)
+    assert models.key_name(up, 0) == ("up", False)
+    assert models.key_name(up, shift | keypad) == ("up", True)  # macOS's arrows are the keypad's
+    assert models.key_name(up, alt) == ("", False)  # Alt+↑: up a folder (R2.9.1)
+    assert models.key_name(up, ctrl | shift) == ("", True)  # Ctrl+Shift+↑: a playlist's (R6.9)
+    assert models.key_name(a, ctrl) == ("all", False) and models.key_name(a, 0) == ("", False)
+    assert models.key_name(int(k.Key_End.value), 0) == ("end", False)
+
+
+def test_the_selection_stays_with_its_songs_through_paging_sorting_and_a_rescan(
+    index, qtbot, monkeypatch
+):
+    """Long lists are paged by id (A1.5): the selection is kept by song id, so it is the same songs
+    on whatever page they are, in another order, and after a scan that keeps them."""
+    monkeypatch.setattr(models, "PAGE", 4)
+    monkeypatch.setattr(models, "KEEP", 1)
+    fill(index, [{"path": f"{n:02}.flac", "title": f"Song {n:02}"} for n in range(20)])
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    m.click(2, False, False)
+    m.click(17, True, False)  # on another page
+    m.row(10)  # the first page dropped
+    assert roles(m, 2)["selected"] and roles(m, 17)["selected"] and not roles(m, 10)["selected"]
+    m.sort_by("title", descending=True)
+    assert chosen_titles(m, index) == ["Song 17", "Song 02"]
+    assert roles(m, 2)["selected"] and roles(m, 17)["selected"]  # 17 and 2, the other way round
+    assert roles(m, 2)["current"]  # the current row moved with its song
+    fill(index, [{"path": "aa.flac", "title": "Song 99"}])  # a scan adds a song at the top
+    m.refresh()
+    assert chosen_titles(m, index) == ["Song 17", "Song 02"] and roles(m, 3)["selected"]
+    with qtbot.waitSignal(m.selectionChanged):  # a scan takes a selected song away
+        index.write(lambda c: c.execute("DELETE FROM song WHERE path = '17.flac'")).result()
+        m.refresh()
+    assert chosen_titles(m, index) == ["Song 02"] and m.property("selectionCount") == 1
+
+
+def test_a_search_keeps_the_songs_it_leaves_selected_and_select_all_takes_what_it_shows(
+    index, qtbot
+):
+    fill(index, [{"path": f"{n}.flac", "title": f"Tide {n}"} for n in range(3)]
+         + [{"path": "x.flac", "title": "Other"}])  # fmt: skip
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    m.click(0, False, False)
+    m.click(3, False, True)  # all four
+    searched(m, qtbot, "tide")
+    assert chosen_titles(m, index) == ["Tide 0", "Tide 1", "Tide 2"]  # Other left the list
+    m.clearSelection()
+    m.selectAll()  # the filtered list's songs
+    assert m.property("selectionCount") == 3 and m.property("selectionState") == "all"
+    searched(m, qtbot, "")
+    assert m.property("selectionCount") == 3 and m.property("selectionState") == "some"
+    m.wait()
+
+
+def test_enter_plays_from_the_first_song_selected_and_the_menu_takes_the_whole_selection(index):
+    fill(index, [{"path": f"{n}.flac", "title": f"Song {n}"} for n in range(5)])
+    m = models.SongsModel(index.read, "title")
+    m.source = "Songs"
+    m.reload()
+    ids = m.queue_from(0)[0]  # the songs, in the list's order
+    assert m.queue_from_selection() == ([], "Songs")  # nothing selected: nothing plays
+    m.click(3, False, False)
+    m.click(1, True, False)  # the first in the list's order, though clicked last
+    assert m.property("selection") == [ids[1], ids[3]]
+    assert m.queue_from_selection() == (ids[1:], "Songs")
+    assert m.songs_at(3) == [ids[1], ids[3]]  # a row in the selection: all of it
+    assert m.songs_at(0) == [ids[0]]  # one outside it: its own
+    assert m.songs_at(9) == []
+
+
+def test_songs_chosen_to_show_selected_wait_for_a_searchs_rows(index, qtbot):
+    fill(index, [{"path": f"{n}.flac", "title": f"Tide {n}"} for n in range(3)]
+         + [{"path": "x.flac", "title": "Other"}])  # fmt: skip
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    wanted = [i for (i,) in index.read().execute("SELECT id FROM song WHERE title != 'Tide 1'")]
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.set_search("tide")
+        m.select_songs(wanted)
+        assert m.property("selectionCount") == 0  # not yet: the rows are still to come
+    assert chosen_titles(m, index) == ["Tide 0", "Tide 2"]
+    m.select_songs(wanted[:1])  # rows there: at once
+    assert chosen_titles(m, index) == ["Tide 0"]
+    m.wait()

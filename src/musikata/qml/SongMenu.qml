@@ -3,8 +3,9 @@ import QtQuick.Controls.Basic
 import "."
 
 // A song list's right-click menu (R7.2): Play next and Add to queue, for the row it was opened on
-// (a folder's row stands for its songs). It holds only these so far; the rest of R2.9.6's comes
-// with the slices that build them.
+// (a folder's row stands for its songs), or in a list of songs for the whole selection when that
+// row is in it (the model's songs_at decides). It holds only these so far; the rest of R2.9.6's
+// comes with the slices that build them.
 Menu {
     id: menu
     required property var player

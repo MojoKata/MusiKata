@@ -58,7 +58,7 @@ def test_it_waits_for_the_scan_and_fails_on_a_text_past_its_box(shell, tmp_path,
     t, code = run(shell, tmp_path / "tour", qtbot, only="L03-songs")
     assert code == 1
     assert any("runs past rootCard" in f for f in t.faults)
-    assert shell.library.property("songs").rowCount() == 1
+    assert shell.library.property("songs").total() == 1  # its search aside
     written = (tmp_path / "tour" / "layout.txt").read_text()
     assert "L03-songs at 1280 x 800" in written and "L03-songs at 1920 x 1040" in written
 

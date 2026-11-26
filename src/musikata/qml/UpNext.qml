@@ -8,8 +8,10 @@ import "."
 // Harbor"), and the songs played, dimmed, the latest first; each with its cover, title, artist and
 // album, and length, under its heading (N03-now-playing-queue's rows). A row under the pointer shows
 // its drag handle, to reorder the songs to come, and its ×, to take it out; a double click plays it.
-// Esc or the × at the top closes it. Songs dropped onto it from other views (R6.10) come with drag
-// and drop.
+// Its rows are selected as every song list's are (R2.6), clicks and keys forwarded to the model:
+// Enter plays the first song selected, Delete takes the selection out of the queue. Esc clears the
+// selection, or with none closes it, as the × at the top does. Songs dropped onto it from other
+// views (R6.10) come with drag and drop.
 Rectangle {
     id: panel
     required property var player
@@ -19,7 +21,18 @@ Rectangle {
     color: Theme.surface
     border.color: Theme.borderStrong
     focus: visible
-    Keys.onEscapePressed: panel.player.closeUpNext()
+    Keys.onReturnPressed: panel.player.playSelected()
+    Keys.onEnterPressed: panel.player.playSelected()
+    Keys.onDeletePressed: panel.player.removeSelected()
+    Keys.onPressed: (event) => {
+        const row = panel.model.press(event.key, event.modifiers, Math.max(1, Math.floor(rows.height / 48)))
+        if (row === -2 && event.key === Qt.Key_Escape)
+            panel.player.closeUpNext()
+        else
+            event.accepted = row !== -2
+        if (row >= 0)
+            rows.positionViewAtIndex(row, ListView.Contain)
+    }
 
     TapHandler { }  // a click inside the panel stays in it
 
@@ -78,11 +91,14 @@ Rectangle {
             required property string line
             required property string time
             required property string cover
+            required property bool selected
+            required property bool current
             readonly property real headed: first ? 28 : 0
             width: rows.width
             height: headed + 48
             Accessible.role: Accessible.ListItem
             Accessible.name: row.title
+            Accessible.selected: row.selected
 
             Text {
                 visible: row.first
@@ -100,11 +116,21 @@ Rectangle {
                 width: row.width
                 height: 46
                 radius: 10
-                color: row.kind === "now" ? Theme.accentSoft : (hover.hovered ? Theme.hover : "transparent")
+                color: row.selected ? Theme.sel : row.kind === "now" ? Theme.accentSoft : (hover.hovered ? Theme.hover : "transparent")
+                border.color: Theme.accent
+                border.width: row.current && panel.activeFocus ? 1.5 : 0
                 opacity: row.kind === "played" ? 0.55 : 1
 
                 HoverHandler { id: hover }
-                TapHandler { onDoubleTapped: panel.player.playRow(row.index) }
+                TapHandler {
+                    id: tap
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
+                    onTapped: {
+                        panel.forceActiveFocus()
+                        panel.model.click(row.index, (tap.point.modifiers & Qt.ControlModifier) !== 0, (tap.point.modifiers & Qt.ShiftModifier) !== 0)
+                    }
+                    onDoubleTapped: panel.player.playRow(row.index)
+                }
 
                 Item {  // the drag handle: a song to come is dropped where the line shows
                     objectName: "dragHandle"
@@ -191,7 +217,7 @@ Rectangle {
                     Accessible.role: Accessible.Button
                     Accessible.name: qsTr("Remove %1 from the queue").arg(row.title)
                     Icon { anchors.centerIn: parent; name: "close"; size: 13; color: Theme.muted }
-                    TapHandler { onTapped: panel.player.removeRow(row.index) }
+                    TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: panel.player.removeRow(row.index) }
                 }
             }
         }
