@@ -6,7 +6,8 @@ time and opening files (R1.6, R1.7) come with the slices that need them (DEVELOP
 
 A run is a `Session`: the first start's window (firstrun.py) until a root is chosen, then the
 window over the root; a root chosen again (Choose another folder…, R2.10) opens in its place. The
-first root opened starts the cleanup of A2.9 on a thread of its own."""
+first root opened starts the cleanup of A2.9 on a thread of its own. Each root opens with what was
+playing when it last closed, cued (R1.8), but for the tour, whose screens are the same every run."""
 
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from shiboken6 import Shiboken
 
-from musikata_core import __version__, db, roots, settings, workers
+from musikata_core import __version__, db, nowplaying, roots, settings, workers
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 
@@ -39,6 +40,7 @@ from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
 FIRST_QML = os.path.join(os.path.dirname(QML), "FirstRun.qml")
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,11 @@ class Options:
 
 def home_of(env: Mapping[str, str]) -> str:
     return env.get("HOME") or env.get("USERPROFILE") or os.path.expanduser("~")
+
+
+def computer_name() -> str:
+    """This computer's name, for display beside its id (A2.8)."""
+    return platform.node() or "this computer"
 
 
 def options(argv: Sequence[str], env: Mapping[str, str]) -> Options:
@@ -151,12 +158,14 @@ def load(
     playback: Callable[[], Engine] = Engine,
     given: bool = False,
     controls: Callable[[Player, QQuickWindow, media.Art], media.MediaControls] = media.start,
+    keep: bool = True,
 ) -> Shell:
     """The window over the root's index, not yet shown, the root watched once scanned (A2.4).
     `playback` makes the playback thread's engine (a test's plays generated audio on a device it
     chooses). `given`: the root is for this run only, and the window's title names it (R2.1.2).
     A root that isn't there opens with its library as it was (R2.10). `controls` starts the
-    system's media controls over the player, the window and the cover cache (A4.5)."""
+    system's media controls over the player, the window and the cover cache (A4.5). `keep`: what
+    was playing comes back, cued, and is kept from now on (R1.8, `keep_playing`)."""
     index = open_index(root, env, clock)
     missing = not os.path.isdir(root)
     cache = cache_of(index, env)
@@ -173,6 +182,8 @@ def load(
         player.reach_changed
     )  # the song playing ends, nothing after (R2.10)
     library.property("folders").play.connect(player.play_songs)
+    if keep:
+        keep_playing(player, root, index, shared, env, clock)
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
@@ -185,6 +196,37 @@ def load(
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(engine, window, library, player, index, controls(player, window, covers.file))
+
+
+def keep_playing(
+    player: Player,
+    root: str,
+    index: db.Index,
+    shared: settings.Shared,
+    env: Mapping[str, str],
+    clock: Clock,
+) -> None:
+    """What was playing when the root last closed on this computer comes back in `player`,
+    cued (R1.8), its songs found in the index by path or hash; and from now on it is kept in the
+    root's `.musikata/<computer id>/now-playing.json`, or beside the index when that can't be
+    written (R1.5.2, A2.8). Read here, before the window shows, as the shared settings are."""
+    where = nowplaying.places(root, os.path.dirname(index.path), shared.computer_id)
+    kept = nowplaying.load(where)
+    state, dropped = nowplaying.restore(kept, nowplaying.finder(index.read()))
+    if dropped:
+        log.info("%d songs of the queue kept are no longer in the library", dropped)
+    player.restore(state)
+    path, home, name = settings.shared_path(env), home_of(env), computer_name()
+    player.keep(
+        nowplaying.Keeping(
+            where,
+            index.read,
+            clock,
+            kept,
+            computer=functools.partial(settings.computer_id, path, home, name),
+            set_playback=functools.partial(settings.set_playback, path, home, name),
+        )
+    )
 
 
 @dataclass
@@ -238,10 +280,12 @@ class Session(QObject):
         pool: Callable[[], Executor] = workers.pool,
         playback: Callable[[], Engine] = Engine,
         controls: Callable[[Player, QQuickWindow, media.Art], media.MediaControls] = media.start,
+        keep: bool = True,
     ) -> None:
         super().__init__()
         self._env, self._clock, self.given = env, clock, given
         self._pool, self._playback, self._controls = pool, playback, controls
+        self._keep = keep
         self.shell: Shell | None = None
         self.first: FirstStart | None = None
         self._cleanup: threading.Thread | None = None  # A2.9's, once the first root opened
@@ -269,7 +313,14 @@ class Session(QObject):
 
     def _open(self, root: str) -> Shell:
         shell = load(
-            root, self._env, self._clock, self._pool, self._playback, self.given, self._controls
+            root,
+            self._env,
+            self._clock,
+            self._pool,
+            self._playback,
+            self.given,
+            self._controls,
+            self._keep,
         )
         shell.library.rootChosen.connect(self.choose, Qt.ConnectionType.QueuedConnection)
         self.shell = shell
@@ -289,7 +340,7 @@ class Session(QObject):
         for it only, and opened in the window's place."""
         if not self.given:
             path, home = settings.shared_path(self._env), home_of(self._env)
-            settings.choose_root(path, home, root, platform.node() or "this computer")
+            settings.choose_root(path, home, root, computer_name())
         old_window = self.window
         old: Shell | FirstStart | None = self.shell or self.first
         if self.shell is not None:  # the system's controls go to the new window, by MPRIS's name
@@ -378,7 +429,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
     configured = settings.load(settings.shared_path(os.environ), home_of(os.environ)).root
     root, given = root_for(opts, configured)
-    session = Session(os.environ, SystemClock(), given)
+    session = Session(os.environ, SystemClock(), given, keep=not opts.tour)
     session.start(root)
     once = None
     if opts.tour:

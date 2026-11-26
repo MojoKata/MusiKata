@@ -197,10 +197,11 @@ class Engine(QObject):
         song plays on it."""
         self._chosen = chosen
 
-    @Slot(str, int, float)
-    def play(self, path: str, ticket: int, level: float = 1.0) -> None:
-        """Plays the file at `path` from its start, in place of what was playing, its samples
-        multiplied by `level` (its ReplayGain, R7.5)."""
+    @Slot(str, int, float, float)
+    def play(self, path: str, ticket: int, level: float = 1.0, at: float = 0.0) -> None:
+        """Plays the file at `path` from `at` seconds into it (0: its start; R1.8's restored
+        place), in place of what was playing, its samples multiplied by `level` (its ReplayGain,
+        R7.5)."""
         self._halt()
         device = self._output() if self._output is not None else chosen_output(self._chosen)
         if device.isNull():
@@ -215,7 +216,7 @@ class Engine(QObject):
             return
         ring = Stream(rate, channels)
         self._feed = Feed(ring, lambda p: self._opener(p, rate, channels))
-        self._feed.start(ticket, path, song, level)
+        self._feed.start(ticket, path, song, level, round(max(0.0, at) * rate))
         if not self._fill(ring.ring.capacity):  # the whole ring before the first pull
             return
         if not self._open_sink(device, fmt, ring, start=True):

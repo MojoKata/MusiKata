@@ -28,7 +28,7 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
 from musikata import app, bridges, models, player
-from musikata_core import settings
+from musikata_core import nowplaying, settings
 from musikata_core.audio import gain, stream
 from musikata_core.audio.decode import DecodeError
 
@@ -295,6 +295,19 @@ def test_a_seek_moves_the_sound_and_the_position_follows_from_there(make, qtbot)
     qtbot.waitUntil(lambda: p.property("position") > 3.2, timeout=WAIT)
     assert min(log["positions"][since:]) >= 3.0  # never back to where it was
     qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_a_queue_kept_across_a_restart_plays_on_from_its_place(queued, qtbot):
+    """R1.8: the song cued at its place starts there when play is pressed, never from its start."""
+    p, ids = queued(Tone(4.0))
+    p.restore(nowplaying.State(((ids[0], False), (ids[1], False)), (0, 1), 0, 3.0, ""))
+    assert p.property("position") == 3.0 and not p.property("playing")
+    log = heard(p)
+    p.toggle()
+    qtbot.waitUntil(lambda: p.property("position") > 3.2, timeout=WAIT)
+    assert min(log["positions"]) >= 3.0  # never from the start
+    qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
 
 
 @pytest.mark.slow

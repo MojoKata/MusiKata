@@ -137,12 +137,14 @@ class Feed:
         """The song the device plays."""
         return self.flight[0] if self.flight else None
 
-    def start(self, ticket: int, path: str, song: Song, gain: float = 1.0) -> None:
-        """`song` plays from its start, first in an empty stream, its frames multiplied by
-        `gain`."""
-        playing = Playing(ticket, path, song, mark=self.stream.written, gain=gain)
+    def start(self, ticket: int, path: str, song: Song, gain: float = 1.0, frame: int = 0) -> None:
+        """`song` plays from its frame `frame` (at the device's rate; 0, its start: a queue kept
+        across a restart starts where it was, R1.8), first in an empty stream, its frames
+        multiplied by `gain`."""
+        frame = max(0, frame)
+        playing = Playing(ticket, path, song, mark=self.stream.written, offset=frame, gain=gain)
         self.flight = [playing]
-        self._decode(playing, 0)
+        self._decode(playing, frame)
 
     def close(self) -> None:
         """Every song let go of."""

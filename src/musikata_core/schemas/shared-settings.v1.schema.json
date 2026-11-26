@@ -60,9 +60,21 @@
         },
         "resume": {
           "type": "boolean"
+        },
+        "shuffle": {
+          "type": "boolean",
+          "description": "The queue's shuffle (R7.3)"
+        },
+        "repeat": {
+          "enum": [
+            "off",
+            "all",
+            "one"
+          ],
+          "description": "The queue's repeat (R7.3)"
         }
       },
-      "description": "R13.7"
+      "description": "R13.7; shuffle and repeat, R7.3"
     },
     "equalizer": {
       "type": "object",

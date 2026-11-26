@@ -73,6 +73,23 @@ class Queue:
         """OFF, ALL or ONE (R7.3)."""
         return self._repeat
 
+    @property
+    def order(self) -> list[Entry]:
+        """Every entry in the order they play: those played, the current one, those to come."""
+        return list(self._order)
+
+    @property
+    def cursor(self) -> int:
+        """The current entry's place in `order`; len(order) once the queue has played out."""
+        return self._cursor
+
+    @property
+    def unshuffled(self) -> list[int]:
+        """Each entry of `order`'s place in the order shuffle off returns to (R7.3): its own place
+        while not shuffling."""
+        rank = {e.key: i for i, e in enumerate(self._natural)}
+        return [rank[e.key] for e in self._order]
+
     def __len__(self) -> int:
         return len(self._order)
 
@@ -219,6 +236,31 @@ class Queue:
             self._cursor -= 1
         self._lap_order = None
         return True
+
+    def restore(
+        self,
+        songs: Sequence[tuple[int, bool]],
+        unshuffled: Sequence[int],
+        cursor: int,
+        source: str = "",
+    ) -> Entry | None:
+        """The queue becomes `songs`, each a song id and whether the user added it, in the order
+        they play, as kept across a restart (R1.8, R7.2): those before `cursor` played, the one
+        at it current (`cursor` past the end: played out). While shuffling, `unshuffled` gives
+        each one's place in the order shuffle off returns to (R7.3); one that isn't a place for
+        each song, and every one while not shuffling, leaves them in the order they play. The
+        next lap's order (repeat All) is drawn afresh. Gives the current song."""
+        entries = [Entry(next(self._keys), song, added) for song, added in songs]
+        self._order = entries
+        self._natural = list(entries)
+        if self._shuffle and sorted(unshuffled) == list(range(len(entries))):
+            self._natural = [
+                entries[i] for i in sorted(range(len(entries)), key=unshuffled.__getitem__)
+            ]
+        self._cursor = max(0, min(cursor, len(entries)))
+        self._lap_order = None
+        self.source = source
+        return self.current
 
     def clear(self) -> None:
         """Empties the queue; shuffle and repeat stay as they are."""

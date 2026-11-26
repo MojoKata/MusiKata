@@ -301,3 +301,65 @@ def test_the_song_after_the_next_is_what_the_queue_plays_then_without_moving():
     one.play([9])
     one.set_repeat(queue.ALL)
     assert one.after_following().song == 9
+
+
+# ---------- kept across restarts (R1.8, R7.2, R7.3) ----------
+
+
+def test_a_queue_restored_is_cued_on_its_current_song_with_what_the_user_added():
+    q = Queue()
+    entry = q.restore([(10, False), (11, False), (20, True), (12, False)], [0, 1, 3, 2], 1, "GH")
+    assert entry.song == 11 and songs(q) == ([10], 11, [20, 12]) and q.source == "GH"
+    assert [e.added for e in q.order] == [False, False, True, False] and q.cursor == 1
+    assert q.unshuffled == [0, 1, 2, 3]  # not shuffling: the order it plays in
+    assert q.add([30])[0].song == 30 and songs(q)[2] == [20, 30, 12]  # after those added before
+
+
+def test_a_shuffled_queue_restored_comes_back_in_its_order_and_shuffle_off_finds_the_one_before():
+    q = seeded()
+    q.set_shuffle(True)
+    q.restore([(13, False), (11, False), (14, False), (10, False), (12, False)], [3, 1, 4, 0, 2], 1)
+    assert songs(q) == ([13], 11, [14, 10, 12]) and q.unshuffled == [3, 1, 4, 0, 2]
+    q.set_shuffle(False)
+    assert songs(q) == ([13], 11, [10, 12, 14])  # the songs to come, in the order before
+
+
+def test_a_kept_queue_saved_and_restored_is_the_same_queue():
+    q = seeded(3)
+    q.play([10, 11, 12, 13, 14], source="GH")
+    q.set_shuffle(True)
+    q.next()
+    q.play_next([20])
+    again = seeded(9)
+    again.set_shuffle(True)
+    again.restore([(e.song, e.added) for e in q.order], q.unshuffled, q.cursor, q.source)
+    assert songs(again) == songs(q) and again.unshuffled == q.unshuffled
+    assert [e.added for e in again.order] == [e.added for e in q.order]
+
+
+def test_a_restored_queue_with_repeat_all_draws_its_next_lap_afresh():
+    q = seeded(1)
+    q.set_shuffle(True)
+    q.set_repeat(ALL)
+    q.restore([(12, False), (10, False), (11, False)], [2, 0, 1], 2)
+    lap = q.following()
+    assert lap is not None and lap.song in (10, 11)  # never the song that just ended
+    assert q.next() == lap and len(q) == 3 and q.cursor == 0
+
+
+@pytest.mark.parametrize("unshuffled", [[0, 0, 1], [0, 1], [1, 2, 3], [], [2, 1, 0, 3]], ids=str)
+def test_restored_places_that_arent_one_each_leave_the_order_it_plays_in(unshuffled):
+    q = seeded()
+    q.set_shuffle(True)
+    q.restore([(10, False), (11, False), (12, False)], unshuffled, 0)
+    assert q.unshuffled == [0, 1, 2]
+    q.set_shuffle(False)
+    assert songs(q) == ([], 10, [11, 12])
+
+
+@pytest.mark.parametrize("cursor, current", [(-4, 10), (0, 10), (2, 12), (3, None), (9, None)])
+def test_a_restored_cursor_past_either_end_is_the_first_song_or_played_out(cursor, current):
+    q = Queue()
+    q.restore([(10, False), (11, False), (12, False)], [0, 1, 2], cursor)
+    assert (q.current.song if q.current else None) == current
+    assert Queue().restore([], [], 0) is None

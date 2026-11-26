@@ -41,7 +41,8 @@ def _core(*subjects):
 
 CODE = {
     # A2: the index, the scan and watching, search, folders, the root's own files and finding a
-    # root's index, settings, the worker processes; and the package's __init__, read everywhere
+    # root's index, what's playing kept, settings, the worker processes; and the package's
+    # __init__, read everywhere
     "library": [
         f"{CORE}/__init__.py",
         *_core(
@@ -57,6 +58,7 @@ CODE = {
             "duplicates",
             "rootfiles",
             "roots",
+            "nowplaying",
             "settings",
             "workers",
             "clock",

@@ -26,7 +26,7 @@ from typing import Any, Protocol
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
-from musikata_core import albums, db, scanner, settings, watch, workers
+from musikata_core import albums, db, nowplaying, scanner, settings, watch, workers
 from musikata_core.audio import gain
 from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
@@ -1270,14 +1270,20 @@ class Player(QObject):
     R2.10). When the root goes while a song plays (`reach_changed`), the song goes on to its end,
     as far as what the engine has of it can, and nothing is opened after it: the engine is told
     again that nothing follows, Next does nothing and says why (`nextNote`), and so does Up next;
-    when the song ends, the next one is shown, cued, saying why."""
+    when the song ends, the next one is shown, cued, saying why.
+
+    Shuffle and repeat start as the shared settings have them (R7.3), and what's playing as it was
+    kept (`restore`, R1.8): cued at its place in the current song, which play starts from. Given
+    `keep` (`nowplaying.Keeping`), each change is kept on its thread: the queue when it changes,
+    the place on pause, at close and once a minute while playing, and shuffle and repeat when the
+    user changes them."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
     queueChanged = Signal()  # shuffle, repeat, Up next open
     volumeChanged = Signal()
     nowPlaying = Signal(str)  # the path of the song playing or cued now, "" when none
-    _play = Signal(str, int, float)
+    _play = Signal(str, int, float, float)
     _follow = Signal(int, int, str, float)
     _seek = Signal(int, float)
     _pause = Signal()
@@ -1305,6 +1311,11 @@ class Player(QObject):
         self._thread = PlaybackThread(self._engine)
         self._started = False
         self.queue = Queue(rng)
+        self.queue.set_shuffle(self._settings.shuffle)
+        self.queue.set_repeat(self._settings.repeat)
+        self._keeping: nowplaying.Keeping | None = None
+        self._cued_at = 0.0  # where play starts the cued song: its place kept across a restart
+        self._begun_at = 0.0  # where the engine was asked to start the song it plays
         self._up_next = UpNextModel(read, self.queue, self)
         self._up_next_open = False
         self._info: SongInfo | None = None  # the shown song's words, when the index has it
@@ -1394,7 +1405,9 @@ class Player(QObject):
     @Slot(int)
     def shuffleAlbum(self, album_id: int) -> None:  # noqa: N802
         """An album's Shuffle (R2.6): shuffle on, and the album from a song chosen at random."""
-        self.queue.set_shuffle(True)
+        if not self.queue.shuffle:
+            self.queue.set_shuffle(True)
+            self._remember(shuffle=True)
         self.play_songs(*self._album(album_id), start=None)
 
     def _album(self, album_id: int) -> tuple[list[int], str]:
@@ -1418,6 +1431,34 @@ class Player(QObject):
         if 0 < at < len(self.queue):
             self.queue.jump(self.queue.upcoming[at - 1].key)
         self._cue()
+
+    def restore(self, state: nowplaying.State) -> None:
+        """What's playing as kept across a restart (R1.8): the queue `state` holds, its current
+        song cued at its place, paused, nothing playing until play is pressed, which plays it on
+        from there."""
+        self.queue.restore(state.songs, state.unshuffled, state.cursor, state.source)
+        self._cue()
+        if self.queue.current is not None and state.position > 0:
+            self._position = self._cued_at = state.position
+            self.positionChanged.emit()
+
+    def keep(self, keeping: nowplaying.Keeping) -> None:
+        """From now on what's playing, and shuffle and repeat, are kept by `keeping` (R1.8,
+        R7.3), starting from what it holds now."""
+        self._keeping = keeping
+        keeping.settle(self._state())
+
+    def _state(self) -> nowplaying.State:
+        return nowplaying.state_of(self.queue, self._position)
+
+    def _keep(self, why: str) -> None:
+        if self._keeping is not None:
+            self._keeping.changed(self._state(), why)
+
+    def _remember(self, **fields: object) -> None:
+        """Shuffle or repeat changed by the user: kept in the shared settings (R7.3)."""
+        if self._keeping is not None:
+            self._keeping.playback(**fields)
 
     def go(self, step: dict[str, Any]) -> None:
         """A tour's step (A1.6): {"queue": "Glass Harbor"} cues that album at its first song,
@@ -1508,7 +1549,7 @@ class Player(QObject):
         elif self._on:
             self._resume.emit()
         elif self.queue.current is not None:
-            self._start(self.queue.current)
+            self._start(self.queue.current, self._cued_at)
 
     @Slot()
     def next(self) -> None:
@@ -1543,11 +1584,12 @@ class Player(QObject):
     @Slot()
     def toggleShuffle(self) -> None:  # noqa: N802
         self.queue.set_shuffle(not self.queue.shuffle)
+        self._remember(shuffle=self.queue.shuffle)
         self._queue_changed()
 
     @Slot()
     def cycleRepeat(self) -> None:  # noqa: N802
-        self.queue.cycle_repeat()
+        self._remember(repeat=self.queue.cycle_repeat())
         self._queue_changed()
 
     @Slot(float)
@@ -1611,14 +1653,20 @@ class Player(QObject):
         self._start_engine(path)
 
     def close(self) -> None:
-        """Stops the song and ends the playback thread: for closing."""
+        """Stops the song and ends the playback thread: for closing. What's playing is kept
+        first, and the writes asked for are waited for (R1.8)."""
+        self._keep(nowplaying.QUIT)
+        if self._keeping is not None:
+            self._keeping.close()
+            self._keeping = None  # what the engine says as it stops changes nothing kept
         self._thread.close()
 
     # ---------- playing the queue's songs ----------
 
-    def _start(self, entry: Entry) -> None:
-        """The queue's current song plays from its start; one gone from the index, or whose root
-        isn't there, is cued instead, `error` saying why."""
+    def _start(self, entry: Entry, at: float = 0.0) -> None:
+        """The queue's current song plays from its start, or `at` seconds into it (its place kept
+        across a restart); one gone from the index, or whose root isn't there, is cued instead,
+        `error` saying why."""
         info = self._song(entry.song)
         if info is None:
             self._stop_engine()
@@ -1635,11 +1683,11 @@ class Player(QObject):
             self._queue_changed()
             return
         self._error = ""
-        self._show(info, info.path)
+        self._show(info, info.path, at)
         before = self.queue.played[-1].song if self.queue.played else None
         after = self.queue.following()
         level = self._replaygain(entry.song, before, after.song if after is not None else None)
-        self._start_engine(self._whole(info.path), entry.key, level)
+        self._start_engine(self._whole(info.path), entry.key, level, at)
         self._queue_changed()
 
     def _cue(self) -> None:
@@ -1656,12 +1704,12 @@ class Player(QObject):
             return None
         return read_songs(self._read(), [song]).get(song)
 
-    def _show(self, info: SongInfo | None, path: str) -> None:
+    def _show(self, info: SongInfo | None, path: str, at: float = 0.0) -> None:
         """The song the bar shows, before the engine has it: its words, its length as the index
-        has it, at its start."""
+        has it, at its start or `at` seconds into it."""
         self._info = info
         self._length = (info.length or 0.0) if info is not None else 0.0
-        self._position = 0.0
+        self._position, self._cued_at = at, 0.0
         self._set_path(path)
         self.changed.emit()
         self.positionChanged.emit()
@@ -1671,17 +1719,20 @@ class Player(QObject):
             self._path = path
             self.nowPlaying.emit(path)
 
-    def _start_engine(self, path: str, key: int | None = None, level: float | None = None) -> None:
+    def _start_engine(
+        self, path: str, key: int | None = None, level: float | None = None, at: float = 0.0
+    ) -> None:
         """The engine plays `path`, the queue's entry `key` (None: outside the queue), under a new
-        ticket, at ReplayGain `level` (None: a file not in the index, as songs without tags play);
-        what follows it is told after."""
+        ticket, at ReplayGain `level` (None: a file not in the index, as songs without tags play),
+        from `at` seconds into it; what follows it is told after."""
         if not self._started:
             self._thread.start()
             self._started = True
         self._requested = next(self._tickets)
         self._playing(key)
         self._level = self._replaygain(None, None, None) if level is None else level
-        self._play.emit(path, self._requested, self._level)
+        self._begun_at = self._position = at
+        self._play.emit(path, self._requested, self._level, at)
 
     def _replaygain(self, song: int | None, before: int | None, after: int | None) -> float:
         """The multiplier ReplayGain gives `song` (R7.5), played between `before` and `after` in
@@ -1742,6 +1793,7 @@ class Player(QObject):
         self._up_next.refresh()
         self.queueChanged.emit()
         self._tell_following()
+        self._keep(nowplaying.QUEUE)
 
     def _why_next(self) -> str:
         """Why the song after the current one can't play now: its root, or its linked folder,
@@ -1793,7 +1845,7 @@ class Player(QObject):
         self._on, self._paused = True, False
         if self._info is None:
             self._set_path(self._under_root(path))
-        self._length, self._position = max(0.0, length), 0.0
+        self._length, self._position = max(0.0, length), self._begun_at
         self.changed.emit()
         self.positionChanged.emit()
 
@@ -1832,6 +1884,8 @@ class Player(QObject):
         if self._on and not self._seeking:
             self._position = seconds
             self.positionChanged.emit()
+            if not self._paused and self._keeping is not None and self._keeping.ticks():
+                self._keep(nowplaying.TICK)  # at most once a minute while playing (A2.8)
 
     @Slot(int)
     def _on_sought(self, ticket: int) -> None:
@@ -1842,6 +1896,8 @@ class Player(QObject):
         if self._on:
             self._paused = paused
             self.changed.emit()
+            if paused:
+                self._keep(nowplaying.PAUSE)
 
     @Slot(int)
     def _on_ended(self, ticket: int) -> None:

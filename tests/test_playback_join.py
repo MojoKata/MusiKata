@@ -676,3 +676,14 @@ def test_the_stream_takes_back_what_the_device_hasnt_taken_and_never_what_it_has
     s.finish()
     s.reopen()
     assert not s.finished and s.ring.drop(5) == 0
+
+
+def test_a_song_started_at_a_frame_plays_from_there_and_says_its_place():
+    """A queue kept across a restart starts its song where it was (R1.8)."""
+    d = Device({"a": Tune(0, 1500)})
+    song = d.songs["a"]
+    d.feed.start(1, "a", song, 1.0, 700)
+    assert d.feed.position(0) == 7.0
+    d.run()
+    assert np.array_equal(d.out(), played((0, 700, 800)))
+    assert d.feed.position(d.stream.taken) == 15.0

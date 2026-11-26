@@ -87,6 +87,7 @@ class FakeEngine(QObject):
         self.levels = []  # (file name, ReplayGain) of each song asked to play or follow
         self.device = None  # the device chosen, as told
         self.holding = False
+        self.at = 0.0
 
     @Slot()
     def setup(self):
@@ -96,9 +97,10 @@ class FakeEngine(QObject):
     def choose_device(self, chosen):
         self.device = chosen
 
-    @Slot(str, int, float)
-    def play(self, path, ticket, level):
+    @Slot(str, int, float, float)
+    def play(self, path, ticket, level, at=0.0):
         self.asked.append(("play", path))
+        self.at = at  # where the song was asked to start, in seconds
         self.levels.append((os.path.basename(path), round(level, 4)))
         self.path, self.ticket, self.follower = path, ticket, (0, "")
         self.began.emit(ticket, path, 42.0)

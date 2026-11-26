@@ -115,6 +115,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.duplicates` | library | Exact and likely copies, and the best copy (R2.12) |
 | `musikata_core.rootfiles` | library | The root's own files: plays, ratings, dismissals, merged and matched (A2.8, A2.10) |
 | `musikata_core.roots` | library | A root's id and finding its index; removing old ones (A2.9) |
+| `musikata_core.nowplaying` | library | What's playing kept across restarts: `now-playing.json` read, matched to the index and written on its rhythm (R1.8, R7.2, A2.8, A2.10) |
 | `musikata_core.settings` | library | The two `settings.json`, their defaults and the split (R13, R13.9, A2.10) |
 | `musikata_core.workers` | library | The worker processes, at low priority (A1.3) |
 | `musikata_core.clock` | library | The clock every timed piece is given (`docs/process/coding.md`) |

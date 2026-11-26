@@ -1,7 +1,9 @@
 """The queue as the app plays it (the Player bridge of src/musikata/bridges.py, and
 src/musikata/nowplaying.py; R7.1 to R7.3, R6.5): a double click queuing the rest of its list, a
 song that ends starting the next, the bar's buttons, Play next and Add to queue, Up next's rows,
-reorder and ×, and what the bar says; then the bar and Up next in the window.
+reorder and ×, and what the bar says; then the bar and Up next in the window; and what's playing,
+shuffle and repeat kept across a restart (R1.8), when each is written and how a root opens with
+them.
 
 The engine is a stand-in that plays nothing (`FakeEngine`, tests/fakes.py): it says a song began
 when asked, and a test says when it ended, so every rule is shown without a device or a wait on
@@ -11,10 +13,12 @@ Why: what plays next is decided here every time a song ends; a queue that skips 
 and an end cross, a Previous that never goes back, or a bar that names another song than the one
 heard are each only noticed by listening."""
 
+import json
+import logging
 import os
 import random
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 
 import pytest
 from fakes import FakeClock, FakeEngine, fill
@@ -24,6 +28,7 @@ from PySide6.QtTest import QTest
 
 from musikata import app, bridges, layout, models, nowplaying, player, tour
 from musikata_core import db, settings
+from musikata_core import nowplaying as nowplaying_core
 from musikata_core.audio.queue import ALL, ONE
 
 WAIT = 5_000
@@ -884,3 +889,222 @@ def test_the_bar_and_up_next_keep_their_text_in_their_boxes_at_both_sizes(shell,
         shell.window.grabWindow()
         assert layout.faults(shell.window) == []
     assert isinstance(find(shell, "nowPlayingBar"), QQuickItem)
+
+
+# ---------- kept across restarts (R1.8, R7.2, R7.3) ----------
+
+
+class Inline(Executor):
+    """Runs each job as it is submitted, so what is kept is there when the call returns."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        done = Future()
+        done.set_result(fn(*args, **kwargs))
+        return done
+
+
+class Recording(nowplaying_core.Keeping):
+    """Keeping that writes nothing: each state it would write, with why, in `written`, and each
+    settings change in `fields`."""
+
+    def __init__(self, clock):
+        record = self.fields = []
+        super().__init__(nowplaying_core.Places(None, ""), lambda: None, clock,
+                         set_playback=lambda **f: record.append(f), executor=Inline())  # fmt: skip
+        self.written, self.why = [], ""
+
+    def changed(self, state, why):
+        self.why = why
+        return super().changed(state, why)
+
+    def _write(self, state):
+        self.written.append((self.why, state))
+
+
+def test_a_restored_queue_is_cued_at_its_place_and_play_goes_on_from_there(made, index, qtbot):
+    p, engine, _ = made
+    songs = ids(index, "LD/GH/01.flac", "LD/GH/02.flac", "MO/Kindling.mp3")
+    p.restore(nowplaying_core.State(((songs[0], False), (songs[1], False), (songs[2], True)),
+                                    (0, 1, 2), 1, 30.0, "Glass Harbor"))  # fmt: skip
+    assert p.property("path") == "LD/GH/02.flac" and p.property("playing") is False
+    assert p.property("positionText") == "0:30" and p.property("progress") == 0.3
+    assert engine.played() == [] and p.queue.source == "Glass Harbor"
+    assert [e.added for e in p.queue.upcoming] == [True]
+    p.toggle()
+    wait_playing(qtbot, p, engine, 1)
+    assert engine.at == 30.0 and p.property("position") == 30.0  # from its place, not its start
+    p.next()
+    wait_playing(qtbot, p, engine, 2)
+    assert engine.at == 0.0  # the next song from its start
+
+
+def test_a_restored_queue_played_out_or_empty_cues_nothing(made, index):
+    p, engine, _ = made
+    songs = ids(index, "LD/GH/01.flac")
+    p.restore(nowplaying_core.State(((songs[0], False),), (0,), 1, 0.0, "Glass Harbor"))
+    assert p.property("path") == "" and p.queue.current is None and len(p.queue) == 1
+    p.restore(nowplaying_core.State())
+    assert p.property("path") == "" and len(p.queue) == 0 and engine.played() == []
+
+
+def test_shuffle_and_repeat_start_as_the_settings_have_them_and_changes_are_kept(index, qtbot):
+    playback = settings.Playback(shuffle=True, repeat=ALL)
+    p = bridges.Player("/m", FakeEngine(), read=index.read, playback=playback)
+    assert p.property("shuffle") is True and p.property("repeat") == ALL
+    kept = Recording(FakeClock())
+    p.keep(kept)
+    p.shuffleAlbum(1)  # already on: nothing to keep
+    p.toggleShuffle()
+    p.cycleRepeat()
+    assert kept.fields == [{"shuffle": False}, {"repeat": ONE}]
+    p.close()
+
+
+def test_what_plays_is_kept_when_the_queue_changes_on_pause_once_a_minute_and_at_close(
+    made, index, qtbot
+):
+    p, engine, songs = made
+    clock = FakeClock()
+    kept = Recording(clock)
+    p.keep(kept)
+    assert kept.written == []  # what it holds at start is kept already
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    assert [w for w, _ in kept.written] == ["queue"]
+    p.playNext(songs, 3)  # the queue changed
+    assert [w for w, _ in kept.written] == ["queue", "queue"]
+    engine.moved.emit(20.0)
+    qtbot.waitUntil(lambda: p.property("position") == 20.0, timeout=WAIT)
+    clock.advance(seconds=59)
+    engine.moved.emit(59.0)
+    qtbot.waitUntil(lambda: p.property("position") == 59.0, timeout=WAIT)
+    assert len(kept.written) == 2  # not a minute yet
+    clock.advance(seconds=1)
+    engine.moved.emit(60.0)
+    qtbot.waitUntil(lambda: len(kept.written) == 3, timeout=WAIT)
+    assert kept.written[-1][0] == "tick" and kept.written[-1][1].position == 60.0
+    p.next()  # the next song: the queue is the same, the place comes with the next write
+    wait_playing(qtbot, p, engine, 2)
+    assert len(kept.written) == 3
+    engine.moved.emit(12.5)
+    qtbot.waitUntil(lambda: p.property("position") == 12.5, timeout=WAIT)
+    p.toggle()
+    qtbot.waitUntil(lambda: p.property("paused"), timeout=WAIT)
+    assert kept.written[-1][0] == "pause"
+    assert (kept.written[-1][1].cursor, kept.written[-1][1].position) == (1, 12.5)
+    p.close()
+    assert len(kept.written) == 4  # nothing changed since the pause
+    assert p._keeping is None
+
+
+def test_at_close_what_changed_since_the_last_write_is_kept(made, index, qtbot):
+    p, engine, songs = made
+    kept = Recording(FakeClock())
+    p.keep(kept)
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    engine.moved.emit(7.0)
+    qtbot.waitUntil(lambda: p.property("position") == 7.0, timeout=WAIT)
+    p.close()
+    assert kept.written[-1][0] == "quit" and kept.written[-1][1].position == 7.0
+
+
+def set_hashes(shell):
+    """Audio hashes as a scan gives them (A2.3), in place of fill's paths."""
+    shell.index.write(
+        lambda c: c.execute("UPDATE song SET audio_hash = printf('%064d', id)")
+    ).result()
+
+
+def reload(tmp_path, root, songs=None):
+    """The window over `root` again, as a new start opens it; with `songs`, the index filled
+    first."""
+    engines = []
+
+    def playback():
+        engines.append(FakeEngine())
+        return engines[-1]
+
+    env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
+    root.mkdir(exist_ok=True)
+    s = app.load(str(root), env, FakeClock(), lambda: ThreadPoolExecutor(1), playback)
+    s.engine_ = engines[0]
+    if songs is not None:
+        fill(s.index, songs)
+        set_hashes(s)
+        s.library.reload()
+    return s
+
+
+@pytest.mark.slow
+def test_a_root_opens_with_what_was_playing_when_it_closed_paused_at_its_place(tmp_path, qtbot):
+    shell = reload(tmp_path, tmp_path / "Music", SONGS)
+    p, engine = shell.player, shell.engine_
+    p.toggleShuffle()
+    p.cycleRepeat()
+    p.go({"queue": "Glass Harbor", "added": ["Kindling"]})
+    before = [(e.song, e.added) for e in p.queue.order]
+    p.toggle()
+    wait_playing(qtbot, p, engine, 1)
+    engine.moved.emit(37.5)
+    qtbot.waitUntil(lambda: p.property("position") == 37.5, timeout=WAIT)
+    p.toggle()
+    qtbot.waitUntil(lambda: p.property("paused"), timeout=WAIT)
+    shell.close()
+    env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
+    shared = settings.load(settings.shared_path(env), str(tmp_path))
+    assert (shared.playback.shuffle, shared.playback.repeat) == (True, ALL)
+    path = tmp_path / "Music" / ".musikata" / shared.computer_id / "now-playing.json"
+    assert json.loads(path.read_text())["position"] == 37.5
+    again = reload(tmp_path, tmp_path / "Music")
+    try:
+        q = again.player
+        assert [(e.song, e.added) for e in q.queue.order] == before and q.queue.shuffle
+        assert q.queue.repeat == ALL and any(added for _, added in before)
+        assert q.property("path") == p.property("path") and q.property("position") == 37.5
+        assert q.property("playing") is False and again.engine_.played() == []
+    finally:
+        again.close()
+
+
+@pytest.mark.slow
+def test_a_song_moved_is_found_by_its_hash_and_one_gone_leaves_the_queue(tmp_path, qtbot):
+    shell = reload(tmp_path, tmp_path / "Music", SONGS)
+    p = shell.player
+    p.go({"queue": "Glass Harbor", "at": 1})
+    p.queue.add(ids(shell.index, "MO/Kindling.mp3"))
+    p._queue_changed()
+    shell.close()
+    index = db.Index(shell.index.path)
+    index.write(lambda c: c.execute("UPDATE song SET path = 'LD/GH/Two.flac' WHERE path = ?",
+                                    ("LD/GH/02.flac",))).result()  # fmt: skip
+    index.write(lambda c: c.execute("DELETE FROM song WHERE path = 'LD/GH/03.flac'")).result()
+    index.close()
+    again = reload(tmp_path, tmp_path / "Music")
+    try:
+        q = again.player
+        found = dict(again.index.read().execute("SELECT id, path FROM song"))
+        assert [found[e.song] for e in q.queue.order] == [
+            "LD/GH/01.flac", "LD/GH/Two.flac", "MO/Kindling.mp3"
+        ]  # fmt: skip
+        assert q.property("path") == "LD/GH/Two.flac"
+    finally:
+        again.close()
+
+
+@pytest.mark.slow
+def test_a_kept_file_broken_by_a_sync_starts_an_empty_queue_and_says_so(tmp_path, caplog):
+    shell = reload(tmp_path, tmp_path / "Music", SONGS)
+    shell.player.go({"queue": "Glass Harbor"})
+    shell.close()
+    env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
+    cid = settings.load(settings.shared_path(env), str(tmp_path)).computer_id
+    path = tmp_path / "Music" / ".musikata" / cid / "now-playing.json"
+    path.write_text(path.read_text()[:40])
+    with caplog.at_level(logging.WARNING):
+        again = reload(tmp_path, tmp_path / "Music")
+    try:
+        assert len(again.player.queue) == 0 and again.player.property("path") == ""
+        assert "the queue starts empty" in caplog.text
+    finally:
+        again.close()

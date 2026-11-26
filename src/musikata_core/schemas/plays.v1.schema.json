@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/MojoKata/MusiKata/schemas/plays.v1.schema.json",
-  "title": "<root>/.musikata/plays/<computer id>.json: one computer's play counts (A2.8)",
+  "title": "<root>/.musikata/<computer id>/plays.json: one computer's play counts (A2.8)",
   "type": "object",
   "properties": {
     "format": {

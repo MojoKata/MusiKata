@@ -1,6 +1,7 @@
 """The shared settings (src/musikata_core/settings.py; R13.9, A2.10, R1.5): where they are on each
 platform, the configured root read from whatever a person, a sync tool or another version left in
-settings.json, and written back keeping everything it doesn't know.
+settings.json, and written back keeping everything it doesn't know; this computer's id, made when
+it has none; shuffle and repeat (R7.3), read and written the same way.
 
 Why: settings.json is hand-editable (R13.9) and outlives the version that wrote it (A2.10), so it is
 data from outside: each shape testing.md's "Shapes" lists for `settings` has its test here."""
@@ -119,7 +120,8 @@ def test_watch_that_isnt_true_or_false_is_on(watch, problems):
 
 
 def test_a2_10s_playback_gives_the_device_replaygain_and_its_pre_amp():
-    example = {"device": None, "replaygain": "album", "replaygain_default": -6.0, "resume": True}
+    example = {"device": None, "replaygain": "album", "replaygain_default": -6.0, "resume": True,
+               "shuffle": False, "repeat": "off"}  # fmt: skip
     got = parse({"format": 1, "playback": example})
     assert got.playback == settings.Playback(None, "album", -6.0) == settings.Shared().playback
     dac = "alsa_output.usb-DAC.analog-stereo"
@@ -227,3 +229,86 @@ def test_a_file_that_cant_be_read_or_written_is_logged(tmp_path, caplog):
         assert not settings.save(str(folder), {"format": 1})
     assert got.root is None and "couldn't be read" in got.problems[0]
     assert "couldn't read" in caplog.text and "couldn't write" in caplog.text
+
+
+# ---------- shuffle and repeat (R7.3), and this computer's id (A2.8) ----------
+
+
+def test_shuffle_and_repeat_are_read_from_playback():
+    got = parse({"format": 1, "playback": {"shuffle": True, "repeat": "all"}})
+    assert got.playback == settings.Playback(shuffle=True, repeat="all") and got.problems == ()
+    assert (settings.Playback().shuffle, settings.Playback().repeat) == (False, "off")
+
+
+@pytest.mark.parametrize(
+    "playback, want, problem",
+    [
+        ({"shuffle": "yes"}, settings.Playback(), "playback.shuffle isn't true or false"),
+        ({"shuffle": 1}, settings.Playback(), "playback.shuffle isn't true or false"),
+        ({"shuffle": None}, settings.Playback(), "playback.shuffle isn't true or false"),
+        ({"repeat": " One "}, settings.Playback(repeat="one"), ""),
+        ({"repeat": "ALL"}, settings.Playback(repeat="all"), ""),
+        ({"repeat": "twice"}, settings.Playback(), "isn't off, all or one"),
+        ({"repeat": True}, settings.Playback(), "isn't off, all or one"),
+        ({"repeat": None}, settings.Playback(), "isn't off, all or one"),
+    ],
+)
+def test_shuffle_and_repeat_broken_in_another_case_or_type(playback, want, problem):
+    got = parse({"format": 1, "playback": playback})
+    assert got.playback == want
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_shuffle_or_repeat_set_keeps_the_rest_of_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({
+        "format": 1, "computer": {"id": "b2c4", "name": "Studio-PC"},
+        "library": {"root": "/home/ana/Music"}, "later_group": {"y": 2},
+        "playback": {"device": "dac", "replaygain": "track", "later": [1]},
+    }))  # fmt: skip
+    assert settings.set_playback(str(path), HOME, "Other", shuffle=True)
+    assert settings.set_playback(str(path), HOME, "Other", repeat="one")
+    doc = json.loads(path.read_text())
+    assert doc == {
+        "format": 1, "computer": {"id": "b2c4", "name": "Studio-PC"},
+        "library": {"root": "/home/ana/Music"}, "later_group": {"y": 2},
+        "playback": {"device": "dac", "replaygain": "track", "later": [1], "shuffle": True,
+                     "repeat": "one"},
+    }  # fmt: skip
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).playback == settings.Playback(
+        "dac", "track", shuffle=True, repeat="one"
+    )
+
+
+def test_shuffle_set_with_no_file_makes_one_with_this_computers_id(tmp_path):
+    path = str(tmp_path / "s" / "settings.json")
+    assert settings.set_playback(path, HOME, "Studio-PC", shuffle=True)
+    got = settings.load(path, HOME)
+    assert got.playback.shuffle and got.computer_name == "Studio-PC" and got.computer_id
+
+
+def test_shuffle_and_repeat_never_go_into_a_newer_or_unreadable_file(tmp_path, caplog):
+    newer, cut = tmp_path / "newer.json", tmp_path / "cut.json"
+    newer.write_text(json.dumps({"format": 2, "library": {"root": "/m"}}))
+    cut.write_text('{"format": 1, "library": {"root": "/home/ana/Mus')  # a sync in progress
+    with caplog.at_level(logging.WARNING):
+        assert not settings.set_playback(str(newer), HOME, "PC", shuffle=True)
+        assert not settings.set_playback(str(cut), HOME, "PC", repeat="all")
+    assert json.loads(newer.read_text())["format"] == 2
+    assert cut.read_text() == '{"format": 1, "library": {"root": "/home/ana/Mus'
+    assert "newer MusiKata" in caplog.text and "left as it is" in caplog.text
+
+
+def test_this_computers_id_is_the_files_else_made_once_and_kept(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"format": 1, "library": {"root": "/m"}, "later": 1}))
+    made = settings.computer_id(str(path), HOME, "Studio-PC")
+    assert made and settings.computer_id(str(path), HOME, "Other") == made
+    doc = json.loads(path.read_text())
+    assert doc["computer"] == {"id": made, "name": "Studio-PC"} and doc["later"] == 1
+    newer = tmp_path / "newer.json"
+    newer.write_text(json.dumps({"format": 2}))
+    assert settings.computer_id(str(newer), HOME, "PC") is None
+    assert json.loads(newer.read_text()) == {"format": 2}
