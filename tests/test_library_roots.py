@@ -127,6 +127,21 @@ def test_indexes_not_opened_for_180_days_are_removed_and_the_log_says_so(tmp_pat
     assert roots.remove_stale(str(tmp_path / "none"), clock_) == []
 
 
+def test_a_stale_roots_caches_go_with_its_index(tmp_path):
+    """A2.9: the index and caches of a root not opened for 180 days; its cover thumbnails and
+    mosaics are under its index's key in the caches (R1.5)."""
+    base, caches, clock_ = str(tmp_path / "roots"), str(tmp_path / "cache"), FakeClock()
+    old = roots.find_index(_root(tmp_path, "Old"), base, clock_)
+    clock_.advance(days=181)
+    recent = roots.find_index(_root(tmp_path, "Recent"), base, clock_)
+    for key in (old.key, recent.key):
+        os.makedirs(os.path.join(caches, key, "covers"))
+        open(os.path.join(caches, key, "covers", "t-256.jpg"), "wb").close()
+    assert roots.remove_stale(base, clock_, keep=recent.key, caches=caches) == [old.key]
+    assert not os.path.exists(os.path.join(caches, old.key))
+    assert os.path.exists(os.path.join(caches, recent.key, "covers", "t-256.jpg"))
+
+
 def test_stale_is_strictly_past_180_days():
     now = datetime(2026, 11, 25, tzinfo=UTC)
     opened = {"a": now - timedelta(days=180), "b": now - timedelta(days=181)}

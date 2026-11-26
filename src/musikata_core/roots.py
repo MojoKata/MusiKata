@@ -170,9 +170,12 @@ def recorded(root: str, base: str) -> Found | None:
     return Found(os.path.join(base, name), name, False)
 
 
-def remove_stale(base: str, clock: Clock, keep: str | None = None) -> list[str]:
-    """Removes each index folder not opened for 180 days (A2.9), but `keep`; says which in the
-    log, and returns them."""
+def remove_stale(
+    base: str, clock: Clock, keep: str | None = None, caches: str | None = None
+) -> list[str]:
+    """Removes each index folder under `base` not opened for 180 days (A2.9), but `keep`, and its
+    caches under `caches` (caches_dir), which are kept under the same key; says which in the log,
+    and returns them."""
     opened: dict[str, datetime] = {}
     try:
         names = os.listdir(base)
@@ -188,5 +191,7 @@ def remove_stale(base: str, clock: Clock, keep: str | None = None) -> list[str]:
     gone = [name for name in stale(opened, clock.now()) if name != keep]
     for name in gone:
         shutil.rmtree(os.path.join(base, name), ignore_errors=True)
-        log.info("removed the index of %s, not opened for 180 days", name)
+        if caches is not None:
+            shutil.rmtree(os.path.join(caches, name), ignore_errors=True)
+        log.info("removed the index and caches of %s, not opened for 180 days", name)
     return gone
