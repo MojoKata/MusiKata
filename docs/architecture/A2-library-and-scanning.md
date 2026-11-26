@@ -31,7 +31,10 @@ A2.2. **The scan.**
 3. Read changed and new files with Mutagen on the worker processes (A1.3), in batches of 200, and
    write each batch in one transaction.
 4. Rows whose file wasn't seen are removed at the end, unless the file reappears elsewhere with
-   the same `audio_hash`, which is a move: the row's path changes and its play counts stay.
+   the same `audio_hash`, which is a move: the row's path changes and its play counts stay. None
+   is removed when the root itself isn't there (R2.10); the rows beneath a link to a folder that
+   can't be reached stay (R2.3.2, R2.10); and when more than a quarter of the library's songs are
+   gone, their removal waits on the user's answer (R2.10.1).
 
 A2.3. **The audio hash** is a hash of the first and last 64 KB of the audio frames, skipping the
 tag blocks, so retagging a file doesn't change it and two copies of a song match.
