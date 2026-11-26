@@ -35,16 +35,17 @@ SIZES = (SHOT, DESIGN)
 # (screen, what the window shows, as Library.go takes it): a screen is named for its mockup
 # (docs/mockups/README.md); one that shows only part of its mockup yet says so (L03 without the
 # Edit tags panel, which comes with slice 5); one with no mockup takes the next number of its area
-# (Artists and an artist's page, R2.6, are L10 and L11; a search being typed, R2.7, is L12; Up next,
-# R7.2, is N08); Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of
+# (Artists, R2.6, is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08); an album's
+# page and an artist's show a search typed into the header over them, as their mockups do (L02,
+# L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of
 # L07, the state dots and chips of R3.9, the tint by a cover's colour). The first queues Glass
 # Harbor, paused at its first song, so every screen after it shows the now-playing bar (R6.5) and
 # the playing album and song marked, with no sound to wait on (Player.go).
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
-    ("L02-album", {"view": "album", "album": "Glass Harbor"}),
+    ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
     ("L10-artists", {"view": "artists"}),
-    ("L11-artist", {"view": "artist", "artist": "Lumen Drift"}),
+    ("L11-artist", {"view": "artist", "artist": "Lumen Drift", "search": "ebb"}),
     ("L03-songs", {"view": "songs"}),
     ("L04-folders", {"view": "folders", "folder": "", "mode": "small"}),
     ("L05-folders-large", {"view": "folders", "folder": "Lumen Drift", "mode": "large"}),

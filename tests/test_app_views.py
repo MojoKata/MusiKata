@@ -115,6 +115,10 @@ def click(shell, item, x=None, y=None):
         {"view": "albums", "search": "zebra"},
         {"view": "artists", "search": "tide"},
         {"view": "songs", "search": "glass harbor 1"},
+        {"view": "album", "album": "Glass Harbor", "search": "rating:>=2"},
+        {"view": "album", "album": "Glass Harbor", "search": "zebra"},
+        {"view": "artist", "artist": "Lumen Drift", "search": "tide"},
+        {"view": "artist", "artist": "Lumen Drift", "search": "zebra"},
     ],
 )
 def test_each_view_loads_with_no_warning_and_its_text_in_its_boxes(shell, qtbot, qtlog, step):
@@ -138,10 +142,10 @@ def test_albums_in_list_mode_load_too(shell, qtbot, qtlog):
 def test_a_cover_is_shown_and_an_album_without_one_shows_the_dashed_tile(shell, qtbot):
     shell.library.go({"view": "album", "album": "Glass Harbor"})
     shot = settle(shell, qtbot)
-    assert shot.pixelColor(232 + 28 + 110, 52 + 110).name() == "#3366cc"
+    assert shot.pixelColor(232 + 28 + 110, 64 + 8 + 110).name() == "#3366cc"  # under the header
     shell.library.go({"view": "album", "album": "Kindling"})
     shot = settle(shell, qtbot)
-    assert shot.pixelColor(232 + 28 + 110, 52 + 110).name() != "#3366cc"
+    assert shot.pixelColor(232 + 28 + 110, 64 + 8 + 110).name() != "#3366cc"
 
 
 @pytest.mark.slow
@@ -208,10 +212,50 @@ def test_slash_opens_the_search_typing_filters_and_escape_clears_it(shell, qtbot
     key(shell, Qt.Key.Key_Slash)
     type_text(shell, "rating:>=3")
     qtbot.waitUntil(lambda: lib.property("viewCount") == "1 of 9 songs", timeout=WAIT)
-    lib.go({"view": "album", "album": "Glass Harbor"})  # a page: no header, / does nothing
-    assert not visible(one(shell, "header"))
+    key(shell, Qt.Key.Key_Escape)
+    key(shell, Qt.Key.Key_Escape)
+
+
+@pytest.mark.slow
+def test_on_a_page_slash_opens_the_search_typing_filters_the_page_and_escape_clears_it(
+    shell, qtbot, qtlog
+):
+    """L02-album, L11-artist: the header over a page, its way back where a view's title is, and
+    its search box filtering the page's songs and albums (R2.7)."""
+    lib = shell.library
+    lib.go({"view": "album", "album": "Glass Harbor"})
+    settle(shell, qtbot)
+    shell.window.requestActivate()
+    qtbot.waitUntil(lambda: shell.window.isActive(), timeout=WAIT)
+    field, songs = one(shell, "search"), one(shell, "albumSongs")
+    assert visible(one(shell, "header")) and visible(one(shell, "back")) and visible(field)
+    assert not visible(one(shell, "sort")) and not visible(one(shell, "modes"))
+    assert field.property("placeholderText") == "Search this album"
     key(shell, Qt.Key.Key_Slash)
-    assert lib.property("search") == ""
+    qtbot.waitUntil(lambda: field.hasActiveFocus(), timeout=WAIT)
+    type_text(shell, "rating:>=2")
+    qtbot.waitUntil(lambda: songs.property("count") == 2, timeout=WAIT)
+    assert lib.property("viewCount") == "2 of 3 songs" and visible(one(shell, "viewCount"))
+    key(shell, Qt.Key.Key_Escape)
+    qtbot.waitUntil(lambda: songs.property("count") == 3, timeout=WAIT)
+    assert field.property("text") == "" and lib.property("viewCount") == ""
+    key(shell, Qt.Key.Key_Escape)
+    click(shell, one(shell, "artistName"))
+    qtbot.waitUntil(lambda: lib.property("view") == "artist", timeout=WAIT)
+    settle(shell, qtbot)
+    key(shell, Qt.Key.Key_Slash)
+    qtbot.waitUntil(lambda: field.hasActiveFocus(), timeout=WAIT)
+    type_text(shell, "tide")
+    qtbot.waitUntil(lambda: lib.property("viewCount") == "1 of 2 albums", timeout=WAIT)
+    assert field.property("text") == "tide"
+    click(shell, one(shell, "back"))  # the album again, as it was left: its search empty
+    qtbot.waitUntil(lambda: lib.property("view") == "album", timeout=WAIT)
+    settle(shell, qtbot)
+    assert field.property("text") == "" and one(shell, "albumSongs").property("count") == 3
+    lib.show("albums")  # a view again: its title where the way back was
+    settle(shell, qtbot)
+    assert not visible(one(shell, "back")) and lib.property("viewCount") == "4 albums"
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
 
 
 @pytest.mark.slow

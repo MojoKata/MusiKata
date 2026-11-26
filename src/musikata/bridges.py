@@ -238,6 +238,16 @@ def state_chips(songs: int, embedded: int, folder_image: str | None) -> list[dic
     return out
 
 
+def page_count_text(parts: Sequence[tuple[int, int, str]], filtered: bool) -> str:
+    """A page's count beside its way back in the header (R6.4), from each of its lists' (shown,
+    total, noun): while a search filters the page (R2.7), what each shows of how many, the lists
+    with nothing to show left out ("6 of 10 songs", "1 of 5 albums · 1 of 1 other song"); "" when
+    none does, the page's own line saying how many it holds."""
+    if not filtered:
+        return ""
+    return " · ".join(count_text(shown, total, one, True) for shown, total, one in parts if total)
+
+
 def _field(name: str, default: object = "") -> Callable[[AlbumPage | ArtistPage], object]:
     """A page's property getter: its value of `name`, `default` before it shows anything."""
     return lambda page: page._values.get(name, default)
@@ -249,15 +259,21 @@ class AlbumPage(QObject):
 
     changed = Signal()
 
-    def __init__(self, read: Callable[[], sqlite3.Connection], parent: QObject | None = None):
+    def __init__(
+        self,
+        read: Callable[[], sqlite3.Connection],
+        parent: QObject | None = None,
+        searcher: Searcher | None = None,
+    ):
         super().__init__(parent)
         self._read = read
         self._id = -1
         self._values: dict[str, object] = {}
-        self._songs = SongsModel(read, "tracks", self, "album_id = ?", (-1,))
+        self._songs = SongsModel(read, "tracks", self, "album_id = ?", (-1,), searcher)
 
-    def load(self, album_id: int) -> bool:
-        """Shows the album with that id; False when there is none."""
+    def load(self, album_id: int, search: str | None = None) -> bool:
+        """Shows the album with that id, its songs filtered by `search` (R2.7; None: the search
+        it has); False when there is none."""
         c = self._read()
         r = c.execute(
             "SELECT title, artist, artist_id, compilation, year, genre, songs, length, embedded,"
@@ -285,6 +301,8 @@ class AlbumPage(QObject):
             (album_id,),
         ).fetchall()
         same, self._id = album_id == self._id, album_id
+        if search is not None:
+            self._songs.search_next(search)
         self._songs.source = title
         self._values = {
             "title": title,
@@ -303,6 +321,14 @@ class AlbumPage(QObject):
             self._songs.select("album_id = ?", (album_id,))
         self.changed.emit()
         return True
+
+    def set_search(self, text: str) -> None:
+        """Filters the album's songs by what the user typed (R2.7)."""
+        self._songs.set_search(text)
+
+    def lists(self) -> list[tuple[PagedModel, str]]:
+        """The lists a search filters, each with what it counts (page_count_text)."""
+        return [(self._songs, "song")]
 
     def _get_id(self) -> int:
         return self._id
@@ -327,16 +353,23 @@ class ArtistPage(QObject):
 
     changed = Signal()
 
-    def __init__(self, read: Callable[[], sqlite3.Connection], parent: QObject | None = None):
+    def __init__(
+        self,
+        read: Callable[[], sqlite3.Connection],
+        parent: QObject | None = None,
+        searcher: Searcher | None = None,
+    ):
         super().__init__(parent)
         self._read = read
         self._id = -1
         self._values: dict[str, object] = {}
-        self._albums = AlbumsModel(read, self, artist_id=-1)
-        self._others = SongsModel(read, "others", self, "artist_id = ?", (-1,))
+        self._albums = AlbumsModel(read, self, artist_id=-1, searcher=searcher)
+        self._others = SongsModel(read, "others", self, "artist_id = ?", (-1,), searcher)
+        self._others.countChanged.connect(self.changed)  # Other songs' title: shown with rows
 
-    def load(self, artist_id: int) -> bool:
-        """Shows the artist with that id; False when there is none."""
+    def load(self, artist_id: int, search: str | None = None) -> bool:
+        """Shows the artist with that id, their albums and other songs filtered by `search`
+        (R2.7; None: the search they have); False when there is none."""
         c = self._read()
         r = c.execute(
             "SELECT name, albums, songs FROM artist WHERE id = ?", (artist_id,)
@@ -345,6 +378,9 @@ class ArtistPage(QObject):
             return False
         name, albums, songs = r
         thumbs = c.execute(f"SELECT {artist_thumbs('?')}", (artist_id, artist_id)).fetchone()[0]
+        if search is not None:
+            self._albums.search_next(search)
+            self._others.search_next(search)
         if artist_id == self._id:  # read again where they are: after a scan
             self._albums.refresh()
             self._others.refresh()
@@ -361,13 +397,26 @@ class ArtistPage(QObject):
             "name": name,
             "detail": artist_line(albums, songs),
             "tiles": tiles((thumbs or "").split()),
-            "othersTitle": "Other songs" if self._others.rowCount() else "",
         }
         self.changed.emit()
         return True
 
+    def set_search(self, text: str) -> None:
+        """Filters the artist's albums, those with a song the search finds, and their other songs
+        by what the user typed (R2.7)."""
+        self._albums.set_search(text)
+        self._others.set_search(text)
+
+    def lists(self) -> list[tuple[PagedModel, str]]:
+        """The lists a search filters, each with what it counts (page_count_text)."""
+        return [(self._albums, "album"), (self._others, "other song")]
+
     def _get_id(self) -> int:
         return self._id
+
+    def _get_others_title(self) -> str:
+        """Other songs' title, while it shows any."""
+        return "Other songs" if self._others.rowCount() else ""
 
     def _get_albums(self) -> AlbumsModel:
         return self._albums
@@ -379,7 +428,7 @@ class ArtistPage(QObject):
     name = QtProperty(str, _field("name"), notify=changed)
     detail = QtProperty(str, _field("detail"), notify=changed)  # 3 albums · 41 songs
     tiles = QtProperty(list, _field("tiles", []), notify=changed)
-    othersTitle = QtProperty(str, _field("othersTitle"), notify=changed)  # "" when there are none
+    othersTitle = QtProperty(str, _get_others_title, notify=changed)  # "" when it shows none
     albums = QtProperty(QObject, _get_albums, constant=True)
     others = QtProperty(QObject, _get_others, constant=True)
 
@@ -388,6 +437,17 @@ VIEWS = ("albums", "artists", "songs", "folders")  # the sidebar's views built s
 TITLES = {"albums": "Albums", "artists": "Artists", "songs": "Songs", "folders": "Folders"}
 NOUNS = {"albums": "album", "artists": "artist", "songs": "song"}  # what each view counts
 SEARCH_HINT = "Search the library"
+# the search box's hint where it searches less than the library: a page (R2.7), Folders (R2.9.2)
+SEARCH_HINTS = {
+    "album": "Search this album",
+    "artist": "Search this artist",
+    "folders": FOLDERS_SEARCH_HINT,
+}
+# what a search that finds nothing says it found none of (R2.7)
+EMPTY_NOUNS = {
+    "albums": "albums", "artists": "artists", "songs": "songs", "folders": "folders or songs",
+    "album": "songs", "artist": "albums or songs",
+}  # fmt: skip
 # the view modes each view has (R6.4; Albums' grid and list, R2.6; Folders' four, R2.9.4): its
 # name, label and icon
 MODES = {"albums": [{"mode": "grid", "label": "Grid", "icon": "grid"},
@@ -468,8 +528,15 @@ class Library(QObject):
         }  # fmt: skip
         for model in self._lists.values():
             model.countChanged.connect(self.changed)
-        self._album = AlbumPage(index.read, self)
-        self._artist = ArtistPage(index.read, self)
+        self._album = AlbumPage(index.read, self, self._searcher)
+        self._artist = ArtistPage(index.read, self, self._searcher)
+        self._pages: dict[str, AlbumPage | ArtistPage] = {
+            "album": self._album,
+            "artist": self._artist,
+        }
+        for page in self._pages.values():
+            for model, _ in page.lists():
+                model.countChanged.connect(self.changed)
         self._view = "albums"
         self._search = ""  # what the header's search box holds (R2.7)
         # the views a page was opened from, each with its search
@@ -523,8 +590,7 @@ class Library(QObject):
         self._chips = genre_chips(c)
         if self._genre and self._genre not in self._chips[0] + self._chips[1]:
             self.set_genre("")
-        pages: dict[str, AlbumPage | ArtistPage] = {"album": self._album, "artist": self._artist}
-        page = pages.get(self._view)
+        page = self._pages.get(self._view)
         if page is not None and not page.load(page.property("id")):
             self.back()
         self._mark_playing()
@@ -564,7 +630,7 @@ class Library(QObject):
             self._artist.property("id") if self._view == "artist" else -1,
             self._search,
         )
-        if self._album.load(album_id):
+        if self._album.load(album_id, ""):
             self._history.append(current)
             self._go("album", "")
 
@@ -576,20 +642,20 @@ class Library(QObject):
             self._album.property("id") if self._view == "album" else -1,
             self._search,
         )
-        if artist_id >= 0 and self._artist.load(artist_id):
+        if artist_id >= 0 and self._artist.load(artist_id, ""):
             self._history.append(current)
             self._go("artist", "")
 
     @Slot()
     def back(self) -> None:
         """Back to the view or page this one was opened from (Albums when none), filtered by the
-        search it had."""
+        search it had, as a list is (R2.7)."""
         view, page, text = self._history.pop() if self._history else ("albums", -1, "")
-        if view == "album" and not self._album.load(page):
-            view = "albums"
-        if view == "artist" and not self._artist.load(page):
-            view = "artists"
-        self._go(view, text if view in VIEWS else "")
+        if view == "album" and not self._album.load(page, text):
+            view, text = "albums", ""
+        if view == "artist" and not self._artist.load(page, text):
+            view, text = "artists", ""
+        self._go(view, text)
 
     def _go(self, view: str, search: str) -> None:
         self._view = view
@@ -602,14 +668,17 @@ class Library(QObject):
 
     @Slot(str)
     def setSearch(self, text: str) -> None:  # noqa: N802
-        """Filters the view open by what the user typed (R2.7), as they type; a page has no
-        search box (L02-album), so a search there does nothing. The view's rows come from the
-        search thread, with its model's countChanged."""
-        model = self._lists.get(self._view)
-        if model is None or text == self._search:
+        """Filters the view open by what the user typed (R2.7), as they type: a list, or a page's
+        lists (an album's songs; an artist's albums and other songs, L02-album, L11-artist). The
+        rows come from the search thread, with their model's countChanged."""
+        if text == self._search:
             return
         self._search = text
-        model.set_search(text)
+        page = self._pages.get(self._view)
+        if page is not None:
+            page.set_search(text)
+        else:
+            self._lists[self._view].set_search(text)
         self.searchChanged.emit()
         self.changed.emit()
 
@@ -635,8 +704,9 @@ class Library(QObject):
 
     def go(self, step: dict[str, str]) -> None:
         """A tour's step (A1.6): {"view": "albums"}, a view with a search typed into it:
-        {"view": "songs", "search": "electronic"}, or a page by its name: {"view": "album",
-        "album": "Glass Harbor"}, {"view": "artist", "artist": "Lumen Drift"}; or Folders at a
+        {"view": "songs", "search": "electronic"}, or a page by its name, with a search too:
+        {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}, {"view": "artist",
+        "artist": "Lumen Drift"}; or Folders at a
         folder, in a mode, with rows selected: {"view": "folders", "folder": "Lumen Drift",
         "mode": "large", "select": ["Lumen Drift/Remixes"]}."""
         view = step["view"]
@@ -651,10 +721,12 @@ class Library(QObject):
             r = c.execute("SELECT id FROM album WHERE title = ?", (step["album"],)).fetchone()
             self.show("albums")
             self.openAlbum(r[0] if r else -1)
+            self.setSearch(step.get("search", ""))
         elif view == "artist":
             r = c.execute("SELECT id FROM artist WHERE name = ?", (step["artist"],)).fetchone()
             self.show("artists")
             self.openArtist(r[0] if r else -1)
+            self.setSearch(step.get("search", ""))
         else:
             self.show(view)
             self.setSearch(step.get("search", ""))
@@ -1083,7 +1155,14 @@ class Library(QObject):
         return self._count_of("artists")
 
     def _get_view_count(self) -> str:
-        return self._count_of(self._view) if self._view in VIEWS else ""
+        page = self._pages.get(self._view)
+        if page is None:
+            return self._count_of(self._view)
+        lists = page.lists()
+        return page_count_text(
+            [(m.rowCount(), m.total(), one) for m, one in lists],
+            any(m.filtered() for m, _ in lists),
+        )
 
     def _get_empty_text(self) -> str:
         """What the view open says when it lists nothing: the library empty, or a search that
@@ -1092,25 +1171,30 @@ class Library(QObject):
             if self._scanning:
                 return "Reading your music…"
             return f"No songs in {self._get_root()}"
-        model = self._lists.get(self._view)
-        if model is None or model.rowCount() or not model.shown_search().strip():
+        page = self._pages.get(self._view)
+        models = [m for m, _ in page.lists()] if page else [self._lists[self._view]]
+        shown = next((m.shown_search() for m in models if m.shown_search().strip()), "")
+        if not shown or any(m.rowCount() for m in models):
             return ""
-        many = NOUNS[self._view] + "s" if self._view in NOUNS else "folders or songs"
-        return no_match_text(model.shown_search(), many)
+        return no_match_text(shown, EMPTY_NOUNS[self._view])
 
     def _get_search(self) -> str:
         return self._search
 
     def _get_searchable(self) -> bool:
-        return self._view in VIEWS
+        return self._view in VIEWS or self._view in self._pages
+
+    def _get_on_page(self) -> bool:
+        return self._view in self._pages
 
     def _get_search_hint(self) -> str:
-        return FOLDERS_SEARCH_HINT if self._view == "folders" else SEARCH_HINT
+        return SEARCH_HINTS.get(self._view, SEARCH_HINT)
 
     def _get_searching(self) -> bool:
         """Whether the view open waits on the search thread's rows: the tour waits on it."""
-        model = self._lists.get(self._view)
-        return model is not None and model.pending()
+        page = self._pages.get(self._view)
+        models = [m for m, _ in page.lists()] if page else [self._lists[self._view]]
+        return any(m.pending() for m in models)
 
     def _get_title(self) -> str:
         if self._view == "folders":
@@ -1211,6 +1295,7 @@ class Library(QObject):
     viewCount = QtProperty(str, _get_view_count, notify=changed)
     search = QtProperty(str, _get_search, notify=searchChanged)
     searchable = QtProperty(bool, _get_searchable, notify=viewChanged)  # the header is shown
+    onPage = QtProperty(bool, _get_on_page, notify=viewChanged)  # the way back in the title's place
     searchHint = QtProperty(str, _get_search_hint, notify=viewChanged)
     searching = QtProperty(bool, _get_searching, notify=changed)
     modes = QtProperty(list, _get_modes, notify=viewChanged)  # [] where the view has one mode

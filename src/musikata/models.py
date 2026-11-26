@@ -335,9 +335,14 @@ class PagedModel(QAbstractListModel):
     def set_search(self, text: str) -> None:
         """Filters the list by what the user typed (R2.7), or shows it whole for a search that
         asks nothing; the rows come when the search thread has found them."""
+        self.search_next(text)
+        self.reload()
+
+    def search_next(self, text: str) -> None:
+        """The search the list's next reading filters by, without reading it now: a page opened
+        at another album with its search reads its songs once, not twice."""
         self._search = text
         self._query_of_search = search.parse(text)
-        self.reload()
 
     def reload(self) -> None:
         """Reads the list afresh from its start: after a new order, a new search or another

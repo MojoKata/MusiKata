@@ -7,7 +7,9 @@ import "."
 // than one mode, the sort, and the ⋮ menu. When the header is too narrow for everything, the search
 // box becomes its icon, which opens it over the title. In Folders the title is the open folder's
 // path, a crumb per folder, each opening its folder; when they don't fit, the middle ones become …,
-// a menu of them (R2.9.1, L05, L08). What each says is the library's.
+// a menu of them (R2.9.1, L05, L08). Over a page (an album's, an artist's: L02-album, L11-artist)
+// the way back stands in the title's place, the count says what a search leaves of the page, and
+// the search filters the page (R2.7). What each says is the library's.
 Item {
     id: header
     required property var library
@@ -33,7 +35,7 @@ Item {
         x: 28
         y: 14
         height: 36
-        visible: !header.overTitle && !crumbs.visible
+        visible: !header.overTitle && !crumbs.visible && !back.visible
         verticalAlignment: Text.AlignVCenter
         text: header.library.title
         color: Theme.text
@@ -131,12 +133,44 @@ Item {
         }
     }
 
+    Item {  // a page's way back, where a view's title is: its chevron and the view or page it goes to
+        id: back
+        objectName: "back"
+        visible: header.library.onPage && !header.overTitle
+        x: 24
+        anchors.verticalCenter: title.verticalCenter
+        width: backLabel.x + backLabel.width + 4 - x
+        height: 28
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Back to %1").arg(header.library.backText)
+        HoverHandler { id: backHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: header.library.back() }
+    }
+    Icon {
+        id: backIcon
+        visible: back.visible
+        x: back.x + 4
+        anchors.verticalCenter: back.verticalCenter
+        name: "chevLeft"
+        size: 14
+        color: Theme.muted
+    }
+    Text {  // the count's sibling, so the count sits on its line
+        id: backLabel
+        visible: back.visible
+        x: backIcon.x + backIcon.width + 4
+        anchors.verticalCenter: back.verticalCenter
+        text: header.library.backText
+        color: backHover.hovered ? Theme.text : Theme.muted
+        font { family: Theme.sans; pixelSize: 13 }
+    }
+
     Text {
         id: count
         objectName: "viewCount"
-        anchors.left: crumbs.visible ? crumbs.right : title.right
+        anchors.left: crumbs.visible ? crumbs.right : back.visible ? backLabel.right : title.right
         anchors.leftMargin: 14
-        anchors.baseline: title.baseline
+        anchors.baseline: back.visible ? backLabel.baseline : title.baseline
         visible: !header.overTitle
         text: header.library.viewCount
         color: Theme.muted

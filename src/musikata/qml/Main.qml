@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Dialogs
 import "."
 
-// The main window (R6.1): the sidebar, and the open view or page (R2.6), as the library says, a view
+// The main window (R6.1): the sidebar, and the open view or page (R2.6), as the library says, either
 // under its header (R6.4); `/` opens the header's search (R2.7, R6.9). Over the view, the banner of
 // a root or linked folder that isn't there (R2.10, X02-root-unavailable), with Try again and Choose
 // another folder… (the platform's folder dialog), and the question of songs gone (R2.10.1). The

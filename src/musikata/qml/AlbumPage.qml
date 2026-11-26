@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "."
 
-// An album's page (R2.6, L02-album): the way back, the cover, the line over the title, the title,
+// An album's page (R2.6, L02-album), under the header (R6.4) with its way back and the search box,
+// which filters its songs (R2.7): the cover, the line over the title, the title,
 // the artist (a click opens their page), songs, length and format; Play and Shuffle, and Edit tags
 // and Album art, which come with later slices (the Edit tags panel, album art); the album's state
 // chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
@@ -15,35 +16,10 @@ Item {
     readonly property var album: library.album
     readonly property bool loading: art.loading
 
-    Item {
-        id: back
-        objectName: "back"
-        x: 24
-        y: 14
-        width: backRow.width + 8
-        height: 28
-        Accessible.role: Accessible.Button
-        Accessible.name: qsTr("Back to %1").arg(page.library.backText)
-        HoverHandler { id: backHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: page.library.back() }
-        Row {
-            id: backRow
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 4
-            Icon { anchors.verticalCenter: parent.verticalCenter; name: "chevLeft"; size: 14; color: Theme.muted }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: page.library.backText
-                color: backHover.hovered ? Theme.text : Theme.muted
-                font { family: Theme.sans; pixelSize: 13 }
-            }
-        }
-    }
-
     Cover {
         id: art
         x: 28
-        y: 52
+        y: 8
         width: 220
         height: 220
         radius: 12
@@ -191,6 +167,17 @@ Item {
                 onMenu: songMenu.openFor(page.album.songs, index)
             }
             ScrollBar.vertical: ScrollBar { }
+        }
+        Text {  // a search that found none of its songs (R2.7)
+            objectName: "empty"
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: songs.y + 40
+            width: Math.min(implicitWidth, table.width - 56)
+            elide: Text.ElideRight
+            visible: text !== ""
+            text: page.library.emptyText
+            color: Theme.muted
+            font { family: Theme.sans; pixelSize: 14 }
         }
     }
     SongMenu { id: songMenu; player: page.player }

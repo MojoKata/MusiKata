@@ -2,8 +2,9 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "."
 
-// An artist's page (R2.6): the way back, their mosaic, name, albums and songs; their albums, by
-// year; then their songs on others' albums and on none.
+// An artist's page (R2.6, L11-artist), under the header (R6.4) with its way back and the search box,
+// which filters their albums and songs (R2.7): their mosaic, name, albums and songs; their albums,
+// by year; then their songs on others' albums and on none.
 Item {
     id: page
     required property var library
@@ -34,34 +35,10 @@ Item {
             width: list.width
             height: albumsFlow.y + albumsFlow.height + (page.artist.othersTitle ? 76 : 24)
 
-            Item {
-                id: back
-                objectName: "back"
-                x: 4
-                y: 14
-                width: backRow.width + 8
-                height: 28
-                Accessible.role: Accessible.Button
-                Accessible.name: qsTr("Back to %1").arg(page.library.backText)
-                HoverHandler { id: backHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: page.library.back() }
-                Row {
-                    id: backRow
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 4
-                    Icon { anchors.verticalCenter: parent.verticalCenter; name: "chevLeft"; size: 14; color: Theme.muted }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: page.library.backText
-                        color: backHover.hovered ? Theme.text : Theme.muted
-                        font { family: Theme.sans; pixelSize: 13 }
-                    }
-                }
-            }
             Mosaic {
                 id: art
                 x: 8
-                y: 52
+                y: 8
                 width: 160
                 height: 160
                 tiles: page.artist.tiles
@@ -156,6 +133,17 @@ Item {
             onMenu: songMenu.openFor(page.artist.others, index)
         }
         ScrollBar.vertical: ScrollBar { }
+    }
+    Text {  // a search that found none of their albums or songs (R2.7)
+        objectName: "empty"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: 260
+        width: Math.min(implicitWidth, page.width - 56)
+        elide: Text.ElideRight
+        visible: text !== ""
+        text: page.library.emptyText
+        color: Theme.muted
+        font { family: Theme.sans; pixelSize: 14 }
     }
     SongMenu { id: songMenu; player: page.player }
 }
