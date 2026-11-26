@@ -1,7 +1,9 @@
 """The tour (src/musikata/tour.py; A1.6): every screen saved at the mockups' size and checked at
-both sizes, after the scan ends, and what runs past its box failing it."""
+both sizes, after the scan ends, and what runs past its box failing it; a run takes the screens of
+the state it started in: the library, the first start (X01) or a root that isn't there (X02)."""
 
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -38,7 +40,7 @@ def test_the_tour_saves_each_screen_and_passes_when_nothing_runs_past_its_box(
     shell.library.songs.reload()
     t, code = run(shell, tmp_path / "tour", qtbot)
     assert code == 0 and t.faults == []
-    assert [os.path.basename(p) for p in t.saved] == [f"{n}.png" for n, _ in tour.STEPS]
+    assert [os.path.basename(p) for p in t.saved] == [f"{n}.png" for n in tour.screens("library")]
     assert os.path.getsize(t.saved[0]) > 1000
     assert (tmp_path / "tour" / "layout.txt").read_text() == ""
     assert (shell.window.width(), shell.window.height()) == tour.DESIGN
@@ -50,13 +52,13 @@ def test_it_waits_for_the_scan_and_fails_on_a_text_past_its_box(shell, tmp_path,
     c.setData(b'import QtQuick\nText { text: "a root whose name runs out of its card" }', QUrl())
     text = c.create()
     text.setParentItem(card)
-    fill(shell.index, [{"path": "a.flac", "title": "Signal Fires"}])
+    (tmp_path / "Music" / "Undertow.flac").write_bytes(b"not audio")
     with qtbot.waitSignal(shell.library.scanningChanged):
-        shell.library.rescan()  # an empty root: the scan removes the row before the shot
+        shell.library.rescan()  # the scan adds its row (unreadable) before the shot
     t, code = run(shell, tmp_path / "tour", qtbot, only="L03-songs")
     assert code == 1
     assert any("runs past rootCard" in f for f in t.faults)
-    assert shell.library.property("songs").rowCount() == 0
+    assert shell.library.property("songs").rowCount() == 1
     written = (tmp_path / "tour" / "layout.txt").read_text()
     assert "L03-songs at 1280 x 800" in written and "L03-songs at 1920 x 1040" in written
 
@@ -92,3 +94,38 @@ def test_what_is_loading_is_what_a_visible_item_says(shell):
     root.setVisible(False)
     assert tour.loading(root) is False
     root.setVisible(True)
+
+
+def test_each_screen_is_of_one_state_and_a_run_takes_those_of_its_own():
+    states = {step.get("state", "library") for _, step in tour.STEPS}
+    assert states == {"library", "first-run", "unavailable"}
+    assert tour.screens("first-run") == ["X01-first-run"]
+    assert tour.screens("unavailable") == ["X02-root-unavailable"]
+    assert tour.state_of(None) == "first-run"
+
+
+def test_a_first_start_tours_its_window_alone(tmp_path, qtbot, qapp):
+    first = app.first_start({"HOME": str(tmp_path), "MUSIKATA_DATA": str(tmp_path / "d")})
+    codes = []
+    t = tour.Tour(first.window, None, str(tmp_path / "tour"), "", codes.append)
+    t.start()
+    qtbot.waitUntil(lambda: bool(codes), timeout=20_000)
+    assert codes == [0] and t.faults == []
+    assert [os.path.basename(p) for p in t.saved] == ["X01-first-run.png"]
+    first.close()
+
+
+def test_a_root_that_isnt_there_tours_its_library_as_it_was(tmp_path, qtbot, qapp):
+    env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
+    root = tmp_path / "Music"
+    root.mkdir()
+    s = app.load(str(root), env, FakeClock(), lambda: ThreadPoolExecutor(1))
+    fill(s.index, [{"path": "a.flac", "title": "Signal Fires", "album": "Glass Harbor"}])
+    s.close()
+    shutil.rmtree(root)  # its drive unplugged (R2.10)
+    s = app.load(str(root), env, FakeClock(), lambda: ThreadPoolExecutor(1), given=True)
+    assert not root.exists() and s.library.property("available") is False
+    t, code = run(s, tmp_path / "tour", qtbot, only="X02-root-unavailable,L01-albums")
+    assert code == 0 and [os.path.basename(p) for p in t.saved] == ["X02-root-unavailable.png"]
+    assert s.library.property("albumCountText") == "1 album"
+    s.close()

@@ -163,3 +163,73 @@ def test_the_clock_the_gatherer_reads_is_the_one_it_was_given():
     assert g.due_in() == pytest.approx(0.5)
     clock._now -= timedelta(days=1)  # the wall clock set back: the gathering runs on its own
     assert g.due_in() == pytest.approx(0.5)
+
+
+# ---------- a root that isn't there (R2.10) ----------
+
+
+def test_a_look_finds_the_root_and_the_linked_folders_still_out_of_reach(tmp_path):
+    music = tmp_path / "Music"
+    (music / "Live").mkdir(parents=True)
+    os.symlink(tmp_path / "unplugged", music / "Archive")
+    assert watch.there(str(music), {"Live", "Archive"}) == (True, frozenset({"Archive"}))
+    assert watch.there(str(tmp_path / "gone"), {"Live"}) == (False, frozenset({"Live"}))
+
+
+def test_presence_looks_off_the_gui_thread_and_says_what_it_found(qtbot):
+    answers = [(False, frozenset()), (True, frozenset({"Archive"}))]
+    p = watch.Presence("/m", lambda root, links: answers.pop(0))
+    with qtbot.waitSignal(p.found) as found:
+        p.look()
+    assert found.args == [False, frozenset()]
+    with qtbot.waitSignal(p.found) as found:
+        p.look()
+    assert found.args == [True, frozenset({"Archive"})]
+    p.close()
+
+
+def test_presence_looks_again_and_again_while_it_runs_and_not_once_stopped(qtbot):
+    looks = []
+    p = watch.Presence("/m", lambda root, links: looks.append(links) or (True, frozenset()),
+                       every=0.001)  # fmt: skip
+    p.links = frozenset({"Live"})
+    assert not p.running()
+    p.start()
+    p.start()
+    assert p.running()
+    qtbot.waitUntil(lambda: len(looks) >= 3, timeout=5000)
+    assert looks[0] == {"Live"}
+    p.stop()
+    assert not p.running()
+    p.close()
+
+
+def test_a_look_that_fails_finds_nothing_there_and_the_log_says_so(qtbot, caplog):
+    def broken(root, links):
+        raise OSError(5, "Input/output error")
+
+    p = watch.Presence("/m", broken)
+    caplog.set_level(logging.WARNING)
+    with qtbot.waitSignal(p.found) as found:
+        p.look()
+    assert found.args == [False, frozenset()] and "couldn't look" in caplog.text
+    p.close()
+
+
+def test_a_look_asked_for_while_one_runs_is_that_one(qtbot):
+    import threading
+
+    gate, looks = threading.Event(), []
+
+    def slow(root, links):
+        looks.append(1)
+        gate.wait(5)
+        return True, frozenset()
+
+    p = watch.Presence("/m", slow)
+    with qtbot.waitSignal(p.found):
+        p.look()
+        p.look()  # while the first runs
+        gate.set()
+    assert looks == [1]
+    p.close()

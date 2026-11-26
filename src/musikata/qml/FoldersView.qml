@@ -411,6 +411,7 @@ Item {
     SelectionBar {
         objectName: "selectionBar"
         folders: view.folders
+        playNote: view.library.playNote
         visible: view.folders.selectionCount > 0
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom

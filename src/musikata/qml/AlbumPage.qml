@@ -109,6 +109,7 @@ Item {
                 label: qsTr("Play")
                 icon: "play"
                 primary: true
+                later: page.library.playNote  // the root isn't there (R2.10)
                 onClicked: page.player.play(page.library.firstSong(page.album.id))
             }
             Btn { label: qsTr("Shuffle"); icon: "shuffle"; later: qsTr("Shuffle comes with the queue") }

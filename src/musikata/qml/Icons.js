@@ -49,6 +49,7 @@ const STROKE = {
     check: "M4 10.5L8 14.5L16 5.5",
     wave: "M3 8V12M5.8 5.5V14.5M8.6 3.5V16.5M11.4 6.5V13.5M14.2 4.5V15.5M17 7.5V12.5",
     starLine: starPoints(9),
+    refresh: "M13.25 4.37A6.5 6.5 0 1 0 15.63 13.25 M13.2 2.5L13.4 5.6L16.4 5.2",
 }
 const FILL = {
     song: ellipse(5.8, 14.8, 2.4, 2) + ellipse(12.8, 12.8, 2.4, 2),

@@ -245,8 +245,8 @@ def test_a_scan_removing_a_file_removes_its_words(index, tmp_path):
     root.mkdir()
     from concurrent.futures import ThreadPoolExecutor
 
-    with ThreadPoolExecutor(1) as pool:
-        scanner.scan(str(root), index, pool)
+    with ThreadPoolExecutor(1) as pool:  # all of a 1-song library: taken out unasked
+        scanner.scan(str(root), index, pool, hold=False)
     assert fts(index) == [] and found(index, "beyonce") == []
 
 

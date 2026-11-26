@@ -231,7 +231,7 @@ def test_an_unreadable_file_that_goes_takes_its_row_with_it(tmp_path):
     with ThreadPoolExecutor(1) as pool:
         first = scanner.scan(str(music), index, pool)
         os.remove(music / "Broken.flac")
-        second = scanner.scan(str(music), index, pool)
+        second = scanner.scan(str(music), index, pool, hold=False)  # all of a 1-song library
     assert first.unreadable == 1 and second.removed == 1
     assert _rows(index) == {}
     index.close()
@@ -283,7 +283,8 @@ def test_a_folder_new_under_a_named_one_is_walked_whole_and_one_gone_takes_its_r
     known = _scan(music, index).folders
     shutil.rmtree(music / "A" / "Old")
     wav(music / "A" / "New" / "Deep" / "3.wav", 3)
-    res = _scan(music, index, _scope("A", "A/New", known=known))  # named twice: walked once
+    # named twice: walked once; the removals, not R2.10.1's question, are the subject
+    res = _scan(music, index, _scope("A", "A/New", known=known), hold=False)
     assert (res.added, res.removed) == (1, 2)
     assert set(res.folders) == {"A", "A/New", "A/New/Deep"}
     assert res.gone_folders == {"A/Old", "A/Old/Deep"}
@@ -298,7 +299,7 @@ def test_a_named_folder_ignored_hidden_or_gone_takes_its_rows_and_its_folders_wi
     _touch(str(music / "A" / scanner.IGNORE), b"")
     os.rename(music / "B", music / ".B")
     shutil.rmtree(music / "C")
-    res = _scan(music, index, _scope("", "A", "B", "C", known=known))
+    res = _scan(music, index, _scope("", "A", "B", "C", known=known), hold=False)
     assert res.removed == 4 and set(_rows(index)) == {"D/5.wav"}
     assert res.gone_folders == {"A", "A/Sub", "B", "C"} and set(res.folders) == {""}  # D passed by
 
@@ -452,3 +453,151 @@ def test_a_link_new_in_a_named_folder_leading_back_to_a_known_one_is_skipped(lib
     caplog.set_level(logging.INFO)
     res = _scan(music, index, _scope("B", known=known))
     assert res.added == 0 and set(res.folders) == {"B"} and "leads back" in caplog.text
+
+
+# ---------- a root that isn't there (R2.10, R2.10.1) ----------
+
+
+def _songs(music, n, folder="A", start=0):
+    for i in range(start, start + n):
+        wav(music / folder / f"{i}.wav", i)
+
+
+def test_a_root_that_isnt_there_is_scanned_without_taking_any_song_for_removed(tmp_path):
+    music = tmp_path / "Music"
+    _songs(music, 3)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    known = _scan(music, index).folders
+    shutil.move(music, tmp_path / "unplugged")
+    whole = _scan(music, index)
+    partial = _scan(music, index, _scope("A", known=known))
+    assert whole.missing and partial.missing and whole.removed == partial.removed == 0
+    assert set(_rows(index)) == {"A/0.wav", "A/1.wav", "A/2.wav"}
+    assert not music.exists()
+    index.close()
+
+
+class _Unplugging:
+    """A pool that unplugs the root (moves it away) as the files are read: the root goes while it
+    is scanned."""
+
+    def __init__(self, music, away):
+        self.music, self.away = music, away
+
+    def map(self, fn, *args):
+        out = [fn(*a) for a in zip(*args, strict=True)]
+        shutil.move(self.music, self.away)
+        return out
+
+
+def test_a_root_that_goes_while_it_is_scanned_loses_nothing(tmp_path):
+    music = tmp_path / "Music"
+    _songs(music, 4)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    _scan(music, index)
+    os.remove(music / "A" / "3.wav")  # gone, but not taken out: the root went meanwhile
+    wav(music / "A" / "new.wav", 9)  # read as the root goes
+    res = scanner.scan(str(music), index, _Unplugging(music, tmp_path / "away"))
+    assert res.missing and res.removed == 0 and res.added == 1
+    assert "A/3.wav" in _rows(index)
+    index.close()
+
+
+def test_a_link_that_leads_nowhere_keeps_its_songs_and_is_named(tmp_path, caplog):
+    music, usb = tmp_path / "Music", tmp_path / "usb"
+    _songs(music, 1)
+    _songs(usb, 2, "Archive")
+    os.symlink(usb / "Archive", music / "Archive")
+    index = db.Index(str(tmp_path / "musikata.db"))
+    known = _scan(music, index).folders
+    assert set(_rows(index)) == {"A/0.wav", "Archive/0.wav", "Archive/1.wav"}
+    shutil.move(usb, tmp_path / "unplugged")
+    caplog.set_level(logging.WARNING)
+    whole = _scan(music, index, hold=False)
+    partial = _scan(music, index, _scope("Archive", known=known), hold=False)
+    assert whole.unreachable == {"Archive"} == partial.unreachable
+    assert whole.removed == partial.removed == 0 and len(_rows(index)) == 3
+    assert "the linked folder Archive can't be reached" in caplog.text
+    shutil.move(tmp_path / "unplugged", usb)
+    back = _scan(music, index)
+    assert back.unreachable == set() and back.removed == 0
+    index.close()
+
+
+def test_a_linked_folder_that_cant_be_read_keeps_its_songs(tmp_path, monkeypatch):
+    music, share = tmp_path / "Music", tmp_path / "share"
+    _songs(share, 2, "Live")
+    music.mkdir()
+    os.symlink(share / "Live", music / "Live", target_is_directory=True)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    _scan(music, index)
+    real = os.scandir
+
+    def asleep(path="."):
+        if str(path).endswith("Live"):
+            raise OSError(5, "Input/output error")  # a NAS gone to sleep
+        return real(path)
+
+    monkeypatch.setattr(scanner.os, "scandir", asleep)
+    res = _scan(music, index, hold=False)
+    assert res.unreachable == {"Live"} and res.removed == 0 and len(_rows(index)) == 2
+    index.close()
+
+
+def test_a_folder_under_a_link_that_leads_nowhere_names_the_link():
+    assert scanner.unreachable_link("/nowhere", "") is None
+    assert scanner.under("A/1.wav", {"A"}) and scanner.under("A", {"A"})
+    assert not scanner.under("AB/1.wav", {"A"}) and not scanner.under("A/1.wav", set())
+
+
+def test_more_than_a_quarter_of_the_songs_gone_is_held_for_the_users_answer(tmp_path, caplog):
+    music = tmp_path / "Music"
+    _songs(music, 4, "A")
+    _songs(music, 4, "B", start=4)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    _scan(music, index)
+    for i in range(3):  # 3 of 8: more than a quarter
+        os.remove(music / "A" / f"{i}.wav")
+    caplog.set_level(logging.WARNING)
+    res = _scan(music, index)
+    assert res.held == ["A/0.wav", "A/1.wav", "A/2.wav"] and res.songs == 8 and res.removed == 0
+    assert len(_rows(index)) == 8 and "the user is asked" in caplog.text
+    kept = _scan(music, index, keep=set(res.held))  # Keep them: not asked about again
+    assert kept.held == [] and kept.removed == 0 and len(_rows(index)) == 8
+    assert scanner.remove(str(music), index, res.held) == 3  # Remove
+    assert set(_rows(index)) == {"A/3.wav", *(f"B/{i}.wav" for i in range(4, 8))}
+    index.close()
+
+
+def test_a_quarter_is_of_the_whole_library_whichever_scan_finds_them_gone(tmp_path):
+    music = tmp_path / "Music"
+    _songs(music, 4, "A")
+    _songs(music, 4, "B", start=4)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    known = _scan(music, index).folders
+    for i in (0, 1):  # 2 of 8, though half of A: a quarter, not more
+        os.remove(music / "A" / f"{i}.wav")
+    res = _scan(music, index, _scope("A", known=known))
+    assert res.held == [] and res.removed == 2
+    os.remove(music / "B" / "4.wav")
+    os.remove(music / "B" / "5.wav")  # 2 of the 6 left, though only B is scanned: more
+    res = _scan(music, index, _scope("B", known=known))
+    assert res.held == ["B/4.wav", "B/5.wav"] and res.songs == 6 and res.removed == 0
+    index.close()
+
+
+def test_more_than_a_quarter_means_more():
+    assert not scanner.over_a_quarter(0, 0) and not scanner.over_a_quarter(1, 4)
+    assert scanner.over_a_quarter(2, 7) and scanner.over_a_quarter(1, 1)
+
+
+def test_songs_taken_out_on_remove_are_those_still_gone_while_the_root_is_there(tmp_path):
+    music = tmp_path / "Music"
+    _songs(music, 3)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    _scan(music, index)
+    os.remove(music / "A" / "0.wav")
+    assert scanner.remove(str(tmp_path / "gone"), index, ["A/0.wav"]) == 0  # no root: nothing
+    assert scanner.remove(str(music), index, ["A/0.wav", "A/1.wav", "A/9.wav"]) == 1
+    assert set(_rows(index)) == {"A/1.wav", "A/2.wav"}  # A/1.wav is there; A/9.wav never was
+    index.close()

@@ -7,6 +7,10 @@ so, and MusiKata rescans when its window gains focus instead.
 What to rescan and when is worked out by plain objects over the clock (`Gatherer`, `OwnWrites`),
 tested by moving a fake one; `Watcher` carries QFileSystemWatcher's reports to them.
 
+A root that isn't there can't be watched (R2.10): `Presence` looks for it, and for the linked
+folders that couldn't be reached, every few seconds while one is missing, so that MusiKata rescans
+when it comes back.
+
 A folder's watch reports what changes in its list of files: a file added, removed, renamed or
 given another modification time or attributes. On Linux it doesn't report a file rewritten in
 place (inotify's IN_MODIFY isn't in Qt's mask for folders), so a copy still being written is looked
@@ -19,6 +23,8 @@ import math
 import os
 import sys
 from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import wait as wait_for
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, Signal
 
@@ -31,6 +37,8 @@ GATHER = 1.0  # seconds a change waits for others before its rescan (A2.4)
 SETTLE = 2.0  # a file modified this recently may still be being written: looked at again
 OWN = 30.0  # seconds a write MusiKata made itself is recognised for (A2.4)
 LIMIT = "/proc/sys/fs/inotify/max_user_watches"  # Linux's limit on the folders a user watches
+CLOSING = 2.0  # seconds closing waits for a look that runs (Presence.close)
+LOOK = 5.0  # seconds between looks for a root, or a linked folder, that isn't there (R2.10)
 
 
 class Gatherer:
@@ -243,3 +251,83 @@ class Watcher(QObject):
             self._arm()
         else:
             self.ready.emit()
+
+
+def there(root: str, links: Iterable[str]) -> tuple[bool, frozenset[str]]:
+    """What a look finds (R2.10): whether the root is there, and which of the linked folders
+    `links` (paths under the root, R2.3.2) still can't be reached."""
+    if not os.path.isdir(root):
+        return False, frozenset(links)
+    return True, frozenset(f for f in links if not os.path.isdir(full_path(root, f)))
+
+
+class Presence(QObject):
+    """Looks for the root and the linked folders that couldn't be reached (R2.10), every `every`
+    seconds while it runs, and when asked (`look`, Try again). A look runs on a thread of its own,
+    the same one each time, since one at a share gone to sleep can take a minute, and `found`
+    gives its answer on the GUI thread: whether the root is there, and the linked folders that
+    still can't be reached. `links` are those to look for; `looking` is the look itself, given the
+    root and them (`there`; a test's stand-in); a look asked for while one runs is that one. It
+    holds nothing of what owns it, so its owner is freed when let go of, on its own thread, never
+    by the garbage collector on another."""
+
+    found = Signal(bool, object)
+    _looked = Signal(object)
+
+    def __init__(
+        self,
+        root: str,
+        looking: Callable[[str, frozenset[str]], tuple[bool, frozenset[str]]] = there,
+        every: float = LOOK,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._root, self._looking = root, looking
+        self.links: frozenset[str] = frozenset()
+        self._pool: ThreadPoolExecutor | None = None
+        self._looked_for: Future[None] | None = None
+        self._looking_now = False  # a look runs, its answer not yet given
+        self._timer = QTimer(self)
+        self._timer.setInterval(math.ceil(every * 1000))
+        self._timer.timeout.connect(self.look)
+        self._looked.connect(self._on_looked)
+
+    def start(self) -> None:
+        """Looks every `every` seconds from now on."""
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def running(self) -> bool:
+        return self._timer.isActive()
+
+    def look(self) -> None:
+        """Looks now, unless a look runs already."""
+        if self._looking_now:
+            return
+        self._looking_now = True
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(1, thread_name_prefix="presence")
+        self._looked_for = self._pool.submit(self._look, self.links)
+
+    def _look(self, links: frozenset[str]) -> None:
+        try:
+            self._looked.emit(self._looking(self._root, links))
+        except OSError as e:  # what can't be looked at isn't there
+            log.warning("couldn't look for the music root: %s", e)
+            self._looked.emit((False, frozenset()))
+
+    def _on_looked(self, answer: tuple[bool, frozenset[str]]) -> None:
+        self._looking_now = False
+        self.found.emit(*answer)
+
+    def close(self) -> None:
+        """Stops looking, and waits a moment for a look that runs; one held up by a share asleep
+        is left to end on its own, so that quitting never waits on it."""
+        self._timer.stop()
+        if self._looked_for is not None:
+            wait_for([self._looked_for], CLOSING)
+        if self._pool is not None:
+            self._pool.shutdown(wait=False)

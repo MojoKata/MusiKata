@@ -27,6 +27,8 @@ QtObject {
     readonly property color ok: "#34d399"
     readonly property color warn: "#fbbf24"
     readonly property color err: "#fb7185"
+    readonly property color errSoft: "#3d1a22"     // behind what is red: the banner and card of R2.10
+    readonly property color warnSoft: "#3a2e12"    // behind what is amber: R2.10.1's question
     readonly property color star: "#fbbf24"
     readonly property color progress: "#4ade80"
     readonly property color input: "#0f1217"

@@ -154,8 +154,10 @@ def test_a_folders_shared_artist_album_and_year_and_none_where_they_differ(index
 
 
 def scan(music, index, scope=None):
+    """A scan taking out what went unasked: the folder rows, not R2.10.1's question, are the
+    subject."""
     with ThreadPoolExecutor(1) as pool:
-        return scanner.scan(str(music), index, pool, scope=scope)
+        return scanner.scan(str(music), index, pool, scope=scope, hold=False)
 
 
 def test_scans_keep_the_rows_after_moves_and_deletes_up_through_the_ancestors(index, tmp_path):

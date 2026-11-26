@@ -3,6 +3,12 @@ demo library and saves DIR/<screen>.png, offscreen; every screen's visible text 
 the box it is drawn in (layout.py), at the mockups' size and at the design point (R6.2.1), and what
 runs past its box is written to DIR/layout.txt and fails the tour.
 
+A screen shows one of three states the app starts in, and a run takes the screens of the state it
+started in: the library ("library"), the first start (R2.1, "first-run": nothing configured and no
+root given), or the library of a root that isn't there (R2.10, "unavailable": a root given that
+isn't there, whose index an earlier run made). scripts/test-tour.sh starts it in each; nothing is
+faked to show them.
+
 Each step waits for what it needs (the scan to end, the window to take its size, the covers to
 load, a search's rows to come), never a fixed time (docs/process/testing.md, "Principles"): what
 loads off the GUI thread is polled for until nothing on the screen says it is `loading`."""
@@ -60,9 +66,24 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
     ),
     ("L08-folder-songs", {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small"}),
     ("L12-search", {"view": "albums", "search": "lumen dri"}),
+    ("X01-first-run", {"state": "first-run"}),
+    ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
 ]
 POLL = 20  # ms between looks at whether the covers have loaded
 PATIENCE = 30_000  # ms the covers may take before the shot is taken anyway, and the tour fails
+
+
+def state_of(library: Library | None) -> str:
+    """The state a run started in: "first-run" (no library yet), "unavailable" (its root isn't
+    there) or "library"."""
+    if library is None:
+        return "first-run"
+    return "library" if library.available else "unavailable"
+
+
+def screens(state: str) -> list[str]:
+    """The screens a run started in `state` takes."""
+    return [name for name, step in STEPS if step.get("state", "library") == state]
 
 
 def loading(item: QQuickItem) -> bool:
@@ -82,7 +103,7 @@ class Tour(QObject):
     def __init__(
         self,
         window: QQuickWindow,
-        library: Library,
+        library: Library | None,
         out: str,
         only: str = "",
         done: Callable[[int], None] = _quit,
@@ -92,7 +113,8 @@ class Tour(QObject):
         unknown = set(names) - {n for n, _ in STEPS}
         if unknown:
             raise ValueError(f"no such screen: {', '.join(sorted(unknown))}")
-        self.steps = [(n, s) for n, s in STEPS if not names or n in names]
+        mine = screens(state_of(library))
+        self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
         self.faults: list[str] = []
         self.saved: list[str] = []
@@ -106,13 +128,13 @@ class Tour(QObject):
         self.win.setWidth(SHOT[0])
         self.win.setHeight(SHOT[1])
         self.win.show()
-        if self.library.scanning:
+        if self.library is not None and self.library.scanning:
             self.library.scanningChanged.connect(self._scanned)
         else:
             QTimer.singleShot(0, self._step)
 
     def _scanned(self) -> None:
-        if not self.library.scanning:
+        if self.library is not None and not self.library.scanning:
             self.library.scanningChanged.disconnect(self._scanned)
             self._step()
 
@@ -121,7 +143,8 @@ class Tour(QObject):
             self._finish()
             return
         name, step = self.steps[self._i]
-        self.library.go(step)
+        if self.library is not None and "view" in step:
+            self.library.go(step)
         self._size = 0
         self._at_size()
 
@@ -181,7 +204,7 @@ class Tour(QObject):
             QTimer.singleShot(0, self._step)
 
     def _finish(self) -> None:
-        if isinstance(self.library.last, BaseException):
+        if self.library is not None and isinstance(self.library.last, BaseException):
             self.faults.append(f"the scan failed: {self.library.last!r}")
         os.makedirs(self.out, exist_ok=True)
         with open(os.path.join(self.out, "layout.txt"), "w", encoding="utf-8") as f:

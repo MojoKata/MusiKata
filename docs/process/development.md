@@ -32,8 +32,9 @@ release carries, which a script fetches, with every package at its pin (`packagi
 .venv/bin/python -m pytest             # all of tier 1's tests
 ```
 
-`MUSIKATA_DATA` points the database and caches at another folder, so a development copy never
-touches the real library's index; `MUSIKATA_DEBUG=1` adds debug lines to the log (R14.5).
+`MUSIKATA_DATA` points the database, the caches and the shared settings at another folder, so a
+development copy never touches the real library's index or changes the configured root (R2.1);
+`MUSIKATA_DEBUG=1` adds debug lines to the log (R14.5).
 
 ## Before each commit
 
@@ -79,6 +80,12 @@ visible text against the box it is drawn in, at that size and at the design poin
 fails on text that runs past it, naming each in `build/tour/layout.txt`. `--tour-only L03-songs`
 takes the screens named. In the container the demo library is the home's `Music`, so the screens
 show `~/Music`, as CI's and the site's do.
+
+A run takes the screens of the state MusiKata started in (`src/musikata/tour.py`): the library, a
+first start (`X01-first-run`: no `--root`, and nothing configured in an empty `MUSIKATA_DATA`) or a
+root that isn't there (`X02-root-unavailable`: `--root` naming a folder gone, whose index an earlier
+run made). `scripts/test-tour.sh` starts it once in each, the second with the demo library's folder
+unmounted, and gathers their screens in `build/tour/`.
 
 ## Redrawing the mockups
 

@@ -14,6 +14,7 @@ Rectangle {
     radius: 12
     color: Theme.raised
     border.color: Theme.borderStrong
+    property string playNote: ""  // why Play waits: the root isn't there (R2.10)
     Accessible.role: Accessible.ToolBar
     Accessible.name: bar.folders.selectionText
 
@@ -68,6 +69,7 @@ Rectangle {
             objectName: "playSelection"
             label: qsTr("Play")
             icon: "play"
+            later: bar.playNote
             onClicked: bar.folders.playSelection()
         }
         Repeater {

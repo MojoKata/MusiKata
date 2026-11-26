@@ -9,7 +9,14 @@ folder's own files, and the folders new under it, walked whole; the folders alre
 before, and watched) are passed by, as their own watches report their changes. A move still has
 two ends when only one is in the scope: a new file takes the row of a song with its hash whose file
 is gone from wherever it was, and a song whose file went takes the row of a copy of it made while
-watching (a move by copying, then removing: `copied`)."""
+watching (a move by copying, then removing: `copied`).
+
+What a scan doesn't do (R2.10): take a root that isn't there for a root whose songs were all
+removed, or a folder joined by a link that leads nowhere (R2.3.2) for one whose songs were; their
+rows stay as they were, and the result says so. And a scan that finds more than a quarter of the
+library's songs gone holds their removal (`Result.held`) until the user answers (R2.10.1), since a
+folder renamed or a share half mounted looks the same as songs deleted; `remove` takes them out
+then."""
 
 from __future__ import annotations
 
@@ -74,19 +81,23 @@ class Scope:
 @dataclass
 class Tree:
     """What a walk went through: each folder it walked (its path under the root, and its real
-    path), the known folders it passed by, and the real paths walked, so that a link leading back
-    to one is skipped (R2.3.2)."""
+    path), the known folders it passed by, the real paths walked, so that a link leading back
+    to one is skipped (R2.3.2), and the links to folders that can't be reached (R2.10)."""
 
     folders: dict[str, str] = field(default_factory=dict)
     passed: set[str] = field(default_factory=set)
     reals: set[str] = field(default_factory=set)
+    unreachable: set[str] = field(default_factory=set)  # links leading nowhere (R2.10)
 
 
 @dataclass
 class Result:
     """What a scan did, in counts, and for watching (A2.4): the folders it walked (path under the
     root -> real path), the known ones it found gone, the files it read, and the copies made while
-    watching that a later scan may find were moves (audio hash -> path)."""
+    watching that a later scan may find were moves (audio hash -> path). And what it left alone
+    (R2.10): `missing`, the root wasn't there, so nothing changed; `unreachable`, the links (paths
+    under the root) to folders that couldn't be reached, whose songs stay; `held`, the songs gone
+    whose removal waits on the user (R2.10.1), of the `songs` the library had."""
 
     added: int = 0
     changed: int = 0
@@ -98,6 +109,10 @@ class Result:
     gone_folders: set[str] = field(default_factory=set, repr=False)
     read: list[Seen] = field(default_factory=list, repr=False)
     copied: dict[str, str] = field(default_factory=dict, repr=False)
+    missing: bool = False
+    unreachable: set[str] = field(default_factory=set)
+    held: list[str] = field(default_factory=list, repr=False)
+    songs: int = 0
 
 
 # ---------- walking ----------
@@ -113,6 +128,11 @@ def _hidden(entry: os.DirEntry[str]) -> bool:
 def _hidden_attribute(st: os.stat_result) -> bool:
     attrs = getattr(st, "st_file_attributes", 0)
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_HIDDEN", 0))
+
+
+def _link(path: str) -> bool:
+    """A symbolic link, or a Windows junction (R2.3.2)."""
+    return os.path.islink(path) or bool(getattr(os.path, "isjunction", bool)(path))
 
 
 def full_path(root: str, rel: str) -> str:
@@ -150,7 +170,11 @@ def walk(
         try:
             entries = sorted(os.scandir(folder), key=lambda e: e.name)
         except OSError as e:
-            log.warning("couldn't read %s: %s", rel or ".", e)
+            if rel and _link(folder):  # a share behind a link, gone to sleep (R2.10)
+                tree.unreachable.add(rel)
+                log.warning("the linked folder %s can't be reached: %s; its songs are kept", rel, e)
+            else:
+                log.warning("couldn't read %s: %s", rel or ".", e)
             return
         if any(entry.name == IGNORE for entry in entries):
             return
@@ -170,9 +194,14 @@ def walk(
                 elif os.path.splitext(entry.name)[1].lower() in EXTENSIONS:
                     st = entry.stat()
                     yield Seen(path, st.st_size, st.st_mtime_ns)
-                elif images is not None and art.is_image(entry.name):
-                    st = entry.stat()
-                    images[rel].append(art.Image(entry.name, st.st_size, st.st_mtime_ns))
+                elif art.is_image(entry.name):
+                    if images is not None:
+                        st = entry.stat()
+                        images[rel].append(art.Image(entry.name, st.st_size, st.st_mtime_ns))
+                elif _link(entry.path) and not os.path.exists(entry.path):
+                    # a link to a folder whose drive isn't there: its songs are kept (R2.10)
+                    tree.unreachable.add(path)
+                    log.warning("the linked folder %s can't be reached; its songs are kept", path)
             except OSError as err:
                 log.warning("couldn't read %s: %s", path, err)
 
@@ -200,6 +229,23 @@ def outside(root: str, folder: str, skip: Iterable[str] = ()) -> bool:
     return False
 
 
+def unreachable_link(root: str, folder: str) -> str | None:
+    """The link at or above `folder` (a path under the root) that leads nowhere, if there is one
+    (R2.10): the folder it joins (R2.3.2) can't be reached."""
+    parts = folder.split("/") if folder else []
+    for n in range(len(parts)):
+        path = "/".join(parts[: n + 1])
+        full = full_path(root, path)
+        if _link(full) and not os.path.exists(full):
+            return path
+    return None
+
+
+def under(path: str, folders: Collection[str]) -> bool:
+    """Whether `path` (under the root) is in one of `folders` or beneath it."""
+    return any(path == f or path.startswith(f + "/") for f in folders)
+
+
 def walk_scope(
     root: str,
     scope: Scope,
@@ -215,6 +261,10 @@ def walk_scope(
     # the known folders count as walked (R2.3.2), but for the named ones, walked again here
     tree.reals |= set(scope.known.values()) - {os.path.realpath(full_path(root, f)) for f in named}
     for folder in named:
+        link = unreachable_link(root, folder)
+        if link is not None:  # behind a link that leads nowhere now: its songs are kept (R2.10)
+            tree.unreachable.add(link)
+            continue
         if folder in tree.folders or outside(root, folder, skip):
             continue
         yield from walk(root, skip, images, start=folder, known=scope.known, tree=tree)
@@ -525,6 +575,53 @@ def _elsewhere(
     return copies
 
 
+def _remove(
+    c: sqlite3.Connection,
+    remove: list[str],
+    taken: Mapping[str, str],
+    images: Mapping[str, list[art.Image]] | None,
+) -> int:
+    """In the writer's transaction: the songs at `remove` taken out of the index, and those at
+    `taken`'s keys taken over by the copies its values name (`take_over`); their albums, artists
+    and folders summarized again (A2.7). The number taken out."""
+    touched = albums.Touched()
+    moved = sum(take_over(c, old, new, touched) for old, new in taken.items())
+    albums.forget(c, remove, touched)
+    search.forget(c, remove)
+    c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
+    albums.refresh(c, touched, images)
+    places = {albums.folder_of(p) for p in [*remove, *taken, *taken.values()]}
+    if images is not None:
+        albums.refresh_folders(c, images)  # covers added or changed beside unchanged songs
+        places |= set(folders.stale_images(c, images))
+    folders.refresh(c, places, images)
+    return moved
+
+
+def remove(root: str, index: db.Index, paths: Collection[str]) -> int:
+    """Takes the songs at `paths` out of the index, those whose file still isn't there: the songs
+    a scan held (R2.10.1), once the user says Remove. A song whose file came back meanwhile stays,
+    and with the root gone again, every one does. The number taken out."""
+    if not os.path.isdir(root):
+        log.warning("didn't take out the songs missing from %s: it isn't there", root)
+        return 0
+    gone = [p for p in paths if not os.path.exists(full_path(root, p))]
+
+    def write(c: sqlite3.Connection) -> int:
+        known = [p for p in gone if c.execute("SELECT 1 FROM song WHERE path = ?", (p,)).fetchone()]
+        _remove(c, known, {}, None)
+        return len(known)
+
+    removed: int = index.write(write).result()
+    log.info("took %d songs missing from %s out of the library", removed, root)
+    return removed
+
+
+def over_a_quarter(gone: int, songs: int) -> bool:
+    """Whether `gone` songs of a library of `songs` is more than a quarter of it (R2.10.1)."""
+    return gone * 4 > songs
+
+
 def scan(
     root: str,
     index: db.Index,
@@ -534,31 +631,43 @@ def scan(
     scope: Scope | None = None,
     expected: Mapping[str, tuple[int, int]] | None = None,
     copied: Mapping[str, str] | None = None,
+    keep: Collection[str] = (),
+    hold: bool = True,
 ) -> Result:
     """One scan of the root into its index (A2.2), or, given a `scope`, of the folders it names
     (A2.4). progress(done, of) after each batch, for the root's card (R2.3). `expected`: files
     MusiKata wrote itself, not read again (`plan`). `copied`: copies made while watching, by audio
     hash, which a song whose file went takes over (`take_over`); the result's are those still
-    standing, with the new ones."""
+    standing, with the new ones.
+
+    A root that isn't there changes nothing (`Result.missing`), and the songs beneath a link that
+    leads nowhere stay (`Result.unreachable`) (R2.10). When the songs gone are more than a quarter
+    of the library's, whichever scan finds them, a partial one included, none is taken out: they
+    are `Result.held` for the user's answer (R2.10.1); `keep`, the songs the user said to keep,
+    stay without being asked about again. `hold` False takes them out unasked: for a test whose
+    subject is the removal itself, in a library too small for a quarter to mean anything."""
     c = index.read()
     images: dict[str, list[art.Image]] = {}
     tree = Tree()
+    if not os.path.isdir(root):  # gone with its drive (R2.10): nothing is taken for removed
+        log.warning("didn't scan %s: it isn't there", root)
+        return Result(missing=True)
     if scope is None:
         seen = list(walk(root, skip, images, tree=tree))
-    elif not os.path.isdir(root):  # gone with its drive (R2.10): nothing is taken for removed
-        log.warning("didn't rescan %s: it isn't there", root)
-        return Result()
     else:
         seen = list(walk_scope(root, scope, skip, images, tree))
     rows = _rows(c, scope, tree)
     indexed = {p: (s, m) for p, s, m, _h in rows}
     hashes = {p: h for p, _s, _m, h in rows if h is not None}
     work = plan(seen, indexed, expected)
+    kept = {p for p in work.gone if p in keep or under(p, tree.unreachable)}
+    work.gone = [p for p in work.gone if p not in kept]
     moves = {hashes[p]: p for p in work.gone if p in hashes}
     total = Result(
         unchanged=len(indexed) - len(work.gone) - sum(s.path in indexed for s in work.read),
         folders=dict(tree.folders),
         read=list(work.read),
+        unreachable=set(tree.unreachable),
     )
     copies = dict(copied or {})
     for i in range(0, len(work.read), BATCH):
@@ -588,19 +697,23 @@ def scan(
         and copies[hashes[p]] not in gone
         and os.path.exists(full_path(root, copies[hashes[p]]))
     }
-    remove = [p for p in left if p not in taken]
+    removing = [p for p in left if p not in taken]
+    total.songs = c.execute("SELECT COUNT(*) FROM song").fetchone()[0]
+    if not os.path.isdir(root):  # gone while it was walked: what wasn't seen isn't taken out
+        log.warning("%s went while it was scanned: nothing is taken out", root)
+        total.missing, removing, taken = True, [], {}
+    elif hold and over_a_quarter(len(removing), total.songs):
+        log.warning(
+            "%d of the %d songs in %s are gone: the user is asked before they are taken out",
+            len(removing),
+            total.songs,
+            root,
+        )
+        total.held, removing = removing, []
 
     def delete(c: sqlite3.Connection) -> int:
-        touched = albums.Touched()
-        total.moved += sum(take_over(c, old, new, touched) for old, new in taken.items())
-        albums.forget(c, remove, touched)
-        search.forget(c, remove)
-        c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
-        albums.refresh(c, touched, images)
-        albums.refresh_folders(c, images)  # covers added or changed beside unchanged songs
-        places = {albums.folder_of(p) for p in [*remove, *taken, *taken.values()]}
-        folders.refresh(c, places | set(folders.stale_images(c, images)), images)
-        return len(remove)
+        total.moved += _remove(c, removing, taken, images)
+        return len(removing)
 
     total.removed = index.write(delete).result()
     used = {hashes[p] for p in taken}

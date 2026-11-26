@@ -3,7 +3,8 @@ them (R2.6, R6.3), the header (R6.4: the view's title and count, the search, the
 sort), Albums with its genre chips and Artists, an album's and an artist's pages, Folders (its open
 folder and list are folders.py's, R2.9), and the scans,
 run one at a time on a thread of their own with the worker processes reading the files (A1.3,
-A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4).
+A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4); the root's
+card, and a root that isn't there (R2.1.1, R2.10).
 `Player`: the song playing, played on the playback thread (player.py, A4.1).
 
 What the root's card and the pages say is decided here, as text (`docs/process/coding.md`: QML only
@@ -19,7 +20,7 @@ from collections.abc import Callable
 from concurrent.futures import Executor
 
 from PySide6.QtCore import Property as QtProperty
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
 from musikata_core import albums, db, scanner, watch, workers
 from musikata_core.clock import Clock, SystemClock
@@ -52,6 +53,14 @@ from .player import Engine, PlaybackThread
 log = logging.getLogger(__name__)
 
 
+def local_folder(folder: str) -> str | None:
+    """A folder chosen or dropped (R2.1), as a path or a file: URL, as a whole path; None when it
+    isn't a folder."""
+    path = QUrl(folder).toLocalFile() if folder.startswith("file:") else folder
+    path = os.path.abspath(os.path.expanduser(path)) if path else ""
+    return path if path and os.path.isdir(path) else None
+
+
 def shown_path(path: str, home: str) -> str:
     """A path as MusiKata shows it: under the home folder as ~/…, with the system's separator."""
     home = home.rstrip("/\\")
@@ -70,6 +79,99 @@ def summary(songs: int, albums: int, size: int) -> str:
 def scanning_text(done: int, of: int) -> str:
     """The root card's line while a scan runs (R2.3)."""
     return f"Scanning… {done:,} of {of:,}" if of else "Scanning…"
+
+
+APP = "MusiKata"
+
+
+def window_title(root: str, given: bool) -> str:
+    """The window's title: the app's name, and the root's when it was given for this run only, so
+    a library that isn't the usual one is never mistaken for it (R2.1.2):
+    MusiKata — /media/usb/Music."""
+    return f"{APP} — {root}" if given else APP
+
+
+def banner(root: str, missing: bool, links: list[str]) -> dict[str, object]:
+    """The banner across the view (R2.10, X02-root-unavailable): the root that isn't there (shown
+    as `root`), or else the linked folders that can't be reached (R2.3.2), each shown as its whole
+    path, named; {} when all is there. `choose` says whether it offers Choose another folder…,
+    which is for the root."""
+    if missing:
+        return {
+            "title": f"{root} isn't available. Its drive may be unplugged or its share not"
+            " mounted.",
+            "detail": "Your library is kept. Playing and changes to files wait until it's back.",
+            "choose": True,
+        }
+    if not links:
+        return {}
+    if len(links) == 1:
+        return {
+            "title": f"{links[0]} isn't available. Its drive may be unplugged or its share not"
+            " mounted.",
+            "detail": "Its songs are kept. Playing them waits until it's back.",
+            "choose": False,
+        }
+    others = plural(len(links) - 1, "other linked folder")
+    return {
+        "title": f"{links[0]} and {others} aren't available. Their drives may be unplugged or their"
+        " shares not mounted.",
+        "detail": "Their songs are kept. Playing them waits until they're back.",
+        "choose": False,
+    }
+
+
+def question(root: str, gone: int) -> dict[str, str]:
+    """Asking before taking out the songs a scan found gone (R2.10.1): its text and its two
+    answers; {} when there is nothing to ask."""
+    if not gone:
+        return {}
+    if gone == 1:
+        return {
+            "text": f"1 song is missing from {root}. Remove it from the library?",
+            "keep": "Keep it",
+            "remove": "Remove",
+        }
+    return {
+        "text": f"{gone:,} songs are missing from {root}. Remove them from the library?",
+        "keep": "Keep them",
+        "remove": "Remove",
+    }
+
+
+SHOWN_UNREADABLE = 3  # files the dot's tooltip names before "and n more"
+
+
+def dot(missing: bool, scanning: bool, unreadable: int, links: int) -> str:
+    """The root card's dot (R2.1.1): "missing" (red, R2.10), "scanning" (turning), "warn" (amber:
+    files that couldn't be read, or linked folders that can't be reached) or "ok" (green: up to
+    date)."""
+    if missing:
+        return "missing"
+    if scanning:
+        return "scanning"
+    return "warn" if unreadable or links else "ok"
+
+
+def dot_tip(
+    state: str, root: str, unreadable: int, names: list[tuple[str, str]], links: list[str]
+) -> str:
+    """What the dot's tooltip says (R2.1.1): the state, and when amber, what couldn't be read
+    (`names`: the first files' paths and why) and the linked folders that can't be reached."""
+    if state == "missing":
+        return f"{root} isn't available"
+    if state == "scanning":
+        return f"Scanning {root}"
+    if state == "ok":
+        return "Up to date"
+    lines = []
+    if unreadable:
+        lines.append(f"{plural(unreadable, 'file')} couldn't be read:")
+        lines += [f"{path}: {why}" for path, why in names[:SHOWN_UNREADABLE]]
+        if unreadable > SHOWN_UNREADABLE:
+            lines.append(f"and {unreadable - SHOWN_UNREADABLE:,} more")
+    lines += [f"{link} can't be reached" for link in links]
+    return "\n".join(lines)
 
 
 def counts(c: sqlite3.Connection) -> tuple[int, int, int]:
@@ -287,12 +389,22 @@ class Library(QObject):
     way back from a page (R6.3), Albums and its genre chips, Artists, Songs, and the pages; and
     its scans. With `watching`, a scan of the root starts watching it (A2.4): a change the watcher
     reports is rescanned, its folders only, and the views read again where they are. `remembered`:
-    where Folders was left, which it opens at (R2.9.1; folders.Remembered)."""
+    where Folders was left, which it opens at (R2.9.1; folders.Remembered).
+
+    The root's card (R2.1.1) and a root that isn't there (R2.10): `missing` when it isn't, at
+    start or found gone by a scan or a look; then the library stays as it was, the banner says so,
+    playing waits (`unplayable`), and the root is looked for every few seconds (watch.Presence,
+    `looking` a test's stand-in for the look) and rescanned when it comes back. Linked folders
+    that can't be reached are the same for their own songs. Songs a scan found gone, more than a
+    quarter of the library, wait on the question of R2.10.1. `given`: the root is for this run
+    only (R2.1.2), and the window's title names it. Choose another folder… says which with
+    `rootChosen`, for app.Session to open it."""
 
     changed = Signal()  # the card's line, the counts, the genre chips, the empty texts
     scanningChanged = Signal()
     viewChanged = Signal()  # the view, and its header's title, modes and sorts
     searchChanged = Signal()
+    rootChosen = Signal(str)  # Choose another folder… (R2.10): the folder chosen, a whole path
     _progress = Signal(int, int)
     _finished = Signal(object)
 
@@ -306,6 +418,10 @@ class Library(QObject):
         clock: Clock | None = None,
         watching: bool = False,
         remembered: Remembered | None = None,
+        missing: bool = False,
+        given: bool = False,
+        looking: Callable[[str, frozenset[str]], tuple[bool, frozenset[str]]] = watch.there,
+        look_every: float = watch.LOOK,
     ) -> None:
         super().__init__(parent)
         self._root, self._index, self._home, self._pool = root, index, home, pool
@@ -346,6 +462,18 @@ class Library(QObject):
         self._progress.connect(self._on_progress)
         self._finished.connect(self._on_finished)
         self._counts = (0, 0, 0)
+        self._given = given
+        self._missing = missing  # the root isn't there (R2.10)
+        self._links: frozenset[str] = frozenset()  # linked folders that can't be reached
+        self._held: list[str] = []  # songs gone, waiting on the user's answer (R2.10.1)
+        self._kept: set[str] = set()  # songs gone the user said to keep, not asked about again
+        self._removing: list[str] = []  # songs gone the user said to remove, waiting their turn
+        self._taking: set[str] = set()  # those being taken out now
+        self._unreadable: tuple[int, list[tuple[str, str]]] = (0, [])
+        self._presence = watch.Presence(root, looking, look_every, self)
+        self._presence.found.connect(self._on_found)
+        if missing:
+            self._presence.start()
         self.reload()
 
     def reload(self) -> None:
@@ -358,6 +486,13 @@ class Library(QObject):
         self._folders.reload()
         c = self._index.read()
         self._counts = counts(c)
+        self._unreadable = (
+            c.execute("SELECT COUNT(*) FROM song WHERE error IS NOT NULL").fetchone()[0],
+            c.execute(
+                "SELECT path, error FROM song WHERE error IS NOT NULL ORDER BY path LIMIT ?",
+                (SHOWN_UNREADABLE,),
+            ).fetchall(),
+        )
         self._chips = genre_chips(c)
         if self._genre and self._genre not in self._chips[0] + self._chips[1]:
             self.set_genre("")
@@ -558,9 +693,9 @@ class Library(QObject):
         self._busy = True
         if scope is None and self._watcher is not None:
             self._watcher.forget()  # what it gathered, this scan covers
-        expected, copied = self._own.expected(), dict(self._copied)
+        expected, copied, keep = self._own.expected(), dict(self._copied), set(self._kept)
         self._thread = threading.Thread(
-            target=self._scan, args=(scope, expected, copied), name="scan", daemon=True
+            target=self._scan, args=(scope, expected, copied, keep), name="scan", daemon=True
         )
         self._thread.start()
 
@@ -569,6 +704,7 @@ class Library(QObject):
         scope: scanner.Scope | None,
         expected: dict[str, tuple[int, int]],
         copied: dict[str, str],
+        keep: set[str],
     ) -> None:
         result: scanner.Result | BaseException
         try:
@@ -581,6 +717,7 @@ class Library(QObject):
                     scope=scope,
                     expected=expected,
                     copied=copied,
+                    keep=keep,
                 )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
@@ -595,12 +732,24 @@ class Library(QObject):
         self.reload()
 
     @Slot(object)
-    def _on_finished(self, finished: tuple[bool, scanner.Result | BaseException]) -> None:
+    def _on_finished(self, finished: tuple[bool | None, scanner.Result | BaseException]) -> None:
+        """A scan ended (whole: the root's, or a partial one), or a removal (whole None)."""
         whole, result = finished
         self._busy = False
+        if whole is None:
+            self._taking = set()
+            if isinstance(result, scanner.Result) and result.missing and not self._closed:
+                self._went()
+            self.reload()
+            self._next()
+            return
         if isinstance(result, scanner.Result) and not self._closed:
-            self._copied = result.copied
-            self._watch(whole, result)
+            if result.missing:
+                self._went()
+            else:
+                self._copied = result.copied
+                self._watch(whole, result)
+                self._found_there(whole, result)
         if whole:
             self._scanning = False
         self.reload()
@@ -609,16 +758,137 @@ class Library(QObject):
         self._next()
 
     def _next(self) -> None:
-        """The next scan, once one has ended: the root's, if asked for meanwhile, else the
-        folders gathered and due."""
+        """The next scan, once one has ended: the songs the user said to remove (R2.10.1), the
+        root's, if asked for meanwhile, else the folders gathered and due."""
         if self._busy or self._closed:
             return
-        if self._scanning:
+        if self._removing:
+            self._start_removal()
+        elif self._scanning:
             self._start(None)
         elif self._watcher is not None and self._watcher.due():
             folders = self._watcher.take()
             if folders:
                 self._start(scanner.Scope(folders, self._watcher.known()))
+
+    # ---------- a root that isn't there (R2.10, R2.10.1) ----------
+
+    def _went(self) -> None:
+        """The root isn't there: the library stays as it was, its watches went with it, and it is
+        looked for until it comes back."""
+        if not self._missing:
+            log.warning("%s isn't there: its library is kept as it was", self._root)
+        self._missing = True
+        if self._watcher is not None:  # its watches went with it: the next scan watches anew
+            self._watcher.close()
+            self._watcher.deleteLater()
+            self._watcher = None
+        self._presence.start()
+        self.changed.emit()
+
+    def _found_there(self, whole: bool, result: scanner.Result) -> None:
+        """After a scan that found the root: the linked folders out of reach (a scan of the root
+        says which; a partial one, those it met, and those it walked are back), and the songs gone
+        that wait on the user's answer."""
+        self._missing = False
+        walked = set(result.folders)
+        answered = set(self._removing) | self._taking
+        if whole:
+            self._set_links(frozenset(result.unreachable))
+            self._held = [p for p in result.held if p not in answered]
+        else:
+            self._set_links(frozenset((self._links - walked) | result.unreachable))
+            self._held = sorted((set(self._held) | set(result.held)) - answered)
+        if self._links:
+            self._presence.start()
+        else:
+            self._presence.stop()
+
+    def _set_links(self, links: frozenset[str]) -> None:
+        self._links = self._presence.links = links
+
+    @Slot(bool, object)
+    def _on_found(self, there: bool, links: frozenset[str]) -> None:
+        """A look's answer: a root gone is the library kept; a root, or a linked folder, back is
+        rescanned, and its banner goes."""
+        if self._closed:
+            return
+        if not there:
+            if not self._missing:
+                self._went()
+            return
+        back = self._missing or bool(self._links - links)
+        if back:
+            log.info("%s is there again: rescanning it", self._root)
+            self._missing = False
+            self._set_links(frozenset(links))
+            self.rescan()
+        if not self._links:
+            self._presence.stop()
+        self.changed.emit()
+
+    @Slot()
+    def retry(self) -> None:
+        """Try again (R2.10): looks for the root, and the linked folders out of reach, now."""
+        self._presence.look()
+
+    @Slot(str)
+    def chooseRoot(self, folder: str) -> None:  # noqa: N802
+        """Choose another folder… (R2.10, R2.1): the folder chosen, a path or a file: URL, said
+        with `rootChosen` when it is a folder."""
+        path = local_folder(folder)
+        if path is None:
+            log.warning("didn't open %s as the music root: it isn't a folder", folder)
+            return
+        self.rootChosen.emit(path)
+
+    @Slot()
+    def keepMissing(self) -> None:  # noqa: N802
+        """Keep them (R2.10.1): the songs gone stay, and aren't asked about again while MusiKata
+        runs."""
+        self._kept |= set(self._held)
+        self._held = []
+        self.changed.emit()
+
+    @Slot()
+    def removeMissing(self) -> None:  # noqa: N802
+        """Remove (R2.10.1): the songs gone are taken out of the library, on the scan's thread
+        when no scan runs."""
+        self._removing += self._held
+        self._held = []
+        self.changed.emit()
+        self._next()
+
+    def _start_removal(self) -> None:
+        self._busy = True
+        paths, self._removing = self._removing, []
+        self._taking = set(paths)
+        self._thread = threading.Thread(
+            target=self._remove, args=(paths,), name="scan", daemon=True
+        )
+        self._thread.start()
+
+    def _remove(self, paths: list[str]) -> None:
+        result = scanner.Result(missing=not os.path.isdir(self._root))
+        try:
+            result.removed = scanner.remove(self._root, self._index, paths)
+        except Exception:  # noqa: BLE001  (logged, and MusiKata goes on with the songs kept)
+            log.exception("taking the missing songs out of %s failed", self._root)
+        self._finished.emit((None, result))
+
+    def unplayable(self, path: str) -> str:
+        """Why the song at `path` (under the root) can't play now: its root or its linked folder
+        isn't there (R2.10); "" when it can."""
+        if self._missing:
+            return self._get_play_note()
+        link = next((f for f in sorted(self._links) if scanner.under(path, {f})), None)
+        if link is not None:
+            return f"{self._shown(link)} isn't available, so its songs can't play"
+        return ""
+
+    def _shown(self, folder: str) -> str:
+        """A folder under the root (a path with /) as MusiKata shows it, whole."""
+        return shown_path(scanner.full_path(self._root, folder), self._home)
 
     # ---------- watching (A2.4, R2.4) ----------
 
@@ -644,8 +914,11 @@ class Library(QObject):
     @Slot(bool)
     def window_active(self, active: bool) -> None:
         """The window gained (or lost) focus: where watching stopped, gaining it rescans the root
-        (R2.4)."""
-        if active and self._watcher is not None and self._watcher.why:
+        (R2.4); and it looks for the root, which may have gone or come back meanwhile (R2.10)."""
+        if not active:
+            return
+        self._presence.look()
+        if self._watcher is not None and self._watcher.why and not self._missing:
             self.rescan()
 
     def wrote(self, path: str, size: int, mtime_ns: int) -> None:
@@ -683,6 +956,7 @@ class Library(QObject):
     def close(self) -> None:
         """Stops watching and waits for the threads: for closing. No scan starts after."""
         self._closed = True
+        self._presence.close()
         if self._watcher is not None:
             self._watcher.close()
         self.wait()
@@ -714,7 +988,33 @@ class Library(QObject):
         return self._scanning
 
     def _get_line(self) -> str:
+        if self._missing:
+            return "Not available"
         return scanning_text(self._done, self._of) if self._scanning else summary(*self._counts)
+
+    def _get_available(self) -> bool:
+        return not self._missing
+
+    def _get_dot(self) -> str:
+        return dot(self._missing, self._scanning, self._unreadable[0], len(self._links))
+
+    def _get_dot_tip(self) -> str:
+        links = [self._shown(f) for f in sorted(self._links)]
+        return dot_tip(self._get_dot(), self._get_root(), *self._unreadable, links)
+
+    def _get_banner(self) -> dict[str, object]:
+        links = [self._shown(f) for f in sorted(self._links)]
+        return banner(self._get_root(), self._missing, links)
+
+    def _get_question(self) -> dict[str, str]:
+        return question(self._get_root(), len(self._held))
+
+    def _get_play_note(self) -> str:
+        """Why nothing plays (R2.10): the root isn't there; "" when it is."""
+        return f"Playing waits until {self._get_root()} is back" if self._missing else ""
+
+    def _get_window_title(self) -> str:
+        return window_title(self._get_root(), self._given)
 
     def _count_of(self, view: str) -> str:
         if view == "folders":
@@ -835,6 +1135,13 @@ class Library(QObject):
         return self._albums_mode
 
     root = QtProperty(str, _get_root, constant=True)
+    windowTitle = QtProperty(str, _get_window_title, constant=True)  # MusiKata — ~/Music (R2.1.2)
+    available = QtProperty(bool, _get_available, notify=changed)  # the root is there (R2.10)
+    dot = QtProperty(str, _get_dot, notify=changed)  # the card's dot: ok, scanning, warn, missing
+    dotTip = QtProperty(str, _get_dot_tip, notify=changed)
+    banner = QtProperty(dict, _get_banner, notify=changed)  # {} when there is none (R2.10)
+    question = QtProperty(dict, _get_question, notify=changed)  # {} when none (R2.10.1)
+    playNote = QtProperty(str, _get_play_note, notify=changed)  # why Play waits; "" when it can
     songs = QtProperty(QObject, _get_songs, constant=True)
     albums = QtProperty(QObject, _get_albums, constant=True)
     artists = QtProperty(QObject, _get_artists, constant=True)
@@ -887,10 +1194,15 @@ class Player(QObject):
     _stop = Signal()
 
     def __init__(
-        self, root: str, engine: Engine | None = None, parent: QObject | None = None
+        self,
+        root: str,
+        engine: Engine | None = None,
+        parent: QObject | None = None,
+        refuse: Callable[[str], str] | None = None,
     ) -> None:
         super().__init__(parent)
         self._root = root
+        self._refuse = refuse  # why a song can't play now (Library.unplayable, R2.10)
         self._engine = engine if engine is not None else Engine()
         self._thread = PlaybackThread(self._engine)
         self._started = False
@@ -918,8 +1230,14 @@ class Player(QObject):
     @Slot(str)
     def play(self, path: str) -> None:
         """Plays the song at `path` under the root (the index's path) from its start (R7.1); ""
-        (an album with no songs) does nothing."""
+        (an album with no songs) does nothing. A song whose root, or linked folder, isn't there
+        doesn't play, and `error` says why (R2.10); the song playing goes on to its end."""
         if not path:
+            return
+        why = self._refuse(path) if self._refuse is not None else ""
+        if why:
+            self._error = why
+            self.changed.emit()
             return
         self.play_file(os.path.join(self._root, *path.split("/")))
 

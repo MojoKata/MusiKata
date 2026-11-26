@@ -8,6 +8,7 @@ and a thumbnail made again on every scroll would keep the disk busy for nothing.
 
 import logging
 import os
+import shutil
 
 import pytest
 from fakes import fill
@@ -245,3 +246,13 @@ def test_a_mosaic_is_drawn_from_its_pieces_thumbnails_and_kept_under_a_hash_of_t
     os.remove(root / "B.png")
     assert not p.image(name, 256).isNull()  # from the cache, the covers not read again
     assert p.image(covers.mosaic_id(["gone", "nothing"]), 256).isNull()
+
+
+def test_a_root_that_isnt_there_shows_its_covers_from_the_cache(qapp, tmp_path, index):
+    """R2.10: browsing a library whose drive is unplugged shows the covers already made."""
+    root, cache = tmp_path / "Music", tmp_path / "cache"
+    with_cover(index, str(root), "file", "A/cover.jpg", encoded(600, 600))
+    p = provider(root, index, cache)
+    first = p.image("T", 256)
+    shutil.rmtree(root)
+    assert not p.image("T", 256).isNull() and p.image("T", 256).size() == first.size()

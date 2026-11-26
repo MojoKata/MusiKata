@@ -148,6 +148,28 @@ def find_index(root: str, base: str, clock: Clock) -> Found:
     return Found(folder, key, writable)
 
 
+def recorded(root: str, base: str) -> Found | None:
+    """The index under `base` that last opened `root`, found by the path its index.json records,
+    the most recently opened when several do, without reading or writing anything in the root: for
+    a root that isn't there (R2.10), whose library is shown as it was. None when no index has
+    opened it."""
+    root = os.path.normcase(os.path.realpath(root))
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    found: list[tuple[str, str]] = []
+    for name in names:
+        data = _read_json(os.path.join(base, name, "index.json")) or {}
+        path, when = data.get("path"), data.get("opened")
+        if isinstance(path, str) and os.path.normcase(path) == root:
+            found.append((when if isinstance(when, str) else "", name))
+    if not found:
+        return None
+    name = max(found)[1]
+    return Found(os.path.join(base, name), name, False)
+
+
 def remove_stale(base: str, clock: Clock, keep: str | None = None) -> list[str]:
     """Removes each index folder not opened for 180 days (A2.9), but `keep`; says which in the
     log, and returns them."""

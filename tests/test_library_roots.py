@@ -136,3 +136,31 @@ def test_stale_is_strictly_past_180_days():
 def test_the_system_clock_is_utc_and_monotonic():
     c = clock.SystemClock()
     assert c.now().tzinfo is not None and c.monotonic() <= c.monotonic()
+
+
+def test_a_root_that_isnt_there_finds_the_index_that_last_opened_it_touching_nothing(tmp_path):
+    base, music = str(tmp_path / "roots"), tmp_path / "Music"
+    music.mkdir()
+    first = roots.find_index(str(music), base, FakeClock())
+    later = FakeClock(datetime(2026, 11, 26, tzinfo=UTC))
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    other = roots.find_index(str(copy), base, later)  # another root, opened later
+    shutil.rmtree(music)  # its drive unplugged (R2.10)
+    found = roots.recorded(str(music), base)
+    assert found == roots.Found(first.folder, first.key, False) and found.key != other.key
+    assert not music.exists()  # nothing made where the root was
+    assert roots.recorded(str(tmp_path / "Never"), base) is None
+    assert roots.recorded(str(music), str(tmp_path / "no-roots")) is None
+
+
+def test_of_two_indexes_that_opened_one_path_the_last_opened_is_found(tmp_path):
+    base = tmp_path / "roots"
+    for name, when in (("old", "2026-01-01T00:00:00+00:00"), ("new", "2026-06-01T00:00:00+00:00"),
+                       ("odd", None)):  # fmt: skip
+        (base / name).mkdir(parents=True)
+        record = {"format": 1, "path": os.path.realpath(str(tmp_path / "Music"))}
+        if when:
+            record["opened"] = when
+        (base / name / "index.json").write_text(json.dumps(record))
+    assert roots.recorded(str(tmp_path / "Music"), str(base)).key == "new"
