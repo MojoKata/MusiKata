@@ -18,6 +18,7 @@ Rectangle {
     required property string genre
     required property string year
     required property int rating
+    required property string plays
     required property string time
     height: 36
     radius: 6
@@ -49,5 +50,6 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         rating: row.rating
     }
-    Cell { column: 7; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }
+    Cell { column: 7; text: row.plays; horizontalAlignment: Text.AlignRight }
+    Cell { column: 8; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }
 }

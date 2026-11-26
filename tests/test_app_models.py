@@ -5,7 +5,7 @@ import os
 import threading
 
 import pytest
-from fakes import fill
+from fakes import fill, played
 from PySide6.QtCore import QModelIndex, Qt
 
 from musikata import models
@@ -27,10 +27,21 @@ def test_time_and_title_texts():
     assert models.title_of("", "x.mp3") == "x" and models.title_of("Tide", "x.mp3") == "Tide"
 
 
+def test_a_songs_plays_are_every_computers_added_up_and_none_shows_nothing(index):
+    fill(index, [{"path": p} for p in ("a.flac", "b.flac", "c.flac")])
+    played(index, {"a.flac": 3, "b.flac": 1})
+    played(index, {"a.flac": 2}, computer="studio-pc")
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    assert [m.row(i)["plays"] for i in range(3)] == ["5", "1", ""]
+    assert [models.plays_text(n) for n in (None, 0, 1, 1204)] == ["", "", "1", "1,204"]
+
+
 def test_a_row_with_nothing_but_its_path_shows_its_file_name_and_blanks():
-    row = models.row_of(("a/Untitled.wav", None, None, None, None, None, None, None, None))
+    row = models.row_of(("a/Untitled.wav", *[None] * 9))
     assert row == {"title": "Untitled", "artist": "", "album": "", "genre": "", "year": "",
-                   "track": "", "rating": 0, "time": "", "path": "a/Untitled.wav"}  # fmt: skip
+                   "track": "", "rating": 0, "plays": "", "time": "", "path": "a/Untitled.wav"
+                   }  # fmt: skip
 
 
 def test_rows_by_album_artist_then_album_disc_and_track_missing_last_case_aside(index):
@@ -65,7 +76,7 @@ def test_the_roles_give_each_field_as_text_genres_joined_in_their_order(index):
     got = {n: m.data(at, r) for n, r in names.items()}
     assert got == {"title": "Neap Tide", "artist": "Lumen Drift", "album": "Tide Tables",
                    "genre": "Electronic; Ambient", "year": "2022", "track": "7", "rating": 4,
-                   "time": "4:18", "path": "a.flac", "playing": False}  # fmt: skip
+                   "plays": "", "time": "4:18", "path": "a.flac", "playing": False}  # fmt: skip
     assert m.data(at, int(Qt.ItemDataRole.DisplayRole)) is None
     assert m.data(m.index(5, 0), names["title"]) is None
     assert m.rowCount(at) == 0 and m.row(-1) is None
@@ -295,11 +306,13 @@ def test_the_songs_list_sorts_by_each_column_either_way_with_missing_values_last
         {"path": "c.flac", "title": "c", "artist": "Mo", "album": "P", "genres": ("Folk",),
          "length": 20.0},
     ])  # fmt: skip
+    played(index, {"a.flac": 1, "b.flac": 5})
+    played(index, {"a.flac": 1}, computer="other")  # plays add up across computers (R7.9)
     m = models.SongsModel(index.read)
     expected = {
         "title": ["A", "b", "c"], "artist": ["A", "c", "b"], "album": ["c", "b", "A"],
         "genre": ["c", "A", "b"], "year": ["A", "b", "c"], "rating": ["c", "b", "A"],
-        "time": ["A", "c", "b"],
+        "plays": ["c", "b", "A"], "time": ["A", "c", "b"],
     }  # fmt: skip
     for column, titles in expected.items():
         m.sort_by(column)
@@ -315,10 +328,10 @@ def test_the_songs_list_sorts_by_each_column_either_way_with_missing_values_last
 def test_the_songs_headers_say_which_column_sorts_and_which_way():
     headers = models.song_headers("year", True)
     assert [h["label"] for h in headers] == [
-        "#", "TITLE", "ARTIST", "ALBUM", "GENRE", "YEAR", "RATING", "TIME"
+        "#", "TITLE", "ARTIST", "ALBUM", "GENRE", "YEAR", "RATING", "PLAYS", "TIME"
     ]  # fmt: skip
     assert headers[0] == {"label": "#", "sort": "", "order": ""}
-    assert [h["order"] for h in headers] == ["", "", "", "", "", "down", "", ""]
+    assert [h["order"] for h in headers] == ["", "", "", "", "", "down", "", "", ""]
     assert models.song_headers("title", False)[1]["order"] == "up"
     assert {h["order"] for h in models.song_headers("tracks", False)} == {""}
 

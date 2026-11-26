@@ -30,7 +30,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import BinaryIO, Literal
 
-from . import albums, art, db, folders, search, sortnames
+from . import albums, art, db, folders, rootfiles, search, sortnames
 from .clock import Clock, SystemClock
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover
 from .tags import read as read_tags
@@ -499,6 +499,7 @@ def write_batch(
             c.execute(f"UPDATE song SET {sets} WHERE id = :id", {**values, "id": row[0]})
             song_id = row[0]
             if old:
+                rootfiles.moved(c, song_id)  # its plays go with it (A2.8)
                 res.moved += 1
             else:
                 res.changed += 1
@@ -516,6 +517,7 @@ def write_batch(
         albums.place(c, song_id, touched)
         written.append(song_id)
     search.index_songs(c, written)
+    rootfiles.link(c, written)  # plays waiting for these songs, by path or hash (A2.8)
     albums.refresh(c, touched, images)
     places |= albums.folders_of(c, touched.albums)  # an album's cover changed through another
     folders.refresh(c, places, images)
@@ -581,6 +583,7 @@ def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched
     )
     albums.place(c, keep[0], touched)
     search.index_songs(c, [keep[0]])
+    rootfiles.moved(c, keep[0])
     return True
 
 
@@ -639,6 +642,7 @@ def _remove(
     albums.forget(c, remove, touched)
     search.forget(c, remove)
     c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
+    rootfiles.link(c)  # the plays of a song gone may stand for a copy of it (A2.8)
     albums.refresh(c, touched, images)
     places = {albums.folder_of(p) for p in [*remove, *taken, *taken.values()]}
     places |= albums.folders_of(c, touched.albums)

@@ -123,7 +123,24 @@ def _v4(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]
+def _v5(c: sqlite3.Connection) -> None:
+    """Play counts (A2.1's play, R7.9): a row for each song a computer has played, with its count
+    and when it was last played, as that computer's `.musikata/<computer id>/plays.json` names it
+    (A2.8): by the computer's id, the song's path and audio hash, and the song in the index it
+    stands for, found by that path, else that hash (None until one is). This computer's rows are
+    the counts it keeps; another's are read from its file. Filled from the files and by playing,
+    so nothing needs reading again."""
+    c.execute(
+        "CREATE TABLE play (id INTEGER PRIMARY KEY, computer TEXT NOT NULL,"
+        " song_id INTEGER REFERENCES song (id) ON DELETE SET NULL, path TEXT NOT NULL, hash TEXT,"
+        " count INTEGER NOT NULL, last TEXT NOT NULL)"
+    )
+    c.execute("CREATE INDEX play_song ON play (song_id)")
+    c.execute("CREATE INDEX play_path ON play (path)")
+    c.execute("CREATE INDEX play_computer ON play (computer)")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5]
 
 
 def connect(path: str) -> sqlite3.Connection:

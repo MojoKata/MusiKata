@@ -19,12 +19,12 @@ Item {
         width: view.width - 36
         height: view.height - y
 
-        // [x, width] of each column: #, title, artist, album, genre, year, rating, time; the four
-        // of text share what the fixed ones leave
+        // [x, width] of each column: #, title, artist, album, genre, year, rating, plays, time;
+        // the four of text share what the fixed ones leave
         readonly property real gap: 16
-        readonly property var fixed: [28, 0, 0, 0, 0, 44, 70, 44]
-        readonly property var share: [0, 0.31, 0.22, 0.27, 0.20, 0, 0, 0]
-        readonly property real free: Math.max(0, width - 12 - 12 - fixed.reduce((a, b) => a + b, 0) - gap * 7)
+        readonly property var fixed: [28, 0, 0, 0, 0, 44, 70, 48, 44]
+        readonly property var share: [0, 0.31, 0.22, 0.27, 0.20, 0, 0, 0, 0]
+        readonly property real free: Math.max(0, width - 12 - 12 - fixed.reduce((a, b) => a + b, 0) - gap * 8)
         readonly property var columns: {
             let x = 12, out = []
             for (let i = 0; i < fixed.length; i++) {
@@ -41,7 +41,7 @@ Item {
                 id: head
                 required property int index
                 required property var modelData
-                readonly property bool atRight: index === 0 || index === 7
+                readonly property bool atRight: index === 0 || index >= 7
                 objectName: "head-" + modelData.sort
                 x: table.columns[index][0]
                 width: table.columns[index][1]

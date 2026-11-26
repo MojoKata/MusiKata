@@ -9,9 +9,9 @@ lookup of 200 rows by their keys whatever the order, so typing never waits on a 
 scrolling, however deep, never sorts the list again: a page is a few milliseconds at any depth.
 
 What a row shows is decided here, as text (`docs/process/coding.md`: QML only lays out and binds):
-the title, or the file's name when the song has none; the genres joined; the length as m:ss; an
-album's artist and year as one line; a cover as the address the cover provider serves it at; and
-whether it is the song or album playing."""
+the title, or the file's name when the song has none; the genres joined; the plays of every
+computer added up (R7.9); the length as m:ss; an album's artist and year as one line; a cover as the
+address the cover provider serves it at; and whether it is the song or album playing."""
 
 from __future__ import annotations
 
@@ -46,14 +46,14 @@ COVERS = "image://covers/"  # where the cover provider serves a thumbnail, by it
 UNKNOWN_ARTIST = "Unknown artist"
 
 # what a row of a list of songs holds, in the roles' order
-COLUMNS = ("title", "artist", "album", "genre", "year", "track", "rating", "time", "path")
+COLUMNS = ("title", "artist", "album", "genre", "year", "track", "rating", "plays", "time", "path")
 ROLES = {int(Qt.ItemDataRole.UserRole) + i: name for i, name in enumerate(COLUMNS)}
 PLAYING = int(Qt.ItemDataRole.UserRole) + len(COLUMNS)  # the role: whether it's the song playing
 
 # the Songs list's orders (R2.6), one for each column it sorts by: what it sorts by, how text is
 # compared, and what orders songs that tie. A missing value sorts last either way. By artist is
 # by album artist, then album, disc and track, so an album's songs stay together, by their sort
-# names (R2.13); so are the ties of genre, year, rating and time.
+# names (R2.13); so are the ties of genre, year, rating, plays and time.
 BY_ARTIST = (
     "artist_key IS NULL, artist_key, album_key IS NULL, album_key, album_id, disc, track, path"
 )
@@ -66,6 +66,7 @@ COLUMN_SORTS: dict[str, tuple[str, str, str]] = {
               BY_ARTIST),
     "year": ("year", "", BY_ARTIST),
     "rating": ("coalesce(rating, 0)", "", BY_ARTIST),
+    "plays": ("coalesce((SELECT SUM(count) FROM play WHERE song_id = song.id), 0)", "", BY_ARTIST),
     "time": ("length", "", BY_ARTIST),
 }  # fmt: skip
 # the orders of the pages' lists: an album's by disc and track, an artist's other songs by album
@@ -76,7 +77,7 @@ ORDERS = {
 # the Songs list's columns as its header shows them, and the order each sorts by ("": none)
 SONG_HEADERS = (
     ("#", ""), ("TITLE", "title"), ("ARTIST", "artist"), ("ALBUM", "album"), ("GENRE", "genre"),
-    ("YEAR", "year"), ("RATING", "rating"), ("TIME", "time"),
+    ("YEAR", "year"), ("RATING", "rating"), ("PLAYS", "plays"), ("TIME", "time"),
 )  # fmt: skip
 
 
@@ -116,7 +117,7 @@ ALBUM_SORT_LABELS = {"artist": "Artist", "title": "Title", "year": "Year"}
 SONG_COLUMNS = (
     "path, title, artist, album,"
     " (SELECT group_concat(genre, '; ' ORDER BY position) FROM song_genre WHERE song_id = song.id),"
-    " year, track, rating, length"
+    " year, track, rating, (SELECT SUM(count) FROM play WHERE song_id = song.id), length"
 )
 
 
@@ -166,6 +167,12 @@ def time_text(seconds: float | None) -> str:
     s = round(seconds)
     h, rest = divmod(s, 3600)
     return f"{h}:{rest // 60:02d}:{rest % 60:02d}" if h else f"{s // 60}:{s % 60:02d}"
+
+
+def plays_text(plays: int | None) -> str:
+    """A song's plays on every computer, added up (R7.9), as the lists show them: 1,204; empty
+    for a song never played."""
+    return f"{plays:,}" if plays else ""
 
 
 def length_text(seconds: float | None) -> str:
@@ -221,7 +228,7 @@ def tiles(thumbs: Sequence[str]) -> list[dict[str, Any]]:
 
 def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
     """A row of SONG_COLUMNS as the roles give it."""
-    path, title, artist, album, genre, year, track, rating, length = r
+    path, title, artist, album, genre, year, track, rating, plays, length = r
     return {
         "title": title_of(title, path),
         "artist": artist or "",
@@ -230,6 +237,7 @@ def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
         "year": str(year) if year else "",
         "track": str(track) if track else "",
         "rating": rating or 0,
+        "plays": plays_text(plays),
         "time": time_text(length),
         "path": path,
     }

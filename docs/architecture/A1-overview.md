@@ -128,7 +128,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.playlists` | files | M3U and M3U8, smart playlists (R8) |
 | `musikata_core.organize` | files | Moving and renaming files, removing songs to the trash (R12, R2.11) |
 | `musikata_core.history` | files | The change history and Undo (A3.5, R4.9) |
-| `musikata_core.audio` | playback | `decode`, `join`, `seam`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream` (A4, R7, R19) |
+| `musikata_core.audio` | playback | `decode`, `join`, `seam`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream`, `played` (when a song counts as played, R7.9) (A4, R7, R19) |
 | `musikata_core.analysis` | analysis | `peaks` and `spectrum` (A5.1, A5.2) |
 | `musikata_core.online` | online | `http`, `musicbrainz`, `coverart`, `lrclib` (A7) |
 | `musikata_core.update` | online | Checking for, fetching and checking a release (R1.9) |
@@ -140,6 +140,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
+| `musikata.plays` | app | Play counts in the running app: the player's plays kept, the other computers' play files watched and read again (R7.9, A2.8) |
 | `musikata.media` | app | The system's media controls (A4.5): `MediaControls` over the Player bridge, `controls` (what the system is told and what its commands do, without Qt), and the backends `mpris`, `smtc` and `nowplaying_mac` |
 | `musikata.tour` | app | The tour (A1.6) |
 | `musikata.layout` | app | The tour's layout check: each text against the box it is drawn in (A1.6) |

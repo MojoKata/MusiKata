@@ -11,12 +11,13 @@ Item {
     required property var player
     readonly property var artist: library.artist
 
-    // [x, width] of the song columns: #, title, album, rating, time
+    // [x, width] of the song columns: #, title, album, rating, plays, time
     readonly property var columns: {
         const w = list.width
-        const free = Math.max(0, w - 12 - 28 - 16 - 16 - 90 - 16 - 56 - 12 - 16)
+        const free = Math.max(0, w - 12 - 28 - 16 - 16 - 90 - 16 - 56 - 16 - 56 - 12 - 16)
         return [[12, 28], [56, free * 0.55], [56 + free * 0.55 + 16, free * 0.45],
-                [w - 12 - 56 - 16 - 90, 90], [w - 12 - 56, 56]]
+                [w - 12 - 56 - 16 - 56 - 16 - 90, 90], [w - 12 - 56 - 16 - 56, 56],
+                [w - 12 - 56, 56]]
     }
 
     ListView {
@@ -109,7 +110,7 @@ Item {
                 font { family: Theme.sans; pixelSize: 17; weight: Font.Bold }
             }
             Repeater {
-                model: page.artist.othersTitle ? [["#", 0], [qsTr("TITLE"), 1], [qsTr("ALBUM"), 2], [qsTr("RATING"), 3], [qsTr("TIME"), 4]] : []
+                model: page.artist.othersTitle ? [["#", 0], [qsTr("TITLE"), 1], [qsTr("ALBUM"), 2], [qsTr("RATING"), 3], [qsTr("PLAYS"), 4], [qsTr("TIME"), 5]] : []
                 Text {
                     required property var modelData
                     x: page.columns[modelData[1]][0]
@@ -117,7 +118,7 @@ Item {
                     width: page.columns[modelData[1]][1]
                     height: 22
                     verticalAlignment: Text.AlignVCenter
-                    horizontalAlignment: modelData[1] === 0 || modelData[1] === 4 ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: modelData[1] === 0 || modelData[1] >= 4 ? Text.AlignRight : Text.AlignLeft
                     text: modelData[0]
                     color: Theme.faint
                     font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }

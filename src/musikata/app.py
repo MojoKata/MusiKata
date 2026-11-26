@@ -28,7 +28,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from shiboken6 import Shiboken
 
-from musikata_core import __version__, db, nowplaying, roots, settings, workers
+from musikata_core import __version__, db, nowplaying, rootfiles, roots, settings, workers
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 
@@ -37,6 +37,7 @@ from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .firstrun import FirstRun, music_folder
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
+from .plays import PlayCounts
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
 FIRST_QML = os.path.join(os.path.dirname(QML), "FirstRun.qml")
@@ -137,15 +138,18 @@ class Shell:
     player: Player
     index: db.Index
     controls: media.MediaControls
+    counts: PlayCounts | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
-        system's media controls, the playback thread, the watcher, the scan's thread and the worker
-        processes, and the index."""
+        system's media controls, the playback thread, the play counts (their file written), the
+        watcher, the scan's thread and the worker processes, and the index."""
         self.window.close()
         Shiboken.delete(self.engine)
         self.controls.close()
         self.player.close()
+        if self.counts is not None:
+            self.counts.close()
         self.library.close()
         self.index.close()
 
@@ -175,15 +179,27 @@ def load(
     )  # fmt: skip
     shared = settings.load(settings.shared_path(env), home_of(env))  # Playback's (R13.7)
     player = Player(
-        root, playback(), refuse=library.unplayable, read=index.read, playback=shared.playback
+        root,
+        playback(),
+        refuse=library.unplayable,
+        read=index.read,
+        playback=shared.playback,
+        clock=clock,
     )
     player.nowPlaying.connect(library.show_playing)
     library.reachChanged.connect(
         player.reach_changed
     )  # the song playing ends, nothing after (R2.10)
     library.property("folders").play.connect(player.play_songs)
+    counts = None
     if keep:
-        keep_playing(player, root, index, shared, env, clock)
+        make = Once(
+            functools.partial(
+                settings.computer_id, settings.shared_path(env), home_of(env), computer_name()
+            )
+        )
+        keep_playing(player, root, index, shared, env, clock, make)
+        counts = count_plays(player, library, root, index, shared, clock, make)
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
@@ -195,7 +211,9 @@ def load(
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
-    return Shell(engine, window, library, player, index, controls(player, window, covers.file))
+    return Shell(
+        engine, window, library, player, index, controls(player, window, covers.file), counts
+    )
 
 
 def keep_playing(
@@ -205,6 +223,7 @@ def keep_playing(
     shared: settings.Shared,
     env: Mapping[str, str],
     clock: Clock,
+    make: Callable[[], str | None] | None = None,
 ) -> None:
     """What was playing when the root last closed on this computer comes back in `player`,
     cued (R1.8), its songs found in the index by path or hash; and from now on it is kept in the
@@ -223,10 +242,58 @@ def keep_playing(
             index.read,
             clock,
             kept,
-            computer=functools.partial(settings.computer_id, path, home, name),
+            computer=make or functools.partial(settings.computer_id, path, home, name),
             set_playback=functools.partial(settings.set_playback, path, home, name),
         )
     )
+
+
+class Once:
+    """`make` called once, whichever thread asks first, its answer given to every other: this
+    computer's id (A2.8), which what's playing and the play counts each make when they first
+    need it, on threads of their own, must be the same one. An answer of None (it couldn't be
+    kept) is asked for again next time."""
+
+    def __init__(self, make: Callable[[], str | None]) -> None:
+        self._make = make
+        self._lock = threading.Lock()
+        self._made: str | None = None
+
+    def __call__(self) -> str | None:
+        with self._lock:
+            if self._made is None:
+                self._made = self._make()
+            return self._made
+
+
+def count_plays(
+    player: Player,
+    library: Library,
+    root: str,
+    index: db.Index,
+    shared: settings.Shared,
+    clock: Clock,
+    make: Callable[[], str | None],
+) -> PlayCounts:
+    """From now on the songs `player` plays are counted (R7.9) and kept in the index and the
+    root's `.musikata/<computer id>/plays.json` (A2.8); every computer's plays file is read into
+    the index, off the GUI thread, and the others' read again when they change. The lists show
+    the counts anew each time they change, and a scan that moves songs has this computer's file
+    name them where they are. `make` makes this computer's id when it has none (`Once`)."""
+    keeping = rootfiles.Keeping(
+        index,
+        rootfiles.folder_of(root),
+        clock,
+        shared.computer_id,
+        make=make,
+        name=shared.computer_name or computer_name(),
+    )
+    counts = PlayCounts(keeping, rootfiles.folder_of(root), clock, watching=os.path.isdir(root))
+    counts.changed.connect(library.plays_changed)
+    library.songsMoved.connect(counts.moved)
+    player.count(counts)
+    counts.start()
+    return counts
 
 
 @dataclass

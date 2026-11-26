@@ -3,19 +3,20 @@ import "."
 
 // A song on an album's or an artist's page (L02-album): its track number, or under the pointer a
 // play button, or while it plays the playing mark; its title, the column the page adds (`extra`:
-// the album, on an artist's page), its rating and length. A click on the play button or a double
+// the album, on an artist's page), its rating, its plays (R7.9) and length. A click on the play button or a double
 // click plays it; a right click opens its menu (SongMenu).
 Rectangle {
     id: row
     signal activated()
     signal menu()
-    required property var columns       // [x, width] of each column: #, title, extra, rating, time
+    required property var columns       // [x, width] of each column: #, title, extra, rating, plays, time
     required property string path
     required property bool playing
     required property string track
     required property string title
     required property string album
     required property int rating
+    required property string plays
     required property string time
     property bool showAlbum: false
     height: 40
@@ -72,5 +73,6 @@ Rectangle {
         rating: row.rating
         size: 12
     }
-    Cell { column: 4; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }
+    Cell { column: 4; text: row.plays; horizontalAlignment: Text.AlignRight }
+    Cell { column: 5; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }
 }

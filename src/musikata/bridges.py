@@ -28,6 +28,7 @@ from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
 from musikata_core import albums, db, nowplaying, scanner, settings, watch, workers
 from musikata_core.audio import gain
+from musikata_core.audio.played import Listening
 from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
 from musikata_core.tags import Written
@@ -69,6 +70,7 @@ from .nowplaying import (
     song_of_path,
 )
 from .player import Engine, PlaybackThread, gain_of
+from .plays import PlayCounts
 
 log = logging.getLogger(__name__)
 
@@ -486,6 +488,7 @@ class Library(QObject):
     searchChanged = Signal()
     rootChosen = Signal(str)  # Choose another folder… (R2.10): the folder chosen, a whole path
     reachChanged = Signal()  # the root, or a linked folder, went or came back (R2.10)
+    songsMoved = Signal()  # a scan found songs moved: their plays name them anew (A2.8)
     _progress = Signal(int, int)
     _finished = Signal(object)
     _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
@@ -851,6 +854,8 @@ class Library(QObject):
                 self._copied = result.copied
                 self._watch(whole, result)
                 self._found_there(whole, result)
+                if result.moved:
+                    self.songsMoved.emit()
         if whole:
             self._scanning = False
         self.reload()
@@ -1066,6 +1071,14 @@ class Library(QObject):
         if error is not None:
             log.error("couldn't index the files written in %s: %s", self._root, error)
         self.reload()
+
+    @Slot()
+    def plays_changed(self) -> None:
+        """The play counts changed (R7.9; plays.PlayCounts): the lists of songs read their rows
+        again where they are."""
+        self._songs.refresh()
+        self._album.property("songs").refresh()
+        self._artist.property("others").refresh()
 
     @Slot(str)
     def show_playing(self, path: str) -> None:
@@ -1383,7 +1396,11 @@ class Player(QObject):
     kept (`restore`, R1.8): cued at its place in the current song, which play starts from. Given
     `keep` (`nowplaying.Keeping`), each change is kept on its thread: the queue when it changes,
     the place on pause, at close and once a minute while playing, and shuffle and repeat when the
-    user changes them."""
+    user changes them.
+
+    What the engine reports of the song playing is heard (`played.Listening`, on `clock`): once
+    enough of a song of the queue is heard, its play is counted (R7.9) by `count`'s PlayCounts. A
+    file played outside the queue (`play_file`) isn't counted (R1.7)."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
@@ -1408,9 +1425,12 @@ class Player(QObject):
         read: Callable[[], sqlite3.Connection] | None = None,
         rng: random.Random | None = None,
         playback: settings.Playback | None = None,
+        clock: Clock | None = None,
     ) -> None:
         super().__init__(parent)
         self._settings = playback if playback is not None else settings.Playback()
+        self._listening = Listening(clock if clock is not None else SystemClock())
+        self._counts: PlayCounts | None = None
         self._root = root
         self._refuse = refuse  # why a song can't play now (Library.unplayable, R2.10)
         self._read = read
@@ -1554,6 +1574,10 @@ class Player(QObject):
         R7.3), starting from what it holds now."""
         self._keeping = keeping
         keeping.settle(self._state())
+
+    def count(self, counts: PlayCounts) -> None:
+        """From now on each song of the queue heard enough is counted by `counts` (R7.9)."""
+        self._counts = counts
 
     def _state(self) -> nowplaying.State:
         return nowplaying.state_of(self.queue, self._position)
@@ -1718,6 +1742,7 @@ class Player(QObject):
         if self._length:
             seconds = min(seconds, self._length)
         self._position = seconds
+        self._listening.sought(seconds)
         self._seeking += 1
         self._seek.emit(self._requested, seconds)
         self.positionChanged.emit()
@@ -1869,6 +1894,7 @@ class Player(QObject):
         on (`_requested` no longer names it)."""
         self._requested = 0
         self._playing(None)
+        self._listening.stop()
         if self._on or self._started:
             self._stop.emit()
         self._on = self._paused = False
@@ -1877,6 +1903,7 @@ class Player(QObject):
         """Nothing plays now: the queue's current song stays cued, if it has one (after a song
         that failed, or Stop), else the bar is empty (the queue played out)."""
         self.last, self._error = how, error
+        self._listening.stop()
         self._on = self._paused = False
         self._position = 0.0
         if self.queue.current is None or self._info is None:
@@ -1953,6 +1980,9 @@ class Player(QObject):
         if self._info is None:
             self._set_path(self._under_root(path))
         self._length, self._position = max(0.0, length), self._begun_at
+        current = self.queue.current
+        song = current.song if self._playing_key is not None and current is not None else None
+        self._listening.begin(song, self._length, self._begun_at)
         self.changed.emit()
         self.positionChanged.emit()
 
@@ -1983,6 +2013,7 @@ class Player(QObject):
         self._show(info, info.path)
         self._on, self._paused = True, False
         self._length = max(0.0, length)
+        self._listening.begin(entry.song, self._length)  # a new play (R7.6), repeat One's too
         self.changed.emit()
         self._queue_changed()
 
@@ -1991,8 +2022,13 @@ class Player(QObject):
         if self._on and not self._seeking:
             self._position = seconds
             self.positionChanged.emit()
+            play = self._listening.moved(seconds)
+            if play is not None and self._counts is not None:
+                self._counts.played(play)  # heard enough: counted (R7.9)
             if not self._paused and self._keeping is not None and self._keeping.ticks():
                 self._keep(nowplaying.TICK)  # at most once a minute while playing (A2.8)
+            if not self._paused and self._counts is not None:
+                self._counts.tick()  # this computer's plays file, when due (A2.8)
 
     @Slot(int)
     def _on_sought(self, ticket: int) -> None:

@@ -122,25 +122,26 @@ Item {
         width: page.width - 36
         height: page.height - y
 
-        // [x, width] of each column: #, title, (unused), rating, time
+        // [x, width] of each column: #, title, (unused), rating, plays, time
         readonly property real gap: 16
         readonly property var columns: [
             [12, 28],
-            [56, Math.max(0, width - 56 - 16 - 90 - 16 - 56 - 12)],
+            [56, Math.max(0, width - 56 - 16 - 90 - 16 - 56 - 16 - 56 - 12)],
             [0, 0],
-            [width - 12 - 56 - 16 - 90, 90],
+            [width - 12 - 56 - 16 - 56 - 16 - 90, 90],
+            [width - 12 - 56 - 16 - 56, 56],
             [width - 12 - 56, 56],
         ]
 
         Repeater {
-            model: [["#", 0], [qsTr("TITLE"), 1], [qsTr("RATING"), 3], [qsTr("TIME"), 4]]
+            model: [["#", 0], [qsTr("TITLE"), 1], [qsTr("RATING"), 3], [qsTr("PLAYS"), 4], [qsTr("TIME"), 5]]
             Text {
                 required property var modelData
                 x: table.columns[modelData[1]][0]
                 width: table.columns[modelData[1]][1]
                 height: 32
                 verticalAlignment: Text.AlignVCenter
-                horizontalAlignment: modelData[1] === 0 || modelData[1] === 4 ? Text.AlignRight : Text.AlignLeft
+                horizontalAlignment: modelData[1] === 0 || modelData[1] >= 4 ? Text.AlignRight : Text.AlignLeft
                 text: modelData[0]
                 color: Theme.faint
                 font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
