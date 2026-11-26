@@ -182,3 +182,19 @@ def test_the_scan_reads_on_the_worker_processes(audio, tmp_path):
 def test_a_file_gone_before_its_read_is_a_row_with_the_reason(tmp_path):
     r = scanner.read_one(str(tmp_path), scanner.Seen("gone.flac", 1, 1))
     assert r.error and r.tags is None
+
+
+def test_a_reader_failing_in_a_way_no_one_expected_is_a_row_not_a_failed_scan(
+    tmp_path, monkeypatch, caplog
+):
+    """A bug in reading one file (the MP4 reader once took iTunes' cpil, a bool, for a list) costs
+    that file, listed with what went wrong, and never the rest of the scan."""
+
+    def broken(path):
+        raise TypeError("'bool' object is not subscriptable")
+
+    monkeypatch.setattr(scanner, "read_tags", broken)
+    _touch(str(tmp_path / "a.m4a"))
+    r = scanner.read_one(str(tmp_path), scanner.Seen("a.m4a", 1, 1))
+    assert r.error == "TypeError: 'bool' object is not subscriptable" and r.tags is None
+    assert "a.m4a" in caplog.text

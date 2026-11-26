@@ -246,6 +246,9 @@ def read_one(root: str, seen: Seen) -> Read:
         return Read(seen, error=str(e))
     except OSError as e:
         return Read(seen, error=e.strerror or str(e))
+    except Exception as e:  # noqa: BLE001  (a file no reader expected: listed, and the scan goes on)
+        log.exception("reading %s", path)
+        return Read(seen, error=f"{type(e).__name__}: {e}")
 
 
 def _values(r: Read) -> dict[str, object]:

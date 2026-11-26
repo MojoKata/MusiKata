@@ -172,6 +172,21 @@ def test_mp4_freeform_rating_and_replaygain(audio, tmp_path):
 
 
 @pytest.mark.slow
+def test_mp4_atoms_that_are_not_lists_compilation_gapless_and_tempo(audio, tmp_path):
+    """iTunes' cpil and pgap are a bool, not a list; tmpo a list of numbers (the demo library's
+    Compilations stopped the whole scan on cpil)."""
+    path = _copy(audio, "alac", tmp_path)
+    f = mutagen.mp4.MP4(path)
+    f["\xa9nam"] = "Harbor Lights"
+    f["cpil"] = True
+    f["pgap"] = False
+    f["tmpo"] = [120]
+    f.save()
+    t, info = tags.read(path)
+    assert (t.title, t.compilation, info.kind) == ("Harbor Lights", True, "alac")
+
+
+@pytest.mark.slow
 def test_a_wav_with_only_a_riff_info_chunk_is_read(audio, tmp_path):
     path = _copy(audio, "wav", tmp_path)
     with open(path, "rb") as f:

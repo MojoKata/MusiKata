@@ -27,6 +27,10 @@ settings.register_profile("tier1", max_examples=50, derandomize=True, database=N
 settings.register_profile("deep", max_examples=5000, database=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "tier1"))
 
+# Qt draws offscreen, as in tier 1's container: the windows the tests open need no display, and
+# none shows on the desktop of whoever runs them
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIPS = os.path.join(ROOT, "tests", "skips")
 

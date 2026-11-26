@@ -70,11 +70,15 @@ an artist's folder, whose mosaic takes its pieces from a level further down.
 
 ```sh
 MUSIKATA_DATA=build/demo/data .venv/bin/musikata --root build/demo/Music --tour build/tour
+scripts/test-tour.sh       # the same in tier 1's container, as CI runs it; makes build/demo first
 ```
 
-drives the real app through each screen of the mockups and saves `build/tour/<screen>.png`,
-offscreen, so it runs over SSH and in containers (A1.6). It checks every visible text against the
-box it is drawn in and fails on text that runs past it.
+drives the real app through each screen of the mockups and saves `build/tour/<screen>.png` at the
+mockups' 1280 × 800, offscreen, so it runs over SSH and in containers (A1.6). It checks every
+visible text against the box it is drawn in, at that size and at the design point (R6.2.1), and
+fails on text that runs past it, naming each in `build/tour/layout.txt`. `--tour-only L03-songs`
+takes the screens named. In the container the demo library is the home's `Music`, so the screens
+show `~/Music`, as CI's and the site's do.
 
 ## Redrawing the mockups
 

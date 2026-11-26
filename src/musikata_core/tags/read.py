@@ -103,7 +103,7 @@ def _mp4(tags: mutagen.mp4.MP4Tags | None) -> Tags:
     for key, values in tags.items():
         if key.startswith("----:"):
             raw[key] = [bytes(v).decode("utf-8", "replace") for v in values]
-        elif values and isinstance(values[0], str):
+        elif isinstance(values, list) and values and isinstance(values[0], str):
             raw[key] = list(values)
     trkn, disk = tags.get("trkn"), tags.get("disk")
     track = (int(trkn[0][0]), int(trkn[0][1])) if trkn else None

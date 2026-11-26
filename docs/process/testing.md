@@ -77,7 +77,7 @@ with its test.
 
 | Module | Its shapes |
 |---|---|
-| `tags` (A3.2, R4) | ID3v1 only, ID3v2.2, 2.3 and 2.4, and v1 and v2 that disagree; frames repeated or empty; several genres as separate frames, as `;` or `/` in one, or as ID3v1 numbers `(17)`; track as `4`, `04` or `4/10`; years as `2003`, `2003-05-01` or `TYER` with `TDAT`; Vorbis keys in any case and repeated; MP4 freeform atoms; `POPM` from Windows Media Player, MusicBee and foobar2000; Picard's MusicBrainz ids; the text encodings of R4.10 |
+| `tags` (A3.2, R4) | ID3v1 only, ID3v2.2, 2.3 and 2.4, and v1 and v2 that disagree; frames repeated or empty; several genres as separate frames, as `;` or `/` in one, or as ID3v1 numbers `(17)`; track as `4`, `04` or `4/10`; years as `2003`, `2003-05-01` or `TYER` with `TDAT`; Vorbis keys in any case and repeated; MP4 freeform atoms, and atoms that are a bool (`cpil`, `pgap`) or numbers (`tmpo`); `POPM` from Windows Media Player, MusicBee and foobar2000; Picard's MusicBrainz ids; the text encodings of R4.10 |
 | `playlists` (R8.1.2) | absolute and relative paths, `\` and `/`, `file://` URLs; `#EXTINF` and without; a BOM, CRLF, `.m3u` in the system's encoding; comments and blank lines; files missing, outside the root, or listed twice |
 | `lyrics` (A7.6, R17) | times as `[mm:ss]`, `[mm:ss.xx]` and `[mm:ss.xxx]`, several on one line; `[ar:]`, `[ti:]` and `[offset:]`; lines out of order, blank, or untimed; word times `<mm:ss.xx>`; a BOM and CRLF |
 | `attention` (`.cue`) | `FILE` with and without quotes; the sheet in UTF-8 or the system's encoding; `REM` lines; `INDEX 00` and `01` |

@@ -19,8 +19,9 @@ free software under the GPL, version 3 or later ([`LICENSE`](LICENSE)).
 
 A walking skeleton first, then slices that deepen it: the thinnest MusiKata that runs end to end on
 all three platforms comes first, so what each platform does differently (PyAV's wheels, trimming Qt,
-Wayland, the two Mac bundles) shows at the start, not at the release. Each slice is one or more pull
-requests, and is done when its requirements' sections are in the trace (`docs/process/testing.md`),
+Wayland, the two Mac bundles) shows at the start, not at the release. Each slice is a pull request, built
+on a branch of its own that starts from the slice before it, so the next slice goes on while one
+waits for review. A slice is done when its requirements' sections are in the trace (`docs/process/testing.md`),
 its screens are in the tour, and each of its modules reaches the coverage of `testing.md`.
 
 | Slice | | What it builds |
