@@ -30,6 +30,7 @@ from musikata_core import albums, db, nowplaying, scanner, settings, watch, work
 from musikata_core.audio import gain
 from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
+from musikata_core.tags import Written
 
 from .folders import MODES as folders_modes
 from .folders import SEARCH_HINT as FOLDERS_SEARCH_HINT
@@ -488,6 +489,7 @@ class Library(QObject):
     _progress = Signal(int, int)
     _finished = Signal(object)
     _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
+    _indexed = Signal(object)  # the rows of files MusiKata wrote updated (`saved`), or why not
 
     def __init__(
         self,
@@ -554,6 +556,7 @@ class Library(QObject):
         self._progress.connect(self._on_progress)
         self._finished.connect(self._on_finished)
         self._reached.connect(self._on_reached)
+        self._indexed.connect(self._on_indexed)
         self._counts = (0, 0, 0)
         self._given = given
         self._missing = missing  # the root isn't there (R2.10)
@@ -806,6 +809,7 @@ class Library(QObject):
                 copied=copied,
                 keep=keep,
                 reached=self._reached.emit if self._watching else None,
+                clock=self._clock,
             )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
@@ -1044,6 +1048,24 @@ class Library(QObject):
         """MusiKata wrote the file at `path` (under the root), leaving it `size` bytes modified at
         `mtime_ns`: a watched rescan doesn't read it again (A2.4, watch.OwnWrites)."""
         self._own.wrote(path, size, mtime_ns)
+
+    def saved(self, written: Sequence[Written]) -> None:
+        """Files MusiKata wrote itself (tags.save, A3.4), each as it was read back: their rows
+        updated from that on the writer thread, without reading them again, and the rescan their
+        change starts passing them by (A2.4). The views reload once the rows are written."""
+        for w in written:
+            rel = scanner.path_under(self._root, w.path)
+            if rel is not None:
+                self.wrote(rel, w.size, w.mtime_ns)
+        rows = list(written)
+        done = self._index.write(lambda c: scanner.wrote(c, self._root, rows))
+        done.add_done_callback(lambda f: self._indexed.emit(f.exception()))
+
+    @Slot(object)
+    def _on_indexed(self, error: BaseException | None) -> None:
+        if error is not None:
+            log.error("couldn't index the files written in %s: %s", self._root, error)
+        self.reload()
 
     @Slot(str)
     def show_playing(self, path: str) -> None:

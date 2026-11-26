@@ -119,7 +119,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.settings` | library | The two `settings.json`, their defaults and the split (R13, R13.9, A2.10) |
 | `musikata_core.workers` | library | The worker processes, at low priority (A1.3) |
 | `musikata_core.clock` | library | The clock every timed piece is given (`docs/process/coding.md`) |
-| `musikata_core.tags` | tags | The field mapping, reading and writing, the safe write (A3.1, A3.2, A3.4, R4) |
+| `musikata_core.tags` | tags | The field mapping, reading and writing, the safe write: `fields`, `parse` and `read` (reading), `compose` and `write` (writing), `safe` (the safe write), `batch` (a save of many files) (A3.1, A3.2, A3.4, R4) |
 | `musikata_core.encodings` | tags | Scoring and fixing text in the wrong encoding (A3.6, R4.10) |
 | `musikata_core.art` | tags | Finding, embedding and saving covers (R5) |
 | `musikata_core.genres` | tags | Several genres per song, renaming, merging, near duplicates (R9) |

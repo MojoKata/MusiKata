@@ -5,8 +5,9 @@ This much is what the configured root and playing need: where the file is, readi
 shape a person, a sync tool or another version of MusiKata left it, and writing the root back,
 every field it doesn't know kept (A2.10); this computer's id (A2.8), made when it has none;
 Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them; and
-shuffle and repeat (R7.3), written when the user changes them. The rest of the shared settings and
-the root's own `settings.json` come with Settings.
+shuffle and repeat (R7.3), written when the user changes them. Of the root's own `settings.json`,
+the two Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2) are read (`root_tags`). The
+rest of both files comes with Settings.
 
 A value it can't use is reported in the App log and its default used (R13.9); a file of a newer
 format is read for what it can and never written (A2.10)."""
@@ -324,3 +325,76 @@ def choose_root(path: str, home: str, root: str, computer_name: str) -> bool:
         log.info("the music root is %s from now on", root)
         return True
     return False
+
+
+# ---------- the root's own settings.json (R13.9): what writing tags needs ----------
+
+ID3_VERSIONS = ("2.4", "2.3")  # R13.3: 2.4 the default (R4.7.2)
+ROOT_DIR = ".musikata"  # the root's own folder (R1.5)
+
+
+@dataclass(frozen=True)
+class RootTags:
+    """The root's Tags settings (R13.3) that writing tags needs: the ID3 version MP3s are written
+    as (R4.7.2), and whether a written file keeps its modification time (R4.7.1's "Leave file
+    modification times alone", off); what couldn't be used, for the log."""
+
+    id3_version: str = "2.4"
+    keep_modified_times: bool = False
+    problems: tuple[str, ...] = ()
+
+
+def root_path(root: str) -> str:
+    """The root's own settings.json (R13.9), in its .musikata."""
+    return os.path.join(root, ROOT_DIR, NAME)
+
+
+def parse_root_tags(text: str) -> RootTags:
+    """The `tags` group's id3_version and keep_modified_times in the root's settings.json,
+    `text`, whatever was written there (A2.10): what can't be used is named in `problems` and
+    takes its default (R13.9). A version written as a number (2.3) or with a "v" ("v2.3") is
+    read as meant; a newer format is read for what it can."""
+    try:
+        data = json.loads(text.removeprefix("\ufeff"))
+    except ValueError as e:
+        return RootTags(problems=(f"it isn't JSON ({e}): its settings take their defaults",))
+    if not isinstance(data, dict):
+        return RootTags(problems=("it isn't a JSON object: its settings take their defaults",))
+    problems: list[str] = []
+    group = data.get("tags", {})
+    if not isinstance(group, dict):
+        problems.append(f"tags isn't a group: {group!r}")
+        group = {}
+    default = RootTags()
+    version = group.get("id3_version", default.id3_version)
+    if isinstance(version, float | int) and not isinstance(version, bool):
+        version = f"{version:.1f}"
+    if isinstance(version, str):
+        version = version.strip().lower().removeprefix("id3").removeprefix("v")
+    if version not in ID3_VERSIONS:
+        problems.append(f"tags.id3_version isn't 2.3 or 2.4: {group.get('id3_version')!r}; 2.4")
+        version = default.id3_version
+    keep = group.get("keep_modified_times", default.keep_modified_times)
+    if not isinstance(keep, bool):
+        problems.append(f"tags.keep_modified_times isn't true or false: {keep!r}; off")
+        keep = default.keep_modified_times
+    return RootTags(str(version), keep, tuple(problems))
+
+
+def root_tags(root: str) -> RootTags:
+    """The root's Tags settings for writing (`parse_root_tags`) from its settings.json; the
+    defaults when it has none, or it can't be read, each problem logged. A root without its own
+    file takes the configured root's when Settings comes (R13.9.1); until then, the defaults."""
+    path = root_path(root)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return RootTags()
+    except OSError as e:
+        log.warning("couldn't read %s: %s; writing tags takes the defaults", path, e)
+        return RootTags(problems=(f"couldn't be read: {e}",))
+    found = parse_root_tags(text)
+    for problem in found.problems:
+        log.warning("%s: %s", path, problem)
+    return found

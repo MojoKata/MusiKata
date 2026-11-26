@@ -234,3 +234,17 @@ def test_any_text_is_read_without_an_error(value):
 @given(st.binary(max_size=200))
 def test_any_bytes_read_as_riff_info_without_an_error(data):
     parse.riff_info(b"RIFF" + data[:4] + b"WAVE" + data[4:])
+
+
+def test_the_comment_is_the_comm_without_a_description_or_id3v1s_never_another_programs():
+    """iTunes keeps its own numbers in COMM frames (iTunNORM, iTunSMPB), MediaMonkey its custom
+    fields (Songs-DB_Custom1): kept as they are (R4.1.1), and never shown as the comment, which
+    a song without one would otherwise show, and couldn't have removed."""
+    others = [("iTunNORM", " 00000A2B"), ("Songs-DB_Custom1", "vinyl rip")]
+    assert parse.from_id3({}, comments=others).comment is None
+    assert parse.from_id3({}, comments=[*others, (parse.V1_COMMENT, "from v1")]).comment == (
+        "from v1"
+    )
+    assert parse.from_id3(
+        {}, comments=[("", " "), (parse.V1_COMMENT, "v1"), ("", "v2")]
+    ).comment == ("v1")

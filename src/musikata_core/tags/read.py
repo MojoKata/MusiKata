@@ -38,9 +38,11 @@ class TagReadError(Exception):
     """A file MusiKata couldn't read: Needs attention lists it with this reason (R2.8)."""
 
 
-def _open(path: str) -> tuple[str, mutagen.FileType]:
-    """The file's kind (R2.2) and Mutagen's view of it; TagReadError when it can't be opened."""
-    ext = os.path.splitext(path)[1].lower()
+def open_song(path: str, name: str | None = None) -> tuple[str, mutagen.FileType]:
+    """The file's kind (R2.2) and Mutagen's view of it; TagReadError when it can't be opened.
+    `name`, when given, is the name whose extension says the kind: a song's, for the copy a safe
+    write makes of it (A3.4)."""
+    ext = os.path.splitext(name or path)[1].lower()
     if ext not in EXTENSIONS:
         raise TagReadError(f"not a kind MusiKata plays ({ext or 'no extension'})")
     opener = {
@@ -59,10 +61,10 @@ def _open(path: str) -> tuple[str, mutagen.FileType]:
     return kind, f
 
 
-def read(path: str) -> tuple[Tags, AudioInfo]:
-    """A song's tags and what its audio is. Raises TagReadError for a file that isn't one of
-    R2.2's kinds or can't be read, saying why."""
-    kind, f = _open(path)
+def read(path: str, name: str | None = None) -> tuple[Tags, AudioInfo]:
+    """A song's tags and what its audio is (`name`: as for `open_song`). Raises TagReadError for
+    a file that isn't one of R2.2's kinds or can't be read, saying why."""
+    kind, f = open_song(path, name)
     if kind in ("mp3", "wav", "aiff"):
         tags = _id3(f.tags)
         if kind == "mp3" and (tags.rg_track_gain is None or tags.rg_album_gain is None):
@@ -83,12 +85,12 @@ def read(path: str) -> tuple[Tags, AudioInfo]:
     )
 
 
-def pictures(path: str) -> list[Picture]:
+def pictures(path: str, name: str | None = None) -> list[Picture]:
     """The pictures embedded in a song, in the order its file holds them (R5.1): ID3's APIC, FLAC's
     picture blocks, Vorbis comments' METADATA_BLOCK_PICTURE and the older COVERART, MP4's covr.
     A picture that can't be decoded is skipped and logged. Raises TagReadError for a file it
-    can't open."""
-    kind, f = _open(path)
+    can't open. `name`: as for `open_song`."""
+    kind, f = open_song(path, name)
     tags = f.tags
     if kind in ("mp3", "wav", "aiff"):
         apic: list[Any] = tags.getall("APIC") if tags is not None else []
@@ -106,12 +108,12 @@ def pictures(path: str) -> list[Picture]:
     key: str
     value: str
     for key, value in tags or ():
-        name: str = key.upper()
-        if name not in ("METADATA_BLOCK_PICTURE", "COVERART"):
+        upper: str = key.upper()
+        if upper not in ("METADATA_BLOCK_PICTURE", "COVERART"):
             continue
         try:
             data = base64.b64decode(value, validate=False)
-            if name == "COVERART":
+            if upper == "COVERART":
                 out.append(Picture(None, "", data))
             else:
                 p = mutagen.flac.Picture(data)

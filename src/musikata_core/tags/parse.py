@@ -191,8 +191,10 @@ def with_replaygain(tags: Tags, more: Mapping[str, float | None]) -> Tags:
 
 # ---------- each kind's fields ----------
 
-# Vorbis comments (FLAC, Ogg, Opus): keys upper-cased; several values are several fields
-_VORBIS = {
+# A3.2's mapping, the text fields' half (the rest is each kind's function's): R4.1's field to its
+# Vorbis comment (FLAC, Ogg, Opus; keys upper-cased; several values are several fields), its ID3v2
+# frame and its MP4 atom. compose.py writes through the same tables.
+VORBIS = {
     "title": "TITLE", "artist": "ARTIST", "album": "ALBUM", "albumartist": "ALBUMARTIST",
     "composer": "COMPOSER", "comment": "COMMENT", "artistsort": "ARTISTSORT",
     "albumartistsort": "ALBUMARTISTSORT", "albumsort": "ALBUMSORT",
@@ -208,7 +210,7 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     track, track_total = number_pair(text(get("TRACKNUMBER")))
     disc, disc_total = number_pair(text(get("DISCNUMBER")))
     year, date = year_and_date(text(get("DATE")) or text(get("YEAR")))
-    fields = {k: text(get(v)) for k, v in _VORBIS.items()}
+    fields = {k: text(get(v)) for k, v in VORBIS.items()}
     fields["albumartist"] = fields["albumartist"] or text(get("ALBUM ARTIST"))
     fields["comment"] = fields["comment"] or text(get("DESCRIPTION"))
     gains = replaygain_of(raw)
@@ -236,7 +238,17 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     )
 
 
-_ID3 = {
+V1_COMMENT = "ID3v1 Comment"  # the description Mutagen gives an ID3v1 tag's comment
+
+
+def is_comment(description: str) -> bool:
+    """Whether a COMM frame with this description is the song's comment (A3.2): one without a
+    description, or an ID3v1 tag's. The others are other programs' own data, kept as they are
+    (R4.1.1): iTunes' iTunNORM and iTunSMPB, MediaMonkey's Songs-DB_Custom1, MusicMatch's."""
+    return not description or description == V1_COMMENT
+
+
+ID3 = {
     "title": "TIT2", "artist": "TPE1", "album": "TALB", "albumartist": "TPE2",
     "composer": "TCOM", "artistsort": "TSOP", "albumartistsort": "TSO2", "albumsort": "TSOA",
 }  # fmt: skip
@@ -252,8 +264,8 @@ def from_id3(
     """ID3v2 frames by id (TCON already as genre names: read.py takes them from Mutagen, which
     turns ID3v1's numbers, "(17)", into names, R9.3), TXXX frames as "TXXX:<description>", each
     user's POPM, COMM frames as (description, text), and RVA2 frames as `rva2_replaygain` takes
-    them. The comment is the COMM without a description (A3.2), else the first. ReplayGain is
-    TXXX's, else RVA2's."""
+    them. The comment is the first COMM that `is_comment`: without a description (A3.2), or the
+    ID3v1 tag's. ReplayGain is TXXX's, else RVA2's."""
     get = raw.get
     track, track_total = number_pair(text(get("TRCK")))
     disc, disc_total = number_pair(text(get("TPOS")))
@@ -261,9 +273,7 @@ def from_id3(
         year, date = year_and_date(text(get("TDRC")))
     else:
         year, date = id3v23_date(text(get("TYER")), text(get("TDAT")))
-    comment = next((t for d, t in comments if not d and t.strip()), None) or next(
-        (t for _, t in comments if t.strip()), None
-    )
+    comment = next((t for d, t in comments if is_comment(d) and t.strip()), None)
 
     def txxx(name: str) -> str | None:
         for key, values in raw.items():
@@ -272,7 +282,7 @@ def from_id3(
         return None
 
     tags = Tags(
-        **{k: text(get(v)) for k, v in _ID3.items()},
+        **{k: text(get(v)) for k, v in ID3.items()},
         track=track,
         tracktotal=track_total,
         disc=disc,
@@ -292,7 +302,7 @@ def from_id3(
     return with_replaygain(tags, rva2_replaygain(rva2))
 
 
-_MP4 = {
+MP4 = {
     "title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb", "albumartist": "aART",
     "composer": "\xa9wrt", "comment": "\xa9cmt", "artistsort": "soar", "albumartistsort": "soaa",
     "albumsort": "soal",
@@ -320,7 +330,7 @@ def from_mp4(
     t = track or (0, 0)
     d = disc or (0, 0)
     return Tags(
-        **{k: text(get(v)) for k, v in _MP4.items()},
+        **{k: text(get(v)) for k, v in MP4.items()},
         track=t[0] or None,
         tracktotal=t[1] or None,
         disc=d[0] or None,

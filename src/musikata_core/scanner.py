@@ -31,8 +31,10 @@ from dataclasses import dataclass, field
 from typing import BinaryIO, Literal
 
 from . import albums, art, db, folders, search, sortnames
-from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags
+from .clock import Clock, SystemClock
+from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover
 from .tags import read as read_tags
+from .tags.safe import remove_stale
 
 log = logging.getLogger(__name__)
 BATCH = 200  # files read and written at a time (A2.2)
@@ -152,12 +154,15 @@ def walk(
     known: Collection[str] = (),
     tree: Tree | None = None,
     reached: Reached | None = None,
+    now: float | None = None,
 ) -> Iterator[Seen]:
     """Every audio file under root (R2.2's kinds), skipping hidden files and folders, folders
     holding .musikataignore, the folders the settings skip (paths under the root), and the root's
-    .musikata (R2.3.1). Links are followed like folders; one leading back to a folder already
-    walked is skipped, and the log says so (R2.3.2). `images`, when given, gets each folder walked
-    (with no images: an empty list) and its images (R5.1's kinds), for its albums' covers.
+    .musikata (R2.3.1). The copies a safe write left behind (A3.4; tags.is_leftover), hidden too,
+    are removed when they were last touched long enough before `now`, a time (none: kept). Links
+    are followed like folders; one leading back to a folder already walked is skipped, and the
+    log says so (R2.3.2). `images`, when given, gets each folder walked (with no images: an empty
+    list) and its images (R5.1's kinds), for its albums' covers.
 
     A partial scan (A2.4) walks from `start`, a folder under the root, and passes by the folders
     `known` under it; `tree`, when given, gets the folders walked and passed, and its real paths
@@ -192,6 +197,9 @@ def walk(
             images.setdefault(rel, [])
         for entry in entries:
             path = f"{rel}/{entry.name}" if rel else entry.name
+            if now is not None and is_leftover(entry.name) and not entry.is_dir():
+                remove_stale(entry.path, now)
+                continue
             if _hidden(entry) or path in skipped:
                 continue
             try:
@@ -262,11 +270,12 @@ def walk_scope(
     images: dict[str, list[art.Image]] | None = None,
     tree: Tree | None = None,
     reached: Reached | None = None,
+    now: float | None = None,
 ) -> Iterator[Seen]:
     """The audio files a partial scan sees (A2.4): each named folder's own files and those of the
     folders new under it, each named folder walked once, whether named or found new under another.
-    A named folder out of the library now (`outside`) is walked not at all. `reached`: as for
-    `walk`."""
+    A named folder out of the library now (`outside`) is walked not at all. `reached` and `now`:
+    as for `walk`."""
     tree = tree if tree is not None else Tree()
     named = sorted(scope.folders)
     # the known folders count as walked (R2.3.2), but for the named ones, walked again here
@@ -279,7 +288,7 @@ def walk_scope(
         if folder in tree.folders or outside(root, folder, skip):
             continue
         yield from walk(
-            root, skip, images, start=folder, known=scope.known, tree=tree, reached=reached
+            root, skip, images, start=folder, known=scope.known, tree=tree, reached=reached, now=now
         )
     tree.passed -= set(tree.folders)
 
@@ -513,6 +522,33 @@ def write_batch(
     return res
 
 
+def wrote(c: sqlite3.Connection, root: str, written: Iterable[Written]) -> Result:
+    """In the writer's transaction: the rows of the songs MusiKata wrote itself (A2.4; tags.save),
+    each updated from what its file was read back as, with the size and modification time the
+    write left it with, so no scan reads it again (`plan`). A file outside the root is passed
+    by, and the log says so."""
+    batch = []
+    for w in written:
+        rel = path_under(root, w.path)
+        if rel is None:
+            log.warning("didn't index %s: it isn't under %s", w.path, root)
+            continue
+        batch.append(Read(Seen(rel, w.size, w.mtime_ns), w.tags, w.info, w.audio_hash))
+    return write_batch(c, batch, {})
+
+
+def path_under(root: str, path: str) -> str | None:
+    """A file's path under the root, with /, as the index holds it; None when it isn't under it
+    (on another drive, on Windows, included)."""
+    try:
+        rel = os.path.relpath(path, root)
+    except ValueError:
+        return None
+    if rel == os.curdir or rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return None
+    return rel.replace(os.sep, "/")
+
+
 # a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
 ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
        "error", *db.FIELDS)  # fmt: skip
@@ -650,13 +686,16 @@ def scan(
     keep: Collection[str] = (),
     hold: bool = True,
     reached: Reached | None = None,
+    clock: Clock | None = None,
 ) -> Result:
     """One scan of the root into its index (A2.2), or, given a `scope`, of the folders it names
     (A2.4). progress(done, of) after each batch, for the root's card (R2.3). `expected`: files
     MusiKata wrote itself, not read again (`plan`). `copied`: copies made while watching, by audio
     hash, which a song whose file went takes over (`take_over`); the result's are those still
     standing, with the new ones. `reached`: each folder as the walk lists it (`walk`), so that
-    watching it starts then, not once the scan has ended (A2.4).
+    watching it starts then, not once the scan has ended (A2.4). The copies safe writes left
+    behind (A3.4) are removed as the walk meets them, when last touched tags.safe.LEFTOVER
+    seconds before `clock`'s time (the system's, unless given).
 
     A root that isn't there changes nothing (`Result.missing`), and the songs beneath a link that
     leads nowhere stay (`Result.unreachable`) (R2.10). When the songs gone are more than a quarter
@@ -670,10 +709,11 @@ def scan(
     if not os.path.isdir(root):  # gone with its drive (R2.10): nothing is taken for removed
         log.warning("didn't scan %s: it isn't there", root)
         return Result(missing=True)
+    now = (clock or SystemClock()).now().timestamp()
     if scope is None:
-        seen = list(walk(root, skip, images, tree=tree, reached=reached))
+        seen = list(walk(root, skip, images, tree=tree, reached=reached, now=now))
     else:
-        seen = list(walk_scope(root, scope, skip, images, tree, reached))
+        seen = list(walk_scope(root, scope, skip, images, tree, reached, now))
     rows = _rows(c, scope, tree)
     indexed = {p: (s, m) for p, s, m, _h in rows}
     hashes = {p: h for p, _s, _m, h in rows if h is not None}

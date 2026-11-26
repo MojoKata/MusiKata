@@ -45,7 +45,9 @@ file. MusiKata instead:
    permissions, and its modification time when R4.7.1 says so.
 
 On Windows a file open in another program can't be replaced; that is reported (R4.7) and the copy
-removed. Leftover `.musikata-tmp` files from a crash are removed at the next scan.
+removed. Leftover `.musikata-tmp` files from a crash are removed at the next scan, once untouched
+for ten minutes: a rescan a watched change starts mid-save, or another computer sharing the root,
+mustn't take the copy of a write still going on.
 
 A3.5. **The change history** keeps, for each file written, its path and the old value of each
 field that changed. Each entry is one JSON file in `<root>/.musikata/history/`, named by its time
