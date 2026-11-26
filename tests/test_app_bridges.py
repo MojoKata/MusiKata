@@ -716,5 +716,6 @@ def test_files_added_changed_moved_and_removed_under_the_root_appear_while_it_ru
     qtbot.waitUntil(lambda: "C/4.wav" in songs(), timeout=10_000)
     os.remove(music / "A" / "1.wav")  # removed
     qtbot.waitUntil(lambda: "A/1.wav" not in songs(), timeout=10_000)
-    assert lib.property("line").startswith("3 songs")
+    # the card's line follows the scan's commit by a queued signal: waited for, not raced
+    qtbot.waitUntil(lambda: lib.property("line").startswith("3 songs"), timeout=10_000)
     lib.close()
