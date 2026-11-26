@@ -8,19 +8,12 @@ Item {
     id: view
     required property var library
 
-    ViewHeader {
-        id: header
-        width: view.width
-        title: qsTr("Artists")
-        count: view.library.artistCountText
-    }
-
     GridView {
         id: grid
         objectName: "artists"
         readonly property int columns: Math.max(2, Math.floor((width + 18) / (150 + 18)))
         x: 28
-        y: header.height + 8
+        y: 8
         width: view.width - 28 - 10
         height: view.height - y
         cellWidth: Math.floor((width - 14) / columns)
@@ -48,5 +41,17 @@ Item {
             }
         }
         ScrollBar.vertical: ScrollBar { }
+    }
+
+    Text {  // the library empty, or a search that found nothing (R2.7)
+        objectName: "empty"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: 80
+        width: Math.min(implicitWidth, view.width - 56)
+        elide: Text.ElideRight
+        visible: text !== ""
+        text: view.library.emptyText
+        color: Theme.muted
+        font { family: Theme.sans; pixelSize: 14 }
     }
 }

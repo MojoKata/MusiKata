@@ -1,6 +1,8 @@
-"""The views in the window (src/musikata/qml/; R2.6, R6.3): Albums as a grid and a list, an album's
-page, Artists and an artist's page each load with no QML warning, show their covers once loaded off
-the GUI thread, keep their text in its boxes, and go where a click says.
+"""The views in the window (src/musikata/qml/; R2.6, R6.3, R6.4): Albums as a grid and a list, an
+album's page, Artists and an artist's page each load with no QML warning, show their covers once
+loaded off the GUI thread, keep their text in its boxes, and go where a click says; the header's
+search box takes `/` and Esc and filters as the user types (R2.7), becomes its icon when the header
+is narrow, and its sort and ⋮ menu do what they say.
 
 Why: a QML view is only checked by loading it; a binding to a role that isn't there, or a cover
 whose provider fails, shows only as a warning in the log and an empty tile."""
@@ -10,9 +12,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fakes import FakeClock
-from PySide6.QtCore import QBuffer, QPointF, Qt
+from PySide6.QtCore import QBuffer, QPointF, Qt, QUrl
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtMultimedia import QAudioDevice
+from PySide6.QtQml import QQmlComponent
 from PySide6.QtTest import QTest
 
 from musikata import app, layout, player, tour
@@ -109,6 +112,9 @@ def click(shell, item, x=None, y=None):
         {"view": "artist", "artist": "Lumen Drift"},
         {"view": "artist", "artist": "Mara Okafor"},
         {"view": "songs"},
+        {"view": "albums", "search": "zebra"},
+        {"view": "artists", "search": "tide"},
+        {"view": "songs", "search": "glass harbor 1"},
     ],
 )
 def test_each_view_loads_with_no_warning_and_its_text_in_its_boxes(shell, qtbot, qtlog, step):
@@ -163,3 +169,120 @@ def test_clicks_open_a_view_an_album_its_artist_and_go_back(shell, qtbot):
     qtbot.waitUntil(lambda: lib.property("view") == "artists", timeout=WAIT)
     click(shell, one(shell, "side-songs"))
     qtbot.waitUntil(lambda: lib.property("view") == "songs", timeout=WAIT)
+
+
+def key(shell, k):
+    QTest.keyClick(shell.window, k, Qt.KeyboardModifier(0))
+
+
+def type_text(shell, text):
+    """Types lower-case letters, digits and ASCII marks into the window, a key each."""
+    for ch in text:
+        key(shell, Qt.Key(ord(ch.upper())))
+
+
+def visible(item):
+    return item.isVisible() and item.opacity() > 0
+
+
+@pytest.mark.slow
+def test_slash_opens_the_search_typing_filters_and_escape_clears_it(shell, qtbot):
+    lib = shell.library
+    settle(shell, qtbot)
+    shell.window.requestActivate()
+    qtbot.waitUntil(lambda: shell.window.isActive(), timeout=WAIT)
+    field = one(shell, "search")
+    key(shell, Qt.Key.Key_Slash)
+    qtbot.waitUntil(lambda: field.hasActiveFocus(), timeout=WAIT)
+    type_text(shell, "tide")
+    qtbot.waitUntil(lambda: lib.property("viewCount") == "1 of 4 albums", timeout=WAIT)
+    assert lib.property("search") == "tide" and field.property("text") == "tide"
+    key(shell, Qt.Key.Key_Slash)  # in the box, a / is text
+    assert field.property("text") == "tide/" and lib.property("search") == "tide/"
+    key(shell, Qt.Key.Key_Escape)
+    qtbot.waitUntil(lambda: lib.property("viewCount") == "4 albums", timeout=WAIT)
+    assert field.property("text") == "" and field.hasActiveFocus()
+    key(shell, Qt.Key.Key_Escape)  # empty: Esc leaves the box
+    assert not field.hasActiveFocus()
+    lib.show("songs")
+    key(shell, Qt.Key.Key_Slash)
+    type_text(shell, "rating:>=3")
+    qtbot.waitUntil(lambda: lib.property("viewCount") == "1 of 9 songs", timeout=WAIT)
+    lib.go({"view": "album", "album": "Glass Harbor"})  # a page: no header, / does nothing
+    assert not visible(one(shell, "header"))
+    key(shell, Qt.Key.Key_Slash)
+    assert lib.property("search") == ""
+
+
+@pytest.mark.slow
+def test_a_narrow_header_shows_the_search_as_its_icon_which_opens_it_over_the_title(
+    shell, qtbot, qtlog
+):
+    c = QQmlComponent(
+        shell.engine, QUrl.fromLocalFile(os.path.join(os.path.dirname(app.QML), "ViewHeader.qml"))
+    )
+    header = c.createWithInitialProperties({"library": shell.library})
+    assert header is not None, c.errorString()
+    header.setParentItem(shell.window.contentItem())
+    header.setWidth(520)
+    field = items(header, "search")[0]
+    icon = items(header, "searchIcon")[0]
+    count = items(header, "viewCount")[0]
+    assert header.property("narrow") and not visible(field) and visible(icon)
+    click(shell, icon)
+    qtbot.waitUntil(lambda: field.hasActiveFocus(), timeout=WAIT)
+    assert visible(field) and not visible(icon) and not visible(count)
+    assert field.x() == 20 and field.width() > 200  # over the title
+    key(shell, Qt.Key.Key_Escape)
+    assert not visible(field) and visible(icon) and visible(count)
+    header.setWidth(1040)
+    assert not header.property("narrow") and visible(field) and not visible(icon)
+    assert field.width() == 250
+    header.setWidth(700)  # less room: the box narrows before it becomes its icon
+    assert visible(field) and 180 <= field.width() < 250
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
+
+
+def every_item(item):
+    yield item
+    for child in item.childItems():
+        yield from every_item(child)
+
+
+def menu_item(shell, text, qtbot):
+    """The item of the menu open now that says `text`, once it shows."""
+
+    def shown():
+        menu = (i for i in every_item(shell.window.contentItem()) if i.inherits("QQuickMenuItem"))
+        return [i for i in menu if i.property("text") == text and visible(i)]
+
+    qtbot.waitUntil(lambda: bool(shown()), timeout=WAIT)
+    return shown()[0]
+
+
+@pytest.mark.slow
+def test_the_sort_menu_orders_albums_and_the_more_menu_rescans(shell, qtbot):
+    lib = shell.library
+    settle(shell, qtbot)
+    click(shell, one(shell, "sort"))
+    click(shell, menu_item(shell, "Title", qtbot))
+    qtbot.waitUntil(lambda: lib.property("sortText") == "Sort: Title", timeout=WAIT)
+    assert lib.property("albums").row(0)["title"] == "Glass Harbor"
+    click(shell, one(shell, "more"))
+    with qtbot.waitSignal(lib.scanningChanged, timeout=WAIT):
+        click(shell, menu_item(shell, "Rescan library", qtbot))
+    qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_a_click_on_a_songs_column_header_sorts_by_it_and_again_the_other_way(shell, qtbot):
+    lib = shell.library
+    lib.show("songs")
+    settle(shell, qtbot)
+    click(shell, one(shell, "head-title"))
+    qtbot.waitUntil(lambda: lib.property("songs").order() == ("title", False), timeout=WAIT)
+    click(shell, one(shell, "head-title"))
+    qtbot.waitUntil(lambda: lib.property("songs").order() == ("title", True), timeout=WAIT)
+    assert lib.property("songs").row(0)["title"] == "Tide Tables 2"
+    click(shell, one(shell, "head-"))  # the # column: no order of its own
+    assert lib.property("songs").order() == ("title", True)

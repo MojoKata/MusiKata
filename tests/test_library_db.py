@@ -81,7 +81,7 @@ def test_an_index_of_slice_2_gains_albums_and_artists_and_its_songs_are_read_aga
     db.MIGRATIONS[0](c)
     c.execute("PRAGMA user_version = 1")
     c.execute("INSERT INTO song (path, size, mtime_ns, album) VALUES ('a.flac', 10, 5, 'X')")
-    assert db.migrate(c) == 2
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT path, size, mtime_ns, album_id FROM song").fetchall() == [
         ("a.flac", 10, -1, None)
     ]

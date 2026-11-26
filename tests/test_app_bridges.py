@@ -312,3 +312,102 @@ def test_the_song_playing_marks_its_album_and_its_rows_on_the_pages(lib):
     assert songs.data(songs.index(1), songs._role("playing")) is True
     lib.show_playing("")
     assert not any(albums.data(albums.index(i), albums._role("playing")) for i in range(2))
+
+
+# ---------- the header (R6.4) and search (R2.7) ----------
+
+
+def test_the_header_says_each_views_title_count_modes_and_sort(lib):
+    assert lib.property("searchable") and lib.property("title") == "Albums"
+    assert lib.property("viewCount") == "2 albums"
+    assert [m["mode"] for m in lib.property("modes")] == ["grid", "list"]
+    assert lib.property("mode") == "grid"
+    assert [s["label"] for s in lib.property("sorts")] == ["Artist", "Title", "Year"]
+    assert lib.property("sortText") == "Sort: Artist"
+    assert lib.property("searchHint") == "Search the library"
+    lib.show("artists")
+    assert (lib.property("title"), lib.property("viewCount")) == ("Artists", "3 artists")
+    assert lib.property("modes") == [] and lib.property("mode") == ""
+    assert lib.property("sortText") == "Sort: Name" and lib.property("sort") == "name"
+    lib.show("songs")
+    assert (lib.property("title"), lib.property("viewCount")) == ("Songs", "5 songs")
+    assert lib.property("sorts") == [] and lib.property("sortText") == ""
+    assert [h["order"] for h in lib.property("songHeaders")][2] == "up"  # by artist
+    lib.openAlbum(album_id(lib, "Glass Harbor"))
+    assert not lib.property("searchable") and lib.property("title") == ""
+    assert lib.property("viewCount") == "" and lib.property("sortText") == ""
+
+
+def test_the_sorts_order_albums_and_a_songs_column_turns_the_other_way_on_a_second_click(lib):
+    lib.setSort("title")
+    assert lib.property("sort") == "title" and lib.property("sortText") == "Sort: Title"
+    assert lib.property("albums").row(0)["title"] == "Glass Harbor"
+    with pytest.raises(ValueError):
+        lib.setSort("plays")
+    lib.show("artists")
+    lib.setSort("name")
+    with pytest.raises(ValueError):
+        lib.setSort("title")
+    lib.show("songs")
+    lib.sortSongs("title")
+    assert lib.property("songs").order() == ("title", False)
+    lib.sortSongs("title")
+    assert lib.property("songs").order() == ("title", True)
+    assert lib.property("songHeaders")[1]["order"] == "down"
+    lib.sortSongs("year")
+    assert lib.property("songs").order() == ("year", False)
+
+
+def search(lib, qtbot, text):
+    """Types `text` into the search box and waits for the view's rows (never a set time)."""
+    with qtbot.waitSignal(lib.changed, check_params_cb=lambda: not lib.property("searching"),
+                          timeout=5000):  # fmt: skip
+        lib.setSearch(text)
+
+
+def test_a_search_filters_only_the_view_open_and_its_count_says_of_how_many(lib, qtbot):
+    search(lib, qtbot, "ferry")
+    assert lib.property("search") == "ferry"
+    assert lib.property("viewCount") == "1 of 2 albums"
+    assert lib.property("albumCountText") == "1 of 2 albums"
+    assert lib.property("artistCountText") == "3 artists"  # not the view open: whole
+    assert lib.property("emptyText") == ""
+    search(lib, qtbot, "zebra")
+    assert lib.property("viewCount") == "0 of 2 albums"
+    assert lib.property("emptyText") == "No albums match “zebra”"
+    lib.show("songs")  # another view: whole, its box empty
+    assert lib.property("search") == "" and lib.property("countText") == "5 songs"
+    assert lib.property("albums").count == 2
+    search(lib, qtbot, "rating:0 artist:lumen")
+    assert lib.property("viewCount") == "4 of 5 songs"
+    lib.show("artists")
+    search(lib, qtbot, "iron")
+    assert [lib.property("artists").row(i)["name"] for i in range(2)] == [
+        "Iron Arc", "Various Artists"
+    ]  # fmt: skip
+    lib.setSearch("iron")  # the same again: nothing to do
+    assert not lib.property("searching")
+
+
+def test_a_page_opened_from_a_search_goes_back_to_it_and_the_sidebar_clears_it(lib, qtbot):
+    search(lib, qtbot, "glass")
+    lib.openAlbum(album_id(lib, "Glass Harbor"))
+    assert lib.property("view") == "album" and lib.property("search") == ""
+    lib.setSearch("tide")  # a page has no search box: nothing
+    assert lib.property("album").property("songs").count == 2
+    lib.back()
+    assert lib.property("view") == "albums" and lib.property("search") == "glass"
+    assert lib.property("viewCount") == "1 of 2 albums"
+    lib.openArtist(lib.property("album").property("artistId"))
+    lib.show("albums")
+    assert lib.property("search") == "" and lib.property("albums").count == 2
+
+
+def test_a_scan_while_searching_finds_the_search_again(lib, index, qtbot):
+    search(lib, qtbot, "lumen")
+    assert lib.property("viewCount") == "2 of 2 albums"
+    fill(index, [{"path": "LD/new.flac", "title": "New", "artist": "Lumen Drift", "album": "Dawn"}])
+    with qtbot.waitSignal(lib.property("albums").countChanged, timeout=5000):
+        lib.reload()
+    assert lib.property("viewCount") == "3 of 3 albums"
+    lib.wait()

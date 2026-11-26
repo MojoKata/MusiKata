@@ -1,7 +1,8 @@
 """The scan (A2.2, R2.3): walk the root, compare each audio file's size and modification time with
 its row, read the changed and new ones on the worker processes in batches, write each batch in one
-transaction, and remove what's gone, unless it reappears elsewhere with the same audio hash, which
-is a move: its row keeps its id and the plays that hang on it."""
+transaction, with its rows of the search index (A2.5), and remove what's gone, unless it reappears
+elsewhere with the same audio hash, which is a move: its row keeps its id and the plays that hang
+on it."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import BinaryIO, Literal
 
-from . import albums, art, db
+from . import albums, art, db, search
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags
 from .tags import read as read_tags
 
@@ -284,6 +285,7 @@ def write_batch(
     (R2.5), with `images`, each folder's images, for their covers."""
     res = Result()
     touched = albums.Touched()
+    written: list[int] = []
     for r in batch:
         values = _values(r)
         old = moves.pop(r.audio_hash, None) if r.audio_hash else None
@@ -308,6 +310,8 @@ def write_batch(
         for n, g in enumerate(r.tags.genres if r.tags else ()):
             c.execute("INSERT INTO song_genre VALUES (?, ?, ?)", (song_id, n, g))
         albums.place(c, song_id, touched)
+        written.append(song_id)
+    search.index_songs(c, written)
     albums.refresh(c, touched, images)
     return res
 
@@ -349,6 +353,7 @@ def scan(
     def delete(c: sqlite3.Connection) -> int:
         touched = albums.Touched()
         albums.forget(c, remove, touched)
+        search.forget(c, remove)
         c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
         albums.refresh(c, touched, images)
         albums.refresh_folders(c, images)  # covers added or changed beside unchanged songs

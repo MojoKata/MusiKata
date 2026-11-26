@@ -79,7 +79,24 @@ def _v2(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2]
+def _v3(c: sqlite3.Connection) -> None:
+    """Search (A2.5, R2.7): song_fts, FTS5 over each song's title, artist, album, album artist,
+    genres, year and file name, its rowid the song's id, case and accents aside. It is filled
+    from the rows there, so no song needs reading again; the scan keeps it from then on
+    (search.py)."""
+    c.execute(
+        "CREATE VIRTUAL TABLE song_fts USING fts5(title, artist, album, albumartist, genre, year,"
+        " filename, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3')"
+    )
+    c.execute(
+        "INSERT INTO song_fts (rowid, title, artist, album, albumartist, genre, year, filename)"
+        " SELECT id, title, artist, album, albumartist,"
+        " (SELECT group_concat(genre, ' ') FROM song_genre WHERE song_id = song.id), year,"
+        " substr(path, length(rtrim(path, replace(path, '/', ''))) + 1) FROM song"
+    )
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3]
 
 
 def connect(path: str) -> sqlite3.Connection:

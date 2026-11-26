@@ -3,55 +3,17 @@ import QtQuick.Controls.Basic
 import "."
 
 // Albums (R2.6, L01-albums): the genre chips of the most common genres, and the albums as a grid
-// of covers or, with the header's switch, a list; paged from the index as they scroll (A1.5).
+// of covers or, with the header's switch (R6.4), a list; paged from the index as they scroll (A1.5).
 Item {
     id: view
     required property var library
     required property var player
     readonly property bool listMode: view.library.albumsMode === "list"
 
-    ViewHeader {
-        id: header
-        width: view.width
-        title: qsTr("Albums")
-        count: view.library.albumCountText
-
-        Rectangle {  // the view-mode switch (R6.4)
-            width: 76
-            height: 36
-            radius: 8
-            color: Theme.surface
-            border.color: Theme.border
-            Repeater {
-                model: [["grid", qsTr("Grid")], ["list", qsTr("List")]]
-                Rectangle {
-                    required property int index
-                    required property var modelData
-                    x: 3 + index * 35
-                    y: 3
-                    width: 35
-                    height: 30
-                    radius: 6
-                    color: view.library.albumsMode === modelData[0] ? Theme.raised : "transparent"
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.name: modelData[1]
-                    Accessible.checked: view.library.albumsMode === modelData[0]
-                    Icon {
-                        anchors.centerIn: parent
-                        name: modelData[0]
-                        size: 16
-                        color: view.library.albumsMode === modelData[0] ? Theme.text : Theme.muted
-                    }
-                    TapHandler { onTapped: view.library.setAlbumsMode(modelData[0]) }
-                }
-            }
-        }
-    }
-
     Flickable {  // the genre chips (R2.6)
         id: chips
         x: 28
-        y: header.height
+        y: 0
         width: view.width - 28 - 24
         height: 34
         contentWidth: chipRow.width
@@ -191,5 +153,17 @@ Item {
             }
             ScrollBar.vertical: ScrollBar { }
         }
+    }
+
+    Text {  // the library empty, or a search that found nothing (R2.7)
+        objectName: "empty"
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: chips.y + chips.height + 80
+        width: Math.min(implicitWidth, view.width - 56)
+        elide: Text.ElideRight
+        visible: text !== ""
+        text: view.library.emptyText
+        color: Theme.muted
+        font { family: Theme.sans; pixelSize: 14 }
     }
 }

@@ -87,6 +87,7 @@ with its test.
 | `audio.eq` (R19.7) | with and without `Preamp:`; filters `ON` and `OFF`; `PK`, `LSC`, `HSC`, `LP`, `HP` and types it doesn't read; `Fc` with and without `Hz`; `Q` against `BW`; comments; more than ten bands |
 | `online` (A7) | fields missing, `null`, empty or added; dates as a year, a month or a day; several matching releases; answers `503` and `429`; slow answers; text in any script |
 | `rootfiles`, `settings` (A2.10) | each older format, and a newer one; unknown fields and groups; values broken or out of range (R13.9); two computers' entries for one song; a file cut short by a sync in progress; a sync tool's "conflicted copy" beside it |
+| `search` (R2.7, A2.5) | what users type: accents and case (`beyonce`, `MOTLEY crue`); the last word half typed; quotes closed, left open, empty or inside a word (`12"`); FTS5's own operators and marks as text (`OR`, `NOT`, `NEAR(`, `*`, `^`, `-`, `{}`, `:`); a lone `-` and other marks with no word in them; a known `field:` in any case, with no value yet, a word, a phrase or a comparison (`rating:>=4`, `rating:>= 4`, `=>`, `≥`, `rating:4`, `year:<2000`, `year:201`), and a comparison with no number (`rating:high`); an unknown `field:` (`bpm:120`); a NUL; nothing, and anything at all (a property) |
 | `patterns` (R3) | odd characters, deep and shallow folders, numbers in names, `Disc 1` folders, names longer than a platform allows |
 
 ## Tiers

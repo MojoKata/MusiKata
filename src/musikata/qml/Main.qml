@@ -1,8 +1,9 @@
 import QtQuick
 import "."
 
-// The main window (R6.1): the sidebar, and the open view or page (R2.6), as the library says. The
-// now-playing bar (R6.5) comes with slice 4, the header's search and sort with slice 3.2.
+// The main window (R6.1): the sidebar, and the open view or page (R2.6), as the library says, a view
+// under its header (R6.4); `/` opens the header's search (R2.7, R6.9). The now-playing bar (R6.5)
+// comes with slice 4.
 Window {
     id: win
     required property var library
@@ -19,10 +20,25 @@ Window {
         anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
         library: win.library
     }
+    ViewHeader {
+        id: header
+        objectName: "header"
+        anchors { left: sidebar.right; right: parent.right; top: parent.top }
+        visible: win.library.searchable
+        library: win.library
+    }
+    Shortcut {
+        sequence: "/"
+        enabled: win.library.searchable
+        onActivated: header.openSearch()
+    }
     Loader {
         id: view
         objectName: "view"
-        anchors { left: sidebar.right; right: parent.right; top: parent.top; bottom: parent.bottom }
+        anchors {
+            left: sidebar.right; right: parent.right; bottom: parent.bottom
+            top: win.library.searchable ? header.bottom : parent.top
+        }
         sourceComponent: ({
             albums: albums, album: album, artists: artists, artist: artist, songs: songs
         })[win.library.view]

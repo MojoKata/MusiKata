@@ -2,6 +2,7 @@
 SQL, and what each row shows decided in Python, not in QML."""
 
 import os
+import threading
 
 import pytest
 from fakes import fill
@@ -209,7 +210,7 @@ def test_a_list_of_songs_picks_and_orders_what_its_page_asks_for(index):
     fill(index, [{"path": "b.flac", "album": "X", "track": 2}, {"path": "a.flac", "album": "X"},
                  {"path": "c.flac", "album": "X", "track": 1},
                  {"path": "d.flac", "album": "Y"}])  # fmt: skip
-    m = models.SongsModel(index.read, "album", where="album = ?", params=("X",))
+    m = models.SongsModel(index.read, "tracks", where="album = ?", params=("X",))
     m.reload()
     assert [m.row(i)["path"] for i in range(m.count)] == ["c.flac", "b.flac", "a.flac"]
     m.select("album = ?", ("Y",))
@@ -231,3 +232,166 @@ def test_the_songs_list_sorts_artists_by_their_sort_names(index):
     assert [m.row(i)["title"] for i in range(m.count)] == [
         "Under B", "Under B too", "Disc 9", "Disc 10", "Under T"
     ]  # fmt: skip
+
+
+# ---------- sorts (R2.6, R2.13) ----------
+
+
+def test_the_songs_list_sorts_by_each_column_either_way_with_missing_values_last(index):
+    fill(index, [
+        {"path": "a.flac", "title": "b", "artist": "Zed", "album": "Q", "year": 2001, "rating": 3,
+         "genres": ("Soul",), "length": 30.0},
+        {"path": "b.flac", "title": "A", "artist": "Amy", "album": "R", "year": 1999, "rating": 5,
+         "genres": ("jazz",), "length": 10.0},
+        {"path": "c.flac", "title": "c", "artist": "Mo", "album": "P", "genres": ("Folk",),
+         "length": 20.0},
+    ])  # fmt: skip
+    m = models.SongsModel(index.read)
+    expected = {
+        "title": ["A", "b", "c"], "artist": ["A", "c", "b"], "album": ["c", "b", "A"],
+        "genre": ["c", "A", "b"], "year": ["A", "b", "c"], "rating": ["c", "b", "A"],
+        "time": ["A", "c", "b"],
+    }  # fmt: skip
+    for column, titles in expected.items():
+        m.sort_by(column)
+        assert [m.row(i)["title"] for i in range(3)] == titles, column
+        m.sort_by(column, descending=True)
+        down = [m.row(i)["title"] for i in range(3)]
+        assert down == (titles[1::-1] + ["c"] if column == "year" else titles[::-1]), column
+        assert m.order() == (column, True)
+    with pytest.raises(ValueError):
+        models.SongsModel(index.read, "bpm")
+
+
+def test_the_songs_headers_say_which_column_sorts_and_which_way():
+    headers = models.song_headers("year", True)
+    assert [h["label"] for h in headers] == [
+        "#", "TITLE", "ARTIST", "ALBUM", "GENRE", "YEAR", "RATING", "TIME"
+    ]  # fmt: skip
+    assert headers[0] == {"label": "#", "sort": "", "order": ""}
+    assert [h["order"] for h in headers] == ["", "", "", "", "", "down", "", ""]
+    assert models.song_headers("title", False)[1]["order"] == "up"
+    assert {h["order"] for h in models.song_headers("tracks", False)} == {""}
+
+
+def test_albums_sort_by_album_artist_title_or_year(index):
+    fill(index, LIBRARY)
+    m = models.AlbumsModel(index.read)
+    m.sort_by("title")
+    assert [m.row(i)["title"] for i in range(m.count)] == [
+        "Kindling", "Night Ferry", "Northbound Static", "Salt & Ember"
+    ]  # fmt: skip
+    m.sort_by("year")
+    assert [m.row(i)["year"] for i in range(m.count)] == ["2018", "2021", "", ""]
+    assert m.order() == "year"
+    with pytest.raises(ValueError):
+        m.sort_by("plays")
+
+
+# ---------- search (R2.7) ----------
+
+
+def test_a_views_count_says_how_many_a_search_shows_of_how_many():
+    assert models.count_text(1412, 1412, "song", False) == "1,412 songs"
+    assert models.count_text(12, 1412, "song", True) == "12 of 1,412 songs"
+    assert models.count_text(1, 1, "album", True) == "1 of 1 album"
+    assert models.no_match_text(" zebra ", "albums") == "No albums match “zebra”"
+
+
+def searched(model, qtbot, text):
+    """Sets the model's search and waits for its rows (never a set time)."""
+    with qtbot.waitSignal(model.countChanged, timeout=5000):
+        model.set_search(text)
+
+
+def test_a_search_finds_its_rows_off_the_gui_thread_and_they_come_with_count_changed(index, qtbot):
+    fill(index, LIBRARY)
+    threads = []
+
+    def read():
+        threads.append(threading.current_thread())
+        return index.read()
+
+    m = models.SongsModel(read)
+    m.reload()
+    threads.clear()
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.set_search("mara")
+        assert m.count == 6 and m.pending()  # nothing read here: the rows are still to come
+        assert m.searching() and not m.filtered()
+    assert threads and threading.main_thread() not in threads
+    assert m.count == 3 and m.total() == 6 and m.filtered() and not m.pending()
+    assert m.shown_search() == "mara"
+    assert {m.row(i)["artist"] for i in range(3)} == {"Mara Okafor"}
+    m.set_search("")  # nothing asked: the whole list, at once
+    assert m.count == 6 and not m.searching() and not m.filtered() and m.shown_search() == ""
+    m.wait()
+
+
+def test_a_newer_search_replaces_one_still_running_and_its_rows_win(index, qtbot):
+    fill(index, LIBRARY)
+    started, release = threading.Event(), threading.Event()
+
+    def read():
+        if threading.current_thread() is not threading.main_thread() and not started.is_set():
+            started.set()
+            release.wait(5)
+        return index.read()
+
+    m = models.SongsModel(read)
+    m.reload()
+    counts = []
+    m.countChanged.connect(lambda: counts.append(m.count))
+    m.set_search("mara")
+    assert started.wait(5)  # the first search runs, held
+    m.set_search("ferr")
+    m.set_search("ferry")  # replaces "ferr", which never runs
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        release.set()
+    m.wait()
+    qtbot.wait(20)  # nothing more comes: the first search's rows were dropped
+    assert counts == [2] and m.shown_search() == "ferry"
+    assert [m.row(i)["album"] for i in range(2)] == ["Night Ferry", "Night Ferry"]
+
+
+def test_a_searchs_rows_are_paged_by_id_in_the_lists_order(index, qtbot, monkeypatch):
+    monkeypatch.setattr(models, "PAGE", 10)
+    fill(index, [{"path": f"{n:03}.flac", "title": f"Song {n:03}", "artist": "Lumen Drift"}
+                 for n in range(35)] + [{"path": "x.flac", "title": "Other"}])  # fmt: skip
+    m = models.SongsModel(index.read, sort="title")
+    searched(m, qtbot, "lumen")
+    assert m.count == 35 and m.total() == 36
+    assert [m.row(n)["title"] for n in (0, 9, 10, 34)] == [
+        "Song 000", "Song 009", "Song 010", "Song 034"
+    ]  # fmt: skip
+    assert m.pages_read == 3 and m.row(35) is None
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.sort_by("title", descending=True)  # a new order: the search runs again
+    assert m.row(0)["title"] == "Song 034"
+
+
+def test_albums_and_artists_a_search_finds_are_those_of_the_songs_it_finds(index, qtbot):
+    fill(index, LIBRARY)
+    albums = models.AlbumsModel(index.read)
+    searched(albums, qtbot, "iron")  # a song's artist on a compilation
+    assert [albums.row(i)["title"] for i in range(albums.count)] == ["Night Ferry"]
+    albums.filter_genre("Soul")
+    qtbot.waitUntil(lambda: not albums.pending(), timeout=5000)
+    assert albums.count == 0 and albums.total() == 2
+    artists = models.ArtistsModel(index.read)
+    searched(artists, qtbot, "ferry")  # the album's artist, and its songs' artists
+    assert [artists.row(i)["name"] for i in range(artists.count)] == [
+        "Amber Orbit", "Iron Arc", "Various Artists"
+    ]  # fmt: skip
+    searched(artists, qtbot, "rating:>=1")
+    assert artists.count == 0 and artists.total() == 5
+
+
+def test_a_search_that_fails_finds_nothing_and_says_why_in_the_log(
+    index, qtbot, monkeypatch, caplog
+):
+    fill(index, LIBRARY)
+    m = models.SongsModel(index.read)
+    monkeypatch.setattr(models.search, "condition", lambda q: ("no such column", ()))
+    searched(m, qtbot, "x")
+    assert m.count == 0 and m.total() == 0 and "a search failed" in caplog.text

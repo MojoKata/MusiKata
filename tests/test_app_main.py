@@ -8,7 +8,7 @@ import sys
 import pytest
 from fakes import FakeClock
 
-from musikata import app
+from musikata import app, tour
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -73,7 +73,10 @@ def test_a_whole_run_scans_the_root_and_tours_it(tmp_path):
     (tmp_path / "Music" / "Undertow.flac").write_bytes(b"not audio")
     r = run("--root", str(tmp_path / "Music"), "--tour", str(tmp_path / "tour"))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "added=1" in r.stderr and "the tour: 5 screens, 0 texts past their boxes" in r.stdout
+    assert (
+        "added=1" in r.stderr
+        and f"the tour: {len(tour.STEPS)} screens, 0 texts past their boxes" in r.stdout
+    )
     assert (tmp_path / "tour" / "L03-songs.png").exists()
 
 
