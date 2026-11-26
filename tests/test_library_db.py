@@ -73,6 +73,46 @@ def test_each_thread_reads_through_a_connection_of_its_own(tmp_path):
     index.close()
 
 
+def test_closing_the_index_closes_every_threads_reading_connection(tmp_path):
+    """QML's image threads read covers through the index (covers.py) and outlive no index: each
+    one's connection is closed with it, not left open until the thread ends."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    opened, go_on = [], threading.Event()
+
+    def reader():
+        opened.append(index.read())
+        go_on.wait()
+
+    threads = [threading.Thread(target=reader, daemon=True) for _ in range(3)]
+    for t in threads:
+        t.start()
+    try:
+        while len(opened) < 3:
+            threading.Event().wait(0.001)
+        opened.append(index.read())
+        index.close()
+        for c in opened:
+            with pytest.raises(sqlite3.ProgrammingError):
+                c.execute("SELECT 1")
+    finally:
+        go_on.set()
+        for t in threads:
+            t.join()
+
+
+def test_a_thread_that_ends_lets_go_of_its_reading_connection(tmp_path):
+    index = db.Index(str(tmp_path / "musikata.db"))
+    opened = []
+    for _ in range(3):
+        t = threading.Thread(target=lambda: opened.append(index.read()))
+        t.start()
+        t.join()
+    for c in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            c.execute("SELECT 1")
+    index.close()
+
+
 def test_an_index_of_slice_2_gains_albums_and_artists_and_its_songs_are_read_again(tmp_path):
     """Version 2 (R2.5, R2.13): albums and artists are worked out from the tags by the scan, so
     the migration marks every song changed and the next scan reads them all."""

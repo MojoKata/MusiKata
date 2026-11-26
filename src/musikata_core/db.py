@@ -169,8 +169,27 @@ class NewerIndexError(Exception):
     """An index a newer MusiKata made."""
 
 
+class _Reading:
+    """A thread's reading connection, held in the thread's own storage: when the thread ends (or
+    the index closes) the connection is closed and the index lets go of it."""
+
+    def __init__(
+        self, c: sqlite3.Connection, held: dict[int, sqlite3.Connection], lock: threading.RLock
+    ) -> None:
+        self.c, self._held, self._lock = c, held, lock
+        with lock:
+            held[id(self)] = c
+
+    def __del__(self) -> None:
+        with self._lock:
+            self._held.pop(id(self), None)
+        self.c.close()
+
+
 class Index:
-    """One root's musikata.db: its writer thread and a reading connection per thread."""
+    """One root's musikata.db: its writer thread and a reading connection per thread, each closed
+    when its thread ends or the index closes, whichever comes first (QML's image threads read
+    through it, covers.py, and outlive no index)."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -179,6 +198,8 @@ class Index:
         ]
         self._jobs = queue.Queue()
         self._local = threading.local()
+        self._reading: dict[int, sqlite3.Connection] = {}  # each thread's, by its holder
+        self._reading_lock = threading.RLock()  # a holder may go (__del__) while it is held
         writer = connect(path)
         migrate(writer)
         self._thread = threading.Thread(
@@ -211,16 +232,21 @@ class Index:
 
     def read(self) -> sqlite3.Connection:
         """This thread's reading connection."""
-        c: sqlite3.Connection | None = getattr(self._local, "c", None)
-        if c is None:
-            c = connect(self.path)
-            self._local.c = c
-        return c
+        held: _Reading | None = getattr(self._local, "reading", None)
+        if held is None:
+            held = self._local.reading = _Reading(
+                connect(self.path), self._reading, self._reading_lock
+            )
+        return held.c
 
     def close(self) -> None:
+        """Ends the writer thread, after the writes asked for, and closes every thread's reading
+        connection."""
         self._jobs.put(None)
         self._thread.join()
-        c = getattr(self._local, "c", None)
-        if c is not None:
+        self._local.reading = None
+        with self._reading_lock:
+            reading = list(self._reading.values())
+            self._reading.clear()
+        for c in reading:
             c.close()
-            self._local.c = None
