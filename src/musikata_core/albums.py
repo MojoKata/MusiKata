@@ -5,8 +5,8 @@ by the scan, in the same transaction as the songs it touches (A2.2).
   without an album artist uses its artist (R2.5.2).
 - A **compilation** is an album whose songs have different artists and the compilation flag, or
   whose album artist is "Various Artists". Songs flagged as a compilation that name no album
-  artist are grouped by their title alone and listed under "Various Artists", so a compilation is
-  listed once (R2.5.3).
+  artist are grouped by their title and folder, as they have no album artist to match (R2.5.2),
+  and listed under "Various Artists", so a compilation is listed once (R2.5.3).
 - An **artist** is anyone named as a song's artist or an album's artist; names that differ only in
   case are one artist, shown in their most common spelling (R2.5.4).
 
@@ -24,21 +24,26 @@ from dataclasses import dataclass
 from . import art, sortnames
 
 VARIOUS = "Various Artists"  # a compilation's album artist when its songs name none (R2.5.3)
-FLAGGED = "\x01"  # the album-artist part of the identity of such a compilation
+FLAGGED = "\x01"  # before the folder, the album-artist part of the identity of such a compilation
 
 
 def album_identity(
-    album: str | None, albumartist: str | None, artist: str | None, compilation: bool
+    album: str | None,
+    albumartist: str | None,
+    artist: str | None,
+    compilation: bool,
+    folder: str,
 ) -> str | None:
-    """Which album a song is on (R2.5.2, R2.5.3): its album artist (or else its artist) and album
-    title, case aside; None for a song with no album title."""
+    """Which album a song in `folder` is on (R2.5.2, R2.5.3): its album artist (or else its
+    artist) and album title, case aside, or for a song flagged as a compilation that names no
+    album artist, its folder and album title; None for a song with no album title."""
     title = (album or "").strip()
     if not title:
         return None
     if (albumartist or "").strip():
         who = (albumartist or "").strip().casefold()
     elif compilation:
-        who = FLAGGED
+        who = FLAGGED + folder
     else:
         who = (artist or "").strip().casefold()
     return f"{who}\0{title.casefold()}"
@@ -221,12 +226,12 @@ def place(c: sqlite3.Connection, song_id: int, touched: Touched) -> None:
     `touched`."""
     r = c.execute(
         "SELECT album, albumartist, artist, compilation, albumartistsort, artistsort, albumsort,"
-        " album_id, artist_id FROM song WHERE id = ?",
+        " album_id, artist_id, path FROM song WHERE id = ?",
         (song_id,),
     ).fetchone()
-    album, albumartist, artist, compilation, aasort, asort, albumsort, old_album, old_artist = r
+    album, albumartist, artist, compilation, aasort, asort, albumsort, old_album, old_artist = r[:9]
     touched.add(old_album, old_artist)
-    a_identity = album_identity(album, albumartist, artist, bool(compilation))
+    a_identity = album_identity(album, albumartist, artist, bool(compilation), folder_of(r[9]))
     album_id = _get_or_add(c, "album", a_identity) if a_identity else None
     who = artist_identity(artist)
     artist_id = _get_or_add(c, "artist", who) if who else None

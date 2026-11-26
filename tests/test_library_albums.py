@@ -48,15 +48,15 @@ def song(path, **kw):
 
 
 def test_an_album_is_its_album_artist_or_else_artist_and_title_case_aside():
-    assert albums.album_identity("Glass Harbor", "Lumen Drift", "Someone", False) == (
+    assert albums.album_identity("Glass Harbor", "Lumen Drift", "Someone", False, "") == (
         "lumen drift\0glass harbor"
     )
-    assert albums.album_identity("glass harbor ", None, "LUMEN DRIFT", False) == (
+    assert albums.album_identity("glass harbor ", None, "LUMEN DRIFT", False, "X") == (
         "lumen drift\0glass harbor"
     )
-    assert albums.album_identity("Hits", "", "Zed", True) == "\x01\0hits"
-    assert albums.album_identity("", "A", "B", False) is None
-    assert albums.album_identity(None, "A", "B", False) is None
+    assert albums.album_identity("Hits", "", "Zed", True, "Hits/CD") == "\x01Hits/CD\0hits"
+    assert albums.album_identity("", "A", "B", False, "") is None
+    assert albums.album_identity(None, "A", "B", False, "") is None
     assert albums.artist_identity(" Lumen Drift ") == "lumen drift"
     assert albums.artist_identity("  ") is None and albums.artist_identity(None) is None
 
@@ -168,6 +168,20 @@ def test_a_compilation_is_listed_once_under_its_album_artist(index):
                                  ("Various Artists", "Night Ferry", 3, 1)]  # fmt: skip
     various = rows(index, "SELECT albums, songs FROM artist WHERE name = 'Various Artists'")
     assert various == [(2, 5)]
+
+
+def test_compilations_of_one_title_naming_no_album_artist_are_one_album_per_folder(index):
+    """R2.5.2: songs of one title in different folders are one album only when their album artist
+    matches, and flagged songs that name none have none to match (R2.5.3)."""
+    fill(index, [
+        {"path": f"{folder}/{n}.ogg", "artist": a, "album": "Hits", "compilation": True}
+        for folder in ("Hits 1999", "Hits 2004")
+        for n, a in enumerate(("Amber Orbit", "Cinder Fern"))
+    ])  # fmt: skip
+    assert album_rows(index) == [("Various Artists", "Hits", 2, 1),
+                                 ("Various Artists", "Hits", 2, 1)]  # fmt: skip
+    assert rows(index, "SELECT folder FROM album ORDER BY folder") == [("Hits 1999",),
+                                                                       ("Hits 2004",)]  # fmt: skip
 
 
 def test_artists_named_in_another_case_are_one_shown_as_most_songs_name_them(index):

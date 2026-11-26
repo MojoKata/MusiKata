@@ -61,7 +61,7 @@ A table row is traced whole, its cells as written.
 | R2.5.1 | Its identity in the database is its path under the root | test_a_scan_finds_a_change_a_move_by_hash_a_removal_and_an_unreadable_file |
 | R2.5.2 | An album is the songs that share an album artist and an album title | test_songs_sharing_an_album_artist_and_title_are_one_album_wherever_they_are, test_an_albums_row_summarizes_its_songs |
 | R2.5.2 | A song without an album artist uses its artist | test_an_album_is_its_album_artist_or_else_artist_and_title_case_aside, test_songs_sharing_an_album_artist_and_title_are_one_album_wherever_they_are |
-| R2.5.2 | Songs with the same album title in different folders | test_songs_sharing_an_album_artist_and_title_are_one_album_wherever_they_are |
+| R2.5.2 | Songs with the same album title in different folders | test_songs_sharing_an_album_artist_and_title_are_one_album_wherever_they_are, test_compilations_of_one_title_naming_no_album_artist_are_one_album_per_folder |
 | R2.5.3 | A compilation is an album whose songs have different artists | test_a_compilation_is_flagged_songs_of_several_artists_or_various_artists, test_vorbis_keys_in_any_case_repeated_and_their_older_names, test_id3_frames_with_v23_dates_txxx_replaygain_and_comments, test_mp4_atoms_that_are_not_lists_compilation_gapless_and_tempo |
 | R2.5.3 | It is listed once, under its album artist | test_a_compilation_is_listed_once_under_its_album_artist |
 | R2.5.4 | An artist is anyone named as a song's artist or album artist | test_artists_named_in_another_case_are_one_shown_as_most_songs_name_them, test_artists_by_sort_name_with_their_counts_and_mosaic |
