@@ -4,7 +4,7 @@ the scan on a thread of its own, its progress and end reaching QML's thread as s
 import functools
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import BrokenExecutor, ThreadPoolExecutor
 
 import pytest
 from fakes import FakeClock, fill, wav
@@ -441,11 +441,8 @@ class Held:
     def __init__(self, gate):
         self._gate, self._pool = gate, ThreadPoolExecutor(1)
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self._pool.shutdown()
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        self._pool.shutdown(wait)
 
     def map(self, fn, *args):
         assert self._gate.wait(10)
@@ -555,11 +552,8 @@ class Meddling:
     def __init__(self, path):
         self._path, self._pool = path, ThreadPoolExecutor(1)
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self._pool.shutdown()
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        self._pool.shutdown(wait)
 
     def map(self, fn, *args):
         if self._path is not None:
@@ -584,6 +578,59 @@ def test_a_change_made_while_the_first_scan_goes_on_is_rescanned_after_it(
     qtbot.waitUntil(lambda: lib.property("songs").rowCount() == 3, timeout=5000)
     lib.wait()
     assert scopes == [None, {"A"}]
+    lib.close()
+
+
+def test_the_worker_processes_start_once_when_first_needed_and_end_with_the_library(
+    index, music, tmp_path, qtbot
+):
+    """A1.3: the worker processes are started when first needed and end with MusiKata, so a
+    watched rescan doesn't start its own (spawning them costs up to a second)."""
+    clock, made = FakeClock(), []
+
+    def pool():
+        made.append(ThreadPoolExecutor(1))
+        return made[-1]
+
+    lib = bridges.Library(str(music), index, str(tmp_path), pool, clock=clock, watching=True)
+    scanned(lib, qtbot)
+    first = lib.last
+    wav(music / "A" / "3.wav", 3)
+    report(lib, clock, "A")
+    qtbot.waitUntil(lambda: lib.last is not first, timeout=10_000)
+    lib.wait()
+    assert lib.last.added == 1 and len(made) == 1
+    lib.close()
+    with pytest.raises(RuntimeError):
+        made[0].submit(print)
+
+
+class Broken:
+    """Worker processes one of which died: every job fails."""
+
+    down = False
+
+    def map(self, fn, *args):
+        raise BrokenExecutor("a worker process died")
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        self.down = True
+
+
+def test_worker_processes_broken_by_one_that_died_are_started_anew_for_the_next_scan(
+    index, music, tmp_path, qtbot
+):
+    made = []
+
+    def pool():
+        made.append(Broken() if not made else ThreadPoolExecutor(1))
+        return made[-1]
+
+    lib = bridges.Library(str(music), index, str(tmp_path), pool)
+    scanned(lib, qtbot)
+    assert isinstance(lib.last, BrokenExecutor) and made[0].down
+    scanned(lib, qtbot)
+    assert lib.last.added == 2 and len(made) == 2
     lib.close()
 
 

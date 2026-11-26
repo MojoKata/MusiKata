@@ -117,7 +117,8 @@ class Shell:
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
-        playback thread, the watcher and the scan's thread, and the index."""
+        playback thread, the watcher, the scan's thread and the worker processes, and the
+        index."""
         self.window.close()
         Shiboken.delete(self.engine)
         self.player.close()

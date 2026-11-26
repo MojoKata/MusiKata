@@ -17,7 +17,7 @@ import os
 import sqlite3
 import threading
 from collections.abc import Callable
-from concurrent.futures import Executor
+from concurrent.futures import BrokenExecutor, Executor
 
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
@@ -398,7 +398,8 @@ class Library(QObject):
     that can't be reached are the same for their own songs. Songs a scan found gone, more than a
     quarter of the library, wait on the question of R2.10.1. `given`: the root is for this run
     only (R2.1.2), and the window's title names it. Choose another folder… says which with
-    `rootChosen`, for app.Session to open it."""
+    `rootChosen`, for app.Session to open it. `pool` makes the worker processes (A1.3), once,
+    when a scan first needs them; they end with `close`, or are made anew when one has died."""
 
     changed = Signal()  # the card's line, the counts, the genre chips, the empty texts
     scanningChanged = Signal()
@@ -426,6 +427,7 @@ class Library(QObject):
     ) -> None:
         super().__init__(parent)
         self._root, self._index, self._home, self._pool = root, index, home, pool
+        self._workers: Executor | None = None  # the worker processes, once a scan needs them
         self._clock = clock if clock is not None else SystemClock()
         self._watching = watching
         self._watcher: watch.Watcher | None = None
@@ -710,20 +712,25 @@ class Library(QObject):
     ) -> None:
         result: scanner.Result | BaseException
         try:
-            with self._pool() as pool:
-                result = scanner.scan(
-                    self._root,
-                    self._index,
-                    pool,
-                    progress=self._progress.emit if scope is None else None,
-                    scope=scope,
-                    expected=expected,
-                    copied=copied,
-                    keep=keep,
-                    reached=self._reached.emit if self._watching else None,
-                )
+            if self._workers is None:  # started when first needed, kept for the run (A1.3)
+                self._workers = self._pool()
+            result = scanner.scan(
+                self._root,
+                self._index,
+                self._workers,
+                progress=self._progress.emit if scope is None else None,
+                scope=scope,
+                expected=expected,
+                copied=copied,
+                keep=keep,
+                reached=self._reached.emit if self._watching else None,
+            )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
+            if isinstance(e, BrokenExecutor) and self._workers is not None:
+                # a worker process died: the next scan starts them anew
+                self._workers.shutdown(wait=False)
+                self._workers = None
             result = e
         self.last = result
         self._finished.emit((scope is None, result))
@@ -969,12 +976,16 @@ class Library(QObject):
         self._searcher.wait()
 
     def close(self) -> None:
-        """Stops watching and waits for the threads: for closing. No scan starts after."""
+        """Stops watching, waits for the threads and ends the worker processes: for closing. No
+        scan starts after."""
         self._closed = True
         self._presence.close()
         if self._watcher is not None:
             self._watcher.close()
         self.wait()
+        if self._workers is not None:
+            self._workers.shutdown()
+            self._workers = None
 
     # ---------- what QML reads ----------
 
