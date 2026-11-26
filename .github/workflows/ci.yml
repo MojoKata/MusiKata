@@ -46,10 +46,12 @@ jobs:
         run: |
           mkdir -p build
           py=$(sh scripts/python-standalone.sh)
+          # mypy reads the app's imports (PySide6, NumPy) from the packages tier 1 runs on
+          . scripts/lib-tier1.sh && tier1_setup "$PWD"
           {
             "$py" -m ruff format --check . &&
             "$py" -m ruff check . &&
-            "$py" -m mypy &&
+            PYTHONPATH="$SITE" "$py" -m mypy &&
             python3 scripts/doccheck.py --quiet &&
             git ls-files -z | xargs -0 sh -c 'for f; do [ -f "$f" ] && printf "%s\0" "$f"; done' sh |
               xargs -0 python3 scripts/public_text.py check
