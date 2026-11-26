@@ -50,6 +50,20 @@ def test_links_are_followed_and_one_leading_back_is_skipped_and_logged(tmp_path,
     assert "leads back" in caplog.text
 
 
+def test_the_walk_notes_each_folders_images_for_its_albums_covers(tmp_path):
+    r = str(tmp_path)
+    for p in ("a/1.mp3", "a/cover.jpg", "a/Back.PNG", "a/.hidden.jpg", "a/notes.txt", "b/2.flac",
+              "c/folder.webp", "top.jpg"):  # fmt: skip
+        _touch(os.path.join(r, p))
+    images = {}
+    found = [s.path for s in scanner.walk(r, images=images)]
+    assert found == ["a/1.mp3", "b/2.flac"]
+    assert {k: sorted(i.name for i in v) for k, v in images.items()} == {
+        "a": ["Back.PNG", "cover.jpg"], "c": ["folder.webp"], "": ["top.jpg"]
+    }  # fmt: skip
+    assert images["a"][0].size == 1
+
+
 def test_the_plan_reads_only_what_changed_or_is_new_and_lists_what_went():
     seen = [scanner.Seen("a.mp3", 1, 1), scanner.Seen("b.mp3", 2, 2), scanner.Seen("c.mp3", 3, 3)]
     indexed = {"a.mp3": (1, 1), "b.mp3": (2, 9), "gone.mp3": (4, 4)}
@@ -139,6 +153,8 @@ def test_a_scan_fills_the_index_and_a_second_reads_nothing(audio, tmp_path):
         first = scanner.scan(music, index, pool, progress=lambda d, n: progress.append((d, n)))
         second = scanner.scan(music, index, pool)
     assert (first.added, first.unreadable) == (4, 0) and progress == [(4, 4)]
+    album = index.read().execute("SELECT artist, title, songs, genre FROM album").fetchall()
+    assert album == [("Lumen Drift", "Glass Harbor", 4, "Electronic")]
     assert (second.added, second.changed, second.unchanged) == (0, 0, 4)
     genres = index.read().execute("SELECT genre FROM song_genre ORDER BY song_id, position")
     assert [g for (g,) in genres][:2] == ["Electronic", "Ambient"]
@@ -166,6 +182,8 @@ def test_a_scan_finds_a_change_a_move_by_hash_a_removal_and_an_unreadable_file(a
     assert after["Moved.mp3"][0] == before["Lumen Drift/Glass Harbor/02 - Song.mp3"][0]
     assert "Lumen Drift/Glass Harbor/04 - Song.opus" not in after
     assert after["Lumen Drift/Glass Harbor/05 - Broken.flac"][2]  # its reason (R2.8)
+    albums = index.read().execute("SELECT artist, title, songs FROM album").fetchall()
+    assert albums == [("Lumen Drift", "Glass Harbor", 3)]  # one removed; the moved one's tags stay
     index.close()
 
 

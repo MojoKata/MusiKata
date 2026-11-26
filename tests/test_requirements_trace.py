@@ -57,13 +57,24 @@ def _is_header(line: str, item: str) -> bool:
     return i + 1 < len(lines) and re.match(r"^\|[-|: ]+\|$", lines[i + 1]) is not None
 
 
-def traced(text: str) -> list[int]:
-    """The sections the trace covers: its `## N. Title` headings."""
-    return [int(n) for n in re.findall(r"^## (\d+)\. ", text, re.M)]
+def traced(text: str) -> list[str]:
+    """The sections the trace covers: its `## N. Title` headings, and `## N.M. Title` for an item
+    of a section (and the items under it) that joins before the rest of its section."""
+    return re.findall(r"^## (\d+(?:\.\d+)*)\. ", text, re.M)
 
 
-def trace_rows(text: str, number: int) -> list[tuple[str, str, list[str]]]:
-    sec = text[text.index(f"\n## {number}. ") + 1 :]
+def traced_units(key: str) -> list[tuple[str, str]]:
+    """The sentences and table rows a heading of the trace covers: a whole section's, or one
+    item's and its sub-items'."""
+    number = int(key.split(".")[0])
+    units = section_units(reqdocs.section(number), number)
+    if "." not in key:
+        return units
+    return [(rid, u) for rid, u in units if rid == f"R{key}" or rid.startswith(f"R{key}.")]
+
+
+def trace_rows(text: str, key: int | str) -> list[tuple[str, str, list[str]]]:
+    sec = text[text.index(f"\n## {key}. ") + 1 :]
     out = []
     for line in sec.split("\n")[1:]:  # after the section's own heading
         if line.startswith("## "):
@@ -95,7 +106,7 @@ def _shown_well(tok: str, tests: set[str]) -> bool:
 def test_every_sentence_of_a_traced_section_has_a_row_and_every_row_its_sentence():
     trace = _read(TRACE)
     for number in traced(trace):
-        units = section_units(reqdocs.section(number), number)
+        units = traced_units(number)
         assert units, f"the trace has ## {number}., and R{number} has no sentences"
         rows = trace_rows(trace, number)
         unmatched = [
@@ -147,6 +158,17 @@ def test_a_rows_test_names_a_test_a_check_by_hand_or_a_later_issue():
         assert _shown_well(tok, tests), tok
     for tok in ("test_missing", "tier 3: ", "later: 4", "claim"):
         assert not _shown_well(tok, tests), tok
+
+
+def test_a_heading_traces_a_whole_section_or_one_item_and_those_under_it():
+    text = "intro\n## 2.5. Songs\n| R2.5.1 | A song | statement |\n## 13. Sort\n## 2.13. X\n"
+    assert traced(text) == ["2.5", "13", "2.13"]
+    assert trace_rows(text, "2.5") == [("R2.5.1", "A song", ["statement"])]
+    item = traced_units("2.5")
+    assert item and {rid for rid, _ in item} <= {"R2.5", "R2.5.1", "R2.5.2", "R2.5.3", "R2.5.4"}
+    assert {rid for rid, _ in traced_units("2.1")} >= {"R2.1", "R2.1.1"}
+    assert not any(rid.startswith("R2.13") for rid, _ in traced_units("2.1"))
+    assert len(traced_units("2")) > len(item)
 
 
 def test_the_sections_are_read_whatever_their_names_padding():

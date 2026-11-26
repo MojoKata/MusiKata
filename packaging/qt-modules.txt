@@ -70,8 +70,9 @@ plugin platforminputcontexts/ibusplatforminputcontextplugin    linux
 # the desktop's fonts, colours and dialogs, through its portal or GTK
 plugin platformthemes/qxdgdesktopportal                 linux
 plugin platformthemes/qgtk3                             linux
-# album covers, mostly JPEG (R5); PNG is built in
+# album covers, mostly JPEG, and WebP, which R5.1 names too (R5); PNG is built in
 plugin imageformats/qjpeg
+plugin imageformats/qwebp
 
 # PySide6's own files a run needs: the package, its libraries, and Qt's ICU (Linux) and the C++
 # runtime (Windows)

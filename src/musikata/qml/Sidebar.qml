@@ -1,8 +1,9 @@
 import QtQuick
 import "."
 
-// The sidebar (R6.3): the app's icon and name, the library's views as they are built (Songs now;
-// the rest with slices 3 to 7, DEVELOP.md), and the music root's card at the bottom (R2.1.1).
+// The sidebar (R6.3): the app's icon and name, the library's views as they are built (Albums,
+// Artists and Songs; Genres, Folders and Needs attention with slices 3 to 6, DEVELOP.md), and the
+// music root's card at the bottom (R2.1.1).
 Rectangle {
     id: side
     required property var library
@@ -55,7 +56,21 @@ Rectangle {
         color: Theme.faint
         font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
     }
-    SideItem { y: 90; width: side.width; label: "Songs"; icon: "song"; active: true }
+    Repeater {
+        model: [["albums", qsTr("Albums"), "album"], ["artists", qsTr("Artists"), "artist"],
+                ["songs", qsTr("Songs"), "song"]]
+        SideItem {
+            required property int index
+            required property var modelData
+            objectName: "side-" + modelData[0]
+            y: 90 + index * 36
+            width: side.width
+            label: modelData[1]
+            icon: modelData[2]
+            active: side.library.section === modelData[0]
+            onClicked: side.library.show(modelData[0])
+        }
+    }
 
     Rectangle {
         id: card

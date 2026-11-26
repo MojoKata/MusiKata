@@ -25,6 +25,7 @@ from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 
 from .bridges import Library, Player
+from .covers import Covers
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
@@ -60,6 +61,12 @@ def options(argv: Sequence[str], env: Mapping[str, str]) -> Options:
     root = os.path.expanduser(a.root) if a.root else os.path.join(home_of(env), "Music")
     play = os.path.abspath(os.path.expanduser(a.play)) if a.play else None
     return Options(os.path.abspath(root), a.tour, a.tour_only, play)
+
+
+def cache_of(index: db.Index, env: Mapping[str, str]) -> str:
+    """Where the root's cover thumbnails are kept: its caches (R1.5), under its index's key."""
+    key = os.path.basename(os.path.dirname(index.path))
+    return os.path.join(roots.caches_dir(env), key, "covers")
 
 
 def open_index(root: str, env: Mapping[str, str], clock: Clock) -> db.Index:
@@ -102,6 +109,7 @@ def load(
     player = Player(root, playback())
     player.nowPlaying.connect(library.show_playing)
     engine = QQmlApplicationEngine()
+    engine.addImageProvider("covers", Covers(root, index.read, cache_of(index, env)))
     engine.setInitialProperties({"library": library, "player": player})
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()

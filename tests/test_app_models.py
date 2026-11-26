@@ -97,3 +97,137 @@ def test_a_reload_after_a_scan_drops_the_pages_and_tells_the_view(index, qtbot):
     with qtbot.waitSignals([m.countChanged, m.modelReset]):
         m.reload()
     assert m.count == 1 and m.row(0)["title"] == os.path.splitext("a.flac")[0]
+
+
+# ---------- Albums and Artists ----------
+
+
+def roles(model, n):
+    names = {bytes(v).decode(): k for k, v in model.roleNames().items()}
+    return {name: model.data(model.index(n, 0), role) for name, role in names.items()}
+
+
+def test_lengths_and_lines_as_the_pages_give_them():
+    assert [models.length_text(s) for s in (None, 0, 61, 44 * 60 + 20, 72 * 60)] == [
+        "1 min", "1 min", "1 min", "44 min", "1 h 12 min"
+    ]  # fmt: skip
+    assert models.artist_line(3, 41) == "3 albums · 41 songs"
+    assert models.artist_line(0, 1) == "1 song" and models.artist_line(1, 1) == "1 album · 1 song"
+    assert models.cover_url(None) == "" and models.cover_url("ab") == "image://covers/ab"
+
+
+def test_a_mosaic_lays_out_one_to_four_covers_as_r5_8s_table():
+    def boxes(n):
+        return [(m["x"], m["y"], m["w"], m["h"]) for m in models.mosaic(n)]
+
+    assert boxes(0) == [] and boxes(1) == [(0, 0, 1, 1)]
+    assert boxes(2) == [(0, 0, 0.5, 1), (0.5, 0, 0.5, 1)]
+    assert boxes(3) == [(0, 0, 0.5, 1), (0.5, 0, 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)]
+    assert boxes(4) == boxes(9) and len(boxes(4)) == 4
+    assert models.tiles(["a", "b"]) == [
+        {"source": "image://covers/a", "x": 0, "y": 0, "w": 0.5, "h": 1},
+        {"source": "image://covers/b", "x": 0.5, "y": 0, "w": 0.5, "h": 1},
+    ]
+
+
+LIBRARY = [
+    {"path": "PL/1.mp3", "artist": "The Paper Lanterns", "album": "Northbound Static",
+     "year": 2021, "genres": ("Indie Rock",), "length": 200.0},
+    {"path": "MO/1.mp3", "artist": "Mara Okafor", "album": "Salt & Ember", "year": 2018,
+     "genres": ("Soul",)},
+    {"path": "MO/2.mp3", "artist": "Mara Okafor", "album": "Kindling", "genres": ("Soul",)},
+    {"path": "MO/3.mp3", "artist": "Mara Okafor", "album": "Kindling"},
+    {"path": "V/1.ogg", "artist": "Amber Orbit", "album": "Night Ferry", "compilation": True},
+    {"path": "V/2.ogg", "artist": "Iron Arc", "album": "Night Ferry", "compilation": True},
+]  # fmt: skip
+
+
+def test_albums_by_album_artist_then_title_by_their_sort_names(index):
+    fill(index, LIBRARY)
+    m = models.AlbumsModel(index.read)
+    m.reload()
+    assert [m.row(i)["title"] for i in range(m.count)] == [
+        "Kindling", "Salt & Ember", "Northbound Static", "Night Ferry"
+    ]  # fmt: skip
+    first = roles(m, 2)
+    assert first == {"albumId": first["albumId"], "title": "Northbound Static",
+                     "artist": "The Paper Lanterns", "year": "2021",
+                     "line": "The Paper Lanterns · 2021", "genre": "Indie Rock", "songs": "1 song",
+                     "time": "3:20", "cover": "", "playing": False}  # fmt: skip
+    assert roles(m, 0)["line"] == "Mara Okafor" and roles(m, 0)["songs"] == "2 songs"
+    assert m.data(m.index(0, 0), 0) is None and m.data(m.index(9, 0), m._role("title")) is None
+
+
+def test_albums_of_one_genre_and_of_one_artist_by_year(index):
+    fill(index, LIBRARY)
+    m = models.AlbumsModel(index.read)
+    m.filter_genre("Soul")
+    assert [m.row(i)["title"] for i in range(m.count)] == ["Kindling", "Salt & Ember"]
+    mara = index.read().execute("SELECT id FROM artist WHERE name = 'Mara Okafor'").fetchone()[0]
+    m.for_artist(mara)
+    assert [m.row(i)["title"] for i in range(m.count)] == [
+        "Salt & Ember",
+        "Kindling",
+    ]  # no year last
+
+
+def test_the_album_playing_is_marked(index, qtbot):
+    fill(index, LIBRARY)
+    m = models.AlbumsModel(index.read)
+    m.reload()
+    target = m.row(1)["albumId"]
+    with qtbot.waitSignal(m.dataChanged):
+        m.set_playing(target)
+    m.set_playing(target)  # again: nothing
+    assert [roles(m, i)["playing"] for i in range(m.count)] == [False, True, False, False]
+
+
+def test_artists_by_sort_name_with_their_counts_and_mosaic(index):
+    fill(index, LIBRARY)
+
+    def cover(c):
+        c.execute("UPDATE album SET thumb = 'k' WHERE title = 'Kindling'")
+        c.execute("UPDATE album SET thumb = 's' WHERE title = 'Salt & Ember'")
+        c.execute("UPDATE album SET thumb = 'n' WHERE title = 'Night Ferry'")
+
+    index.write(cover).result()
+    m = models.ArtistsModel(index.read)
+    m.reload()
+    got = [(r["name"], r["line"], [t["source"][-1] for t in r["tiles"]])
+           for r in (m.row(i) for i in range(m.count))]  # fmt: skip
+    assert got == [
+        ("Amber Orbit", "1 song", ["n"]),  # on a compilation only: its cover
+        ("Iron Arc", "1 song", ["n"]),
+        ("Mara Okafor", "2 albums · 3 songs", ["k", "s"]),  # the album with the most songs first
+        ("The Paper Lanterns", "1 album · 1 song", []),
+        ("Various Artists", "1 album · 2 songs", ["n"]),
+    ]
+    assert isinstance(roles(m, 0)["artistId"], int)
+
+
+def test_a_list_of_songs_picks_and_orders_what_its_page_asks_for(index):
+    fill(index, [{"path": "b.flac", "album": "X", "track": 2}, {"path": "a.flac", "album": "X"},
+                 {"path": "c.flac", "album": "X", "track": 1},
+                 {"path": "d.flac", "album": "Y"}])  # fmt: skip
+    m = models.SongsModel(index.read, "album", where="album = ?", params=("X",))
+    m.reload()
+    assert [m.row(i)["path"] for i in range(m.count)] == ["c.flac", "b.flac", "a.flac"]
+    m.select("album = ?", ("Y",))
+    assert m.count == 1 and m.row(0)["path"] == "d.flac"
+
+
+def test_the_songs_list_sorts_artists_by_their_sort_names(index):
+    """R2.13 in the Songs list: the same keys Albums and Artists sort by."""
+    fill(index, [
+        {"path": "1.flac", "title": "Under T", "artist": "The Zebras"},
+        {"path": "2.flac", "title": "Under B", "artist": "The Beatles"},
+        {"path": "3.flac", "title": "Under B too", "artist": "David Bowie",
+         "artistsort": "Bowie, David"},
+        {"path": "4.flac", "title": "Disc 10", "artist": "Disc 10"},
+        {"path": "5.flac", "title": "Disc 9", "artist": "disc 9"},
+    ])  # fmt: skip
+    m = models.SongsModel(index.read)
+    m.reload()
+    assert [m.row(i)["title"] for i in range(m.count)] == [
+        "Under B", "Under B too", "Disc 9", "Disc 10", "Under T"
+    ]  # fmt: skip

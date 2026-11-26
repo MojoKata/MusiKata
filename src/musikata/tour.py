@@ -3,8 +3,9 @@ demo library and saves DIR/<screen>.png, offscreen; every screen's visible text 
 the box it is drawn in (layout.py), at the mockups' size and at the design point (R6.2.1), and what
 runs past its box is written to DIR/layout.txt and fails the tour.
 
-Each step waits for what it needs (the scan to end, the window to take its size), never a fixed
-time (docs/process/testing.md, "Principles")."""
+Each step waits for what it needs (the scan to end, the window to take its size, the covers to
+load), never a fixed time (docs/process/testing.md, "Principles"): what loads off the GUI thread
+is polled for until nothing on the screen says it is `loading`."""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtQuick import QQuickWindow
+from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
 from .bridges import Library
@@ -25,12 +26,28 @@ SHOT = (1280, 800)
 DESIGN = (1920, 1040)
 SIZES = (SHOT, DESIGN)
 
-# (screen, what the window shows): a screen is named for its mockup (docs/mockups/README.md); one
-# that shows only part of its mockup yet says so (L03 without the Edit tags panel, which comes with
-# slice 5)
+# (screen, what the window shows, as Library.go takes it): a screen is named for its mockup
+# (docs/mockups/README.md); one that shows only part of its mockup yet says so (L03 without the
+# Edit tags panel, which comes with slice 5); one with no mockup takes the next number of its area
+# (Artists and an artist's page, R2.6, are L10 and L11)
 STEPS: list[tuple[str, dict[str, Any]]] = [
+    ("L01-albums", {"view": "albums"}),
+    ("L02-album", {"view": "album", "album": "Glass Harbor"}),
+    ("L10-artists", {"view": "artists"}),
+    ("L11-artist", {"view": "artist", "artist": "Lumen Drift"}),
     ("L03-songs", {"view": "songs"}),
 ]
+POLL = 20  # ms between looks at whether the covers have loaded
+PATIENCE = 30_000  # ms the covers may take before the shot is taken anyway, and the tour fails
+
+
+def loading(item: QQuickItem) -> bool:
+    """Whether a visible item under `item` says it is still `loading` (a cover, Cover.qml)."""
+    if not item.isVisible():
+        return False
+    if item.property("loading") is True:
+        return True
+    return any(loading(child) for child in item.childItems())
 
 
 def _quit(code: int) -> None:
@@ -58,6 +75,7 @@ class Tour(QObject):
         self._i = 0
         self._size = 0
         self._waiting: Callable[[], None] | None = None
+        self._waited = 0
 
     def start(self) -> None:
         """Shows the window at the mockups' size, then steps through once no scan runs."""
@@ -79,7 +97,7 @@ class Tour(QObject):
             self._finish()
             return
         name, step = self.steps[self._i]
-        self.win.setProperty("tourStep", step)
+        self.library.go(step)
         self._size = 0
         self._at_size()
 
@@ -104,9 +122,26 @@ class Tour(QObject):
             QTimer.singleShot(0, self._shot)
 
     def _shot(self) -> None:
+        """Renders the step once, so its views make their rows and ask for their covers, then
+        waits for the covers."""
+        self.win.grabWindow()
+        self._waited = 0
+        self._settle()
+
+    def _settle(self) -> None:
+        name = self.steps[self._i][0]
+        if loading(self.win.contentItem()):
+            if self._waited < PATIENCE:
+                self._waited += POLL
+                QTimer.singleShot(POLL, self._settle)
+                return
+            self.faults.append(f"{name}: covers still loading after {PATIENCE // 1000} s")
+        QTimer.singleShot(0, self._take)
+
+    def _take(self) -> None:
         name = self.steps[self._i][0]
         w, h = SIZES[self._size]
-        image = self.win.grabWindow()  # renders what the step set, so nothing is waited on
+        image = self.win.grabWindow()
         if SIZES[self._size] == SHOT:
             os.makedirs(self.out, exist_ok=True)
             path = os.path.join(self.out, f"{name}.png")

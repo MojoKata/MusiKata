@@ -369,6 +369,7 @@ def test_double_clicking_a_song_plays_it_and_marks_its_row(tmp_path, qtbot, null
     try:
         fill(shell.index, [{"path": "a.flac", "title": "A"}, {"path": "b.flac", "title": "B"}])
         shell.library.songs.reload()
+        shell.library.show("songs")
         shell.window.show()
         qtbot.waitExposed(shell.window)
         rows = shell.window.findChild(QQuickItem, "songs")

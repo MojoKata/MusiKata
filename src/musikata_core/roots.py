@@ -37,6 +37,20 @@ def roots_dir(env: Mapping[str, str], platform: str = sys.platform) -> str:
     return os.path.join(data, "musikata", "roots")
 
 
+def caches_dir(env: Mapping[str, str], platform: str = sys.platform) -> str:
+    """Where this computer keeps each root's caches, cover thumbnails among them (R1.5's table),
+    each root's under its index's key; MUSIKATA_DATA moves them beside the indexes."""
+    if env.get("MUSIKATA_DATA"):
+        return os.path.join(env["MUSIKATA_DATA"], "cache")
+    home = env.get("HOME") or env.get("USERPROFILE") or os.path.expanduser("~")
+    if platform.startswith("win"):
+        local = env.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+        return os.path.join(local, "MusiKata", "Cache")
+    if platform == "darwin":
+        return os.path.join(home, "Library", "Caches", "MusiKata")
+    return os.path.join(env.get("XDG_CACHE_HOME") or os.path.join(home, ".cache"), "musikata")
+
+
 def path_key(root: str) -> str:
     """The folder name of a root that holds no id of its own (R1.5.2): a hash of its path."""
     return "path-" + hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:16]

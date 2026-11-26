@@ -24,6 +24,15 @@ const STROKE = {
     plus: "M10 4V16M4 10H16",
     search: ellipse(8.8, 8.8, 5.3, 5.3) + "M12.8 12.8L16.5 16.5",
     chevDown: "M5.5 8L10 12.5L14.5 8",
+    chevLeft: "M12 5.5L7.5 10L12 14.5",
+    shuffle: "M3 6H6C11 6 10 14 15 14H17M3 14H6C11 14 10 6 15 6H17M14.5 3.5L17 6L14.5 8.5"
+        + "M14.5 11.5L17 14L14.5 16.5",
+    grid: "M3.5 3.5H9V9H3.5Z M11 3.5H16.5V9H11Z M3.5 11H9V16.5H3.5Z M11 11H16.5V16.5H11Z",
+    list: "M7 5H17M7 10H17M7 15H17M3.5 5V5.01M3.5 10V10.01M3.5 15V15.01",
+    image: "M4.5 3.5H15.5Q17.5 3.5 17.5 5.5V14.5Q17.5 16.5 15.5 16.5H4.5Q2.5 16.5 2.5 14.5V5.5"
+        + "Q2.5 3.5 4.5 3.5Z M3 14.5L8 9.5L11.5 13L13.5 11L17 14.5" + ellipse(13, 7.5, 1.4, 1.4),
+    check: "M4 10.5L8 14.5L16 5.5",
+    wave: "M3 8V12M5.8 5.5V14.5M8.6 3.5V16.5M11.4 6.5V13.5M14.2 4.5V15.5M17 7.5V12.5",
     starLine: starPoints(9),
 }
 const FILL = {
@@ -31,6 +40,8 @@ const FILL = {
     playlist: ellipse(13, 16, 1.8, 1.5),
     more: ellipse(10, 4.5, 1.6, 1.6) + ellipse(10, 10, 1.6, 1.6) + ellipse(10, 15.5, 1.6, 1.6),
     star: starPoints(9),
+    play: "M6 3.5L16.5 10L6 16.5Z",
+    pause: "M5 3.5H8.6V16.5H5Z M11.4 3.5H15V16.5H11.4Z",
 }
 function stroke(name) { return STROKE[name] || "" }
 function fill(name) { return FILL[name] || "" }

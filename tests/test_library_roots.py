@@ -26,6 +26,22 @@ def test_where_each_platform_keeps_its_indexes_and_musikata_data_moves_them():
     assert roots.roots_dir({**env, "MUSIKATA_DATA": "/d"}, "linux") == "/d/roots"
 
 
+def test_where_each_platform_keeps_its_caches_and_musikata_data_moves_them():
+    env = {"HOME": "/h"}
+    assert roots.caches_dir(env, "linux") == os.path.join("/h", ".cache", "musikata")
+    assert roots.caches_dir({**env, "XDG_CACHE_HOME": "/x"}, "linux") == os.path.join(
+        "/x", "musikata"
+    )
+    assert roots.caches_dir(env, "darwin") == os.path.join("/h", "Library", "Caches", "MusiKata")
+    assert roots.caches_dir({"USERPROFILE": "/u"}, "win32") == os.path.join(
+        "/u", "AppData", "Local", "MusiKata", "Cache"
+    )
+    assert roots.caches_dir({"LOCALAPPDATA": "/l"}, "win32") == os.path.join(
+        "/l", "MusiKata", "Cache"
+    )
+    assert roots.caches_dir({**env, "MUSIKATA_DATA": "/d"}, "linux") == os.path.join("/d", "cache")
+
+
 def test_decide_a_root_seen_at_its_path_moved_or_copied():
     assert roots.decide(None, "/m", False) == "use"
     assert roots.decide("/m", "/m", True) == "use"

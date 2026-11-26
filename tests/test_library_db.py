@@ -71,3 +71,20 @@ def test_each_thread_reads_through_a_connection_of_its_own(tmp_path):
     t.join()
     assert mine is index.read() and theirs[0] is not mine
     index.close()
+
+
+def test_an_index_of_slice_2_gains_albums_and_artists_and_its_songs_are_read_again(tmp_path):
+    """Version 2 (R2.5, R2.13): albums and artists are worked out from the tags by the scan, so
+    the migration marks every song changed and the next scan reads them all."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    db.MIGRATIONS[0](c)
+    c.execute("PRAGMA user_version = 1")
+    c.execute("INSERT INTO song (path, size, mtime_ns, album) VALUES ('a.flac', 10, 5, 'X')")
+    assert db.migrate(c) == 2
+    assert c.execute("SELECT path, size, mtime_ns, album_id FROM song").fetchall() == [
+        ("a.flac", 10, -1, None)
+    ]
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert {"album", "artist"} <= tables
+    c.close()

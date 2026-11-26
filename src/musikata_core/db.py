@@ -44,7 +44,42 @@ def _v1(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX song_genre_genre ON song_genre (genre)")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1]
+def _v2(c: sqlite3.Connection) -> None:
+    """Albums and artists (A2.1's album, R2.5) and the sort keys of R2.13 on each song. They are
+    worked out from the songs' tags by the scan (albums.py), so every song is read again by the
+    next one: its size and modification time no longer match its row."""
+    c.execute(
+        "CREATE TABLE artist (id INTEGER PRIMARY KEY, identity TEXT NOT NULL UNIQUE,"
+        " name TEXT NOT NULL, sort_key TEXT NOT NULL, albums INTEGER NOT NULL DEFAULT 0,"
+        " songs INTEGER NOT NULL DEFAULT 0)"
+    )
+    c.execute("CREATE INDEX artist_order ON artist (sort_key, id)")
+    c.execute(
+        "CREATE TABLE album (id INTEGER PRIMARY KEY, identity TEXT NOT NULL UNIQUE,"
+        " artist TEXT NOT NULL, title TEXT NOT NULL, artist_key TEXT NOT NULL,"
+        " title_key TEXT NOT NULL, artist_id INTEGER REFERENCES artist (id) ON DELETE SET NULL,"
+        " compilation INTEGER NOT NULL DEFAULT 0, year INTEGER, genre TEXT,"
+        " songs INTEGER NOT NULL DEFAULT 0, length REAL NOT NULL DEFAULT 0,"
+        " size INTEGER NOT NULL DEFAULT 0, embedded INTEGER NOT NULL DEFAULT 0,"
+        " folder TEXT NOT NULL, folder_image TEXT, folder_image_size INTEGER,"
+        " folder_image_mtime INTEGER, cover_kind TEXT, cover TEXT, thumb TEXT)"
+    )
+    c.execute("CREATE INDEX album_order ON album (artist_key, title_key, id)")
+    c.execute("CREATE INDEX album_artist ON album (artist_id)")
+    c.execute("CREATE INDEX album_thumb ON album (thumb)")
+    for column in (
+        "album_id INTEGER REFERENCES album (id) ON DELETE SET NULL",
+        "artist_id INTEGER REFERENCES artist (id) ON DELETE SET NULL",
+        "artist_key TEXT",
+        "album_key TEXT",
+    ):
+        c.execute(f"ALTER TABLE song ADD COLUMN {column}")
+    c.execute("CREATE INDEX song_album ON song (album_id, disc, track, path)")
+    c.execute("CREATE INDEX song_artist ON song (artist_id)")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2]
 
 
 def connect(path: str) -> sqlite3.Connection:

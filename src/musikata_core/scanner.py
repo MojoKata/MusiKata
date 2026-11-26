@@ -15,7 +15,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import BinaryIO, Literal
 
-from . import db
+from . import albums, art, db
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags
 from .tags import read as read_tags
 
@@ -74,11 +74,14 @@ def _hidden(entry: os.DirEntry[str]) -> bool:
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_HIDDEN", 0))
 
 
-def walk(root: str, skip: Iterable[str] = ()) -> Iterator[Seen]:
+def walk(
+    root: str, skip: Iterable[str] = (), images: dict[str, list[art.Image]] | None = None
+) -> Iterator[Seen]:
     """Every audio file under root (R2.2's kinds), skipping hidden files and folders, folders
     holding .musikataignore, the folders the settings skip (paths under the root), and the root's
     .musikata (R2.3.1). Links are followed like folders; one leading back to a folder already
-    walked is skipped, and the log says so (R2.3.2)."""
+    walked is skipped, and the log says so (R2.3.2). `images`, when given, gets each folder's
+    images (R5.1's kinds), for its albums' covers."""
     skipped = {s.strip("/") for s in skip}
     walked: set[str] = set()
 
@@ -105,6 +108,11 @@ def walk(root: str, skip: Iterable[str] = ()) -> Iterator[Seen]:
                 elif os.path.splitext(entry.name)[1].lower() in EXTENSIONS:
                     st = entry.stat()
                     yield Seen(path, st.st_size, st.st_mtime_ns)
+                elif images is not None and art.is_image(entry.name):
+                    st = entry.stat()
+                    images.setdefault(rel, []).append(
+                        art.Image(entry.name, st.st_size, st.st_mtime_ns)
+                    )
             except OSError as err:
                 log.warning("couldn't read %s: %s", path, err)
 
@@ -264,11 +272,18 @@ def _values(r: Read) -> dict[str, object]:
     return row
 
 
-def write_batch(c: sqlite3.Connection, batch: list[Read], moves: dict[str, str]) -> Result:
+def write_batch(
+    c: sqlite3.Connection,
+    batch: list[Read],
+    moves: dict[str, str],
+    images: Mapping[str, list[art.Image]] | None = None,
+) -> Result:
     """One batch into the index, in the writer's transaction: each file's row added or replaced,
     or, for a new path whose audio hash a gone row has (`moves`: hash -> old path), that row moved
-    here (A2.2, step 4)."""
+    here (A2.2, step 4); and the albums and artists those songs left or joined summarized again
+    (R2.5), with `images`, each folder's images, for their covers."""
     res = Result()
+    touched = albums.Touched()
     for r in batch:
         values = _values(r)
         old = moves.pop(r.audio_hash, None) if r.audio_hash else None
@@ -292,6 +307,8 @@ def write_batch(c: sqlite3.Connection, batch: list[Read], moves: dict[str, str])
         c.execute("DELETE FROM song_genre WHERE song_id = ?", (song_id,))
         for n, g in enumerate(r.tags.genres if r.tags else ()):
             c.execute("INSERT INTO song_genre VALUES (?, ?, ?)", (song_id, n, g))
+        albums.place(c, song_id, touched)
+    albums.refresh(c, touched, images)
     return res
 
 
@@ -307,7 +324,8 @@ def scan(
     c = index.read()
     indexed = {p: (s, m) for p, s, m in c.execute("SELECT path, size, mtime_ns FROM song")}
     hashes = dict(c.execute("SELECT path, audio_hash FROM song WHERE audio_hash IS NOT NULL"))
-    work = plan(walk(root, skip), indexed)
+    images: dict[str, list[art.Image]] = {}
+    work = plan(walk(root, skip, images), indexed)
     moves = {hashes[p]: p for p in work.gone if p in hashes}
     total = Result(
         unchanged=len(indexed) - len(work.gone) - sum(s.path in indexed for s in work.read)
@@ -318,7 +336,7 @@ def scan(
         )
 
         def write(c: sqlite3.Connection, b: list[Read] = batch) -> Result:
-            return write_batch(c, b, moves)
+            return write_batch(c, b, moves, images)
 
         res = index.write(write).result()
         for k in ("added", "changed", "moved", "unreadable"):
@@ -329,7 +347,11 @@ def scan(
     remove = [p for p in work.gone if p not in moved_from]
 
     def delete(c: sqlite3.Connection) -> int:
+        touched = albums.Touched()
+        albums.forget(c, remove, touched)
         c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
+        albums.refresh(c, touched, images)
+        albums.refresh_folders(c, images)  # covers added or changed beside unchanged songs
         return len(remove)
 
     total.removed = index.write(delete).result()

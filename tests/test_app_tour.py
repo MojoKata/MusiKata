@@ -38,7 +38,7 @@ def test_the_tour_saves_each_screen_and_passes_when_nothing_runs_past_its_box(
     shell.library.songs.reload()
     t, code = run(shell, tmp_path / "tour", qtbot)
     assert code == 0 and t.faults == []
-    assert [os.path.basename(p) for p in t.saved] == ["L03-songs.png"]
+    assert [os.path.basename(p) for p in t.saved] == [f"{n}.png" for n, _ in tour.STEPS]
     assert os.path.getsize(t.saved[0]) > 1000
     assert (tmp_path / "tour" / "layout.txt").read_text() == ""
     assert (shell.window.width(), shell.window.height()) == tour.DESIGN
@@ -70,3 +70,25 @@ def test_a_failed_scan_fails_the_tour(shell, tmp_path, qtbot):
 def test_only_names_screens_that_exist(shell, tmp_path):
     with pytest.raises(ValueError, match="no such screen: Z99"):
         tour.Tour(shell.window, shell.library, str(tmp_path), "L03-songs,Z99")
+
+
+def test_a_screen_whose_covers_never_load_is_taken_anyway_and_fails(
+    shell, tmp_path, qtbot, monkeypatch
+):
+    monkeypatch.setattr(tour, "loading", lambda item: True)
+    monkeypatch.setattr(tour, "PATIENCE", 60)
+    t, code = run(shell, tmp_path / "tour", qtbot, only="L01-albums")
+    assert code == 1 and t.faults == [
+        "L01-albums: covers still loading after 0 s", "L01-albums: covers still loading after 0 s"
+    ]  # fmt: skip
+    assert [os.path.basename(p) for p in t.saved] == ["L01-albums.png"]
+
+
+def test_what_is_loading_is_what_a_visible_item_says(shell):
+    root = shell.window.contentItem()
+    assert tour.loading(root) is False
+    root.setProperty("loading", True)
+    assert tour.loading(root) is True
+    root.setVisible(False)
+    assert tour.loading(root) is False
+    root.setVisible(True)

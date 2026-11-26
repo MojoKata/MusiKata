@@ -3,9 +3,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import logging
 import os
 import struct
 from collections import defaultdict
+from typing import Any
 
 import mutagen
 import mutagen.aiff
@@ -18,7 +22,9 @@ import mutagen.oggvorbis
 import mutagen.wave
 
 from . import parse
-from .fields import AudioInfo, Tags
+from .fields import AudioInfo, Picture, Tags
+
+log = logging.getLogger(__name__)
 
 # the file kinds of R2.2, by extension
 EXTENSIONS = {
@@ -31,9 +37,8 @@ class TagReadError(Exception):
     """A file MusiKata couldn't read: Needs attention lists it with this reason (R2.8)."""
 
 
-def read(path: str) -> tuple[Tags, AudioInfo]:
-    """A song's tags and what its audio is. Raises TagReadError for a file that isn't one of
-    R2.2's kinds or can't be read, saying why."""
+def _open(path: str) -> tuple[str, mutagen.FileType]:
+    """The file's kind (R2.2) and Mutagen's view of it; TagReadError when it can't be opened."""
     ext = os.path.splitext(path)[1].lower()
     if ext not in EXTENSIONS:
         raise TagReadError(f"not a kind MusiKata plays ({ext or 'no extension'})")
@@ -50,6 +55,13 @@ def read(path: str) -> tuple[Tags, AudioInfo]:
     if kind == "m4a":
         codec = str(getattr(f.info, "codec", ""))
         kind = "alac" if codec.startswith("alac") else "aac"
+    return kind, f
+
+
+def read(path: str) -> tuple[Tags, AudioInfo]:
+    """A song's tags and what its audio is. Raises TagReadError for a file that isn't one of
+    R2.2's kinds or can't be read, saying why."""
+    kind, f = _open(path)
     if kind in ("mp3", "wav", "aiff"):
         tags = _id3(f.tags)
         if kind == "wav":
@@ -66,6 +78,44 @@ def read(path: str) -> tuple[Tags, AudioInfo]:
         sample_rate=int(getattr(info, "sample_rate", 0) or 0),
         channels=int(getattr(info, "channels", 0) or 0),
     )
+
+
+def pictures(path: str) -> list[Picture]:
+    """The pictures embedded in a song, in the order its file holds them (R5.1): ID3's APIC, FLAC's
+    picture blocks, Vorbis comments' METADATA_BLOCK_PICTURE and the older COVERART, MP4's covr.
+    A picture that can't be decoded is skipped and logged. Raises TagReadError for a file it
+    can't open."""
+    kind, f = _open(path)
+    tags = f.tags
+    if kind in ("mp3", "wav", "aiff"):
+        apic: list[Any] = tags.getall("APIC") if tags is not None else []
+        return [Picture(int(p.type), str(p.mime), bytes(p.data)) for p in apic]
+    if kind in ("aac", "alac"):
+        formats: dict[object, str] = {
+            mutagen.mp4.MP4Cover.FORMAT_JPEG: "image/jpeg",
+            mutagen.mp4.MP4Cover.FORMAT_PNG: "image/png",
+        }
+        covr: list[Any] = (tags.get("covr") if tags is not None else None) or []
+        return [
+            Picture(None, formats.get(getattr(c, "imageformat", None), ""), bytes(c)) for c in covr
+        ]
+    out = [Picture(int(p.type), str(p.mime), bytes(p.data)) for p in getattr(f, "pictures", [])]
+    key: str
+    value: str
+    for key, value in tags or ():
+        name: str = key.upper()
+        if name not in ("METADATA_BLOCK_PICTURE", "COVERART"):
+            continue
+        try:
+            data = base64.b64decode(value, validate=False)
+            if name == "COVERART":
+                out.append(Picture(None, "", data))
+            else:
+                p = mutagen.flac.Picture(data)
+                out.append(Picture(int(p.type), str(p.mime), bytes(p.data)))
+        except (binascii.Error, ValueError, struct.error, mutagen.MutagenError) as e:
+            log.warning("skipped a picture in %s that couldn't be read: %s", path, e)
+    return out
 
 
 def _id3(tags: mutagen.id3.ID3 | None) -> Tags:

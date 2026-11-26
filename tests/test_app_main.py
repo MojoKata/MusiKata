@@ -36,6 +36,15 @@ def test_the_index_is_made_under_the_data_folder_and_found_again(tmp_path):
     again.close()
 
 
+def test_the_covers_are_cached_under_the_roots_key_beside_the_other_roots(tmp_path):
+    env = {"MUSIKATA_DATA": str(tmp_path / "data")}
+    (tmp_path / "Music").mkdir()
+    index = app.open_index(str(tmp_path / "Music"), env, FakeClock())
+    key = os.path.basename(os.path.dirname(index.path))
+    assert app.cache_of(index, env) == str(tmp_path / "data" / "cache" / key / "covers")
+    index.close()
+
+
 def test_a_window_that_doesnt_load_says_so(tmp_path, monkeypatch, qtbot):
     monkeypatch.setattr(app, "QML", str(tmp_path / "Missing.qml"))
     with pytest.raises(RuntimeError, match="didn't load"):
@@ -64,7 +73,7 @@ def test_a_whole_run_scans_the_root_and_tours_it(tmp_path):
     (tmp_path / "Music" / "Undertow.flac").write_bytes(b"not audio")
     r = run("--root", str(tmp_path / "Music"), "--tour", str(tmp_path / "tour"))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "added=1" in r.stderr and "the tour: 1 screens, 0 texts past their boxes" in r.stdout
+    assert "added=1" in r.stderr and "the tour: 5 screens, 0 texts past their boxes" in r.stdout
     assert (tmp_path / "tour" / "L03-songs.png").exists()
 
 

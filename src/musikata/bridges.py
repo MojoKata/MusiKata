@@ -1,9 +1,10 @@
-"""The objects QML sees (A1.2). `Library`: the root, its card's line, the Songs list, and the scan,
-run on a thread of its own with the worker processes reading the files (A1.3, A2.2). `Player`: the
-song playing, played on the playback thread (player.py, A4.1).
+"""The objects QML sees (A1.2). `Library`: the root, its card's line, the views and going between
+them (R2.6, R6.3), Albums with its genre chips and Artists, an album's and an artist's pages, and
+the scan, run on a thread of its own with the worker processes reading the files (A1.3, A2.2).
+`Player`: the song playing, played on the playback thread (player.py, A4.1).
 
-What the root's card says is decided here, as text (`docs/process/coding.md`: QML only lays out and
-binds)."""
+What the root's card and the pages say is decided here, as text (`docs/process/coding.md`: QML only
+lays out and binds)."""
 
 from __future__ import annotations
 
@@ -19,7 +20,19 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from musikata_core import db, scanner, workers
 
-from .models import SongsModel
+from .models import (
+    SORTS,
+    AlbumsModel,
+    ArtistsModel,
+    SongsModel,
+    artist_line,
+    artist_text,
+    artist_thumbs,
+    cover_url,
+    length_text,
+    plural,
+    tiles,
+)
 from .player import Engine, PlaybackThread
 
 log = logging.getLogger(__name__)
@@ -43,10 +56,6 @@ def size_text(n: int) -> str:
     return f"{n} bytes"
 
 
-def plural(n: int, one: str, many: str | None = None) -> str:
-    return f"{n:,} {one if n == 1 else (many or one + 's')}"
-
-
 def summary(songs: int, albums: int, size: int) -> str:
     """The root card's line (R2.1.1): 1,412 songs · 128 albums · 9.8 GB."""
     if not songs:
@@ -60,19 +69,230 @@ def scanning_text(done: int, of: int) -> str:
 
 
 def counts(c: sqlite3.Connection) -> tuple[int, int, int]:
-    """Songs, albums (an album artist's, or else an artist's, album name, case aside) and bytes."""
+    """Songs, albums (R2.5.2) and bytes."""
     r = c.execute(
-        "SELECT COUNT(*), COUNT(DISTINCT lower(coalesce(albumartist, artist, '')) || char(0)"
-        " || lower(album)), coalesce(SUM(size), 0) FROM song"
+        "SELECT COUNT(*), (SELECT COUNT(*) FROM album), coalesce(SUM(size), 0) FROM song"
     ).fetchone()
     return int(r[0]), int(r[1]), int(r[2])
 
 
-class Library(QObject):
-    """One root and its index, as the sidebar and the views see them."""
+CHIPS = 8  # genre chips shown before More… (R2.6)
+KINDS = {
+    "mp3": "MP3", "flac": "FLAC", "aac": "AAC", "alac": "ALAC", "vorbis": "Ogg Vorbis",
+    "opus": "Opus", "wav": "WAV", "aiff": "AIFF",
+}  # fmt: skip
+LOSSLESS = {"flac", "alac", "wav", "aiff"}
 
-    changed = Signal()  # the card's line, the counts
+
+def genre_chips(c: sqlite3.Connection, n: int = CHIPS) -> tuple[list[str], list[str]]:
+    """Albums' genre chips (R2.6): the n genres most albums have, most first, and the rest, by
+    name, for More…."""
+    found = [
+        g
+        for (g,) in c.execute(
+            "SELECT genre FROM album WHERE genre IS NOT NULL GROUP BY genre"
+            " ORDER BY COUNT(*) DESC, genre COLLATE NOCASE"
+        )
+    ]
+    return found[:n], sorted(found[n:], key=str.casefold)
+
+
+def format_text(groups: list[tuple[str | None, int | None, int | None, int]]) -> str:
+    """An album's format (R2.6) from its songs' (kind, sample rate, bit rate, songs): FLAC 44.1
+    kHz; MP3 320 kbps; several kinds, most songs first: FLAC, MP3. Empty when unknown."""
+    by_kind: dict[str, list[tuple[int | None, int | None, int]]] = {}
+    for kind, rate, bitrate, n in groups:
+        if kind:
+            by_kind.setdefault(kind, []).append((rate, bitrate, n))
+    if not by_kind:
+        return ""
+    if len(by_kind) > 1:
+        order = sorted(by_kind, key=lambda k: (-sum(g[2] for g in by_kind[k]), k))
+        return ", ".join(KINDS.get(k, k) for k in order)
+    kind, found = next(iter(by_kind.items()))
+    name = KINDS.get(kind, kind)
+    if kind in LOSSLESS:
+        rate = max(found, key=lambda g: g[2])[0]
+        return f"{name} {rate / 1000:g} kHz" if rate else name
+    songs = sum(g[2] for g in found)
+    kbps = round(sum((g[1] or 0) * g[2] for g in found) / songs / 1000)
+    return f"{name} {kbps} kbps" if kbps else name
+
+
+def kicker(compilation: bool, year: int | None, genre: str | None) -> str:
+    """The line over an album's title (R2.6): Album · 2019 · Electronic."""
+    parts = ("Compilation" if compilation else "Album", str(year) if year else "", genre or "")
+    return " · ".join(p for p in parts if p)
+
+
+def state_chips(songs: int, embedded: int, folder_image: str | None) -> list[dict[str, str]]:
+    """An album's state chips (R2.6), each its text and tone ("ok", "warn", "info"): the art
+    embedded in its songs, and its folder's cover image. Whether its tags match the path (R3.9)
+    comes with tags from paths (slice 7)."""
+    if embedded == songs:
+        out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "ok"}]
+    elif embedded:
+        out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "warn"}]
+    else:
+        out = [{"text": "No art embedded", "tone": "info"}]
+    if folder_image:
+        out.append({"text": f"{folder_image.rpartition('/')[2]} in folder", "tone": "info"})
+    return out
+
+
+def _field(name: str, default: object = "") -> Callable[[AlbumPage | ArtistPage], object]:
+    """A page's property getter: its value of `name`, `default` before it shows anything."""
+    return lambda page: page._values.get(name, default)
+
+
+class AlbumPage(QObject):
+    """An album's page (R2.6, L02-album): its cover, title, artist, the line over the title, the
+    songs, length and format, its state chips, and its songs."""
+
+    changed = Signal()
+
+    def __init__(self, read: Callable[[], sqlite3.Connection], parent: QObject | None = None):
+        super().__init__(parent)
+        self._read = read
+        self._id = -1
+        self._values: dict[str, object] = {}
+        self._songs = SongsModel(read, "album", self, "album_id = ?", (-1,))
+
+    def load(self, album_id: int) -> bool:
+        """Shows the album with that id; False when there is none."""
+        c = self._read()
+        r = c.execute(
+            "SELECT title, artist, artist_id, compilation, year, genre, songs, length, embedded,"
+            " folder_image, thumb FROM album WHERE id = ?",
+            (album_id,),
+        ).fetchone()
+        if r is None:
+            return False
+        (
+            title,
+            artist,
+            artist_id,
+            compilation,
+            year,
+            genre,
+            songs,
+            length,
+            embedded,
+            image,
+            thumb,
+        ) = r
+        groups = c.execute(
+            "SELECT kind, sample_rate, CAST(avg(bitrate) AS INTEGER), COUNT(*) FROM song"
+            " WHERE album_id = ? GROUP BY kind, sample_rate",
+            (album_id,),
+        ).fetchall()
+        self._id = album_id
+        self._values = {
+            "title": title,
+            "artist": artist_text(artist),
+            "artistId": artist_id if artist_id is not None else -1,
+            "kicker": kicker(bool(compilation), year, genre),
+            "detail": " · ".join(
+                p for p in (plural(songs, "song"), length_text(length), format_text(groups)) if p
+            ),
+            "cover": cover_url(thumb),
+            "chips": state_chips(songs, embedded, image),
+        }
+        self._songs.select("album_id = ?", (album_id,))
+        self.changed.emit()
+        return True
+
+    def first_song(self) -> str:
+        """The path of the album's first song ("" when it has none)."""
+        row = self._songs.row(0)
+        return row["path"] if row else ""
+
+    def _get_id(self) -> int:
+        return self._id
+
+    def _get_songs(self) -> SongsModel:
+        return self._songs
+
+    id = QtProperty(int, _get_id, notify=changed)
+    title = QtProperty(str, _field("title"), notify=changed)
+    artist = QtProperty(str, _field("artist"), notify=changed)
+    artistId = QtProperty(int, _field("artistId", -1), notify=changed)
+    kicker = QtProperty(str, _field("kicker"), notify=changed)  # Album · 2019 · Electronic
+    detail = QtProperty(str, _field("detail"), notify=changed)  # 10 songs · 44 min · FLAC 44.1 kHz
+    cover = QtProperty(str, _field("cover"), notify=changed)
+    chips = QtProperty(list, _field("chips", []), notify=changed)
+    songs = QtProperty(QObject, _get_songs, constant=True)
+
+
+class ArtistPage(QObject):
+    """An artist's page (R2.6): their name, counts and mosaic, their albums, then their songs on
+    others' albums and on none."""
+
+    changed = Signal()
+
+    def __init__(self, read: Callable[[], sqlite3.Connection], parent: QObject | None = None):
+        super().__init__(parent)
+        self._read = read
+        self._id = -1
+        self._values: dict[str, object] = {}
+        self._albums = AlbumsModel(read, self, artist_id=-1)
+        self._others = SongsModel(read, "others", self, "artist_id = ?", (-1,))
+
+    def load(self, artist_id: int) -> bool:
+        """Shows the artist with that id; False when there is none."""
+        c = self._read()
+        r = c.execute(
+            "SELECT name, albums, songs FROM artist WHERE id = ?", (artist_id,)
+        ).fetchone()
+        if r is None:
+            return False
+        name, albums, songs = r
+        thumbs = c.execute(f"SELECT {artist_thumbs('?')}", (artist_id, artist_id)).fetchone()[0]
+        self._id = artist_id
+        self._albums.for_artist(artist_id)
+        self._others.select(
+            "artist_id = ? AND (album_id IS NULL OR album_id NOT IN"
+            " (SELECT id FROM album WHERE artist_id = ?))",
+            (artist_id, artist_id),
+        )
+        self._values = {
+            "name": name,
+            "detail": artist_line(albums, songs),
+            "tiles": tiles((thumbs or "").split()),
+            "othersTitle": "Other songs" if self._others.rowCount() else "",
+        }
+        self.changed.emit()
+        return True
+
+    def _get_id(self) -> int:
+        return self._id
+
+    def _get_albums(self) -> AlbumsModel:
+        return self._albums
+
+    def _get_others(self) -> SongsModel:
+        return self._others
+
+    id = QtProperty(int, _get_id, notify=changed)
+    name = QtProperty(str, _field("name"), notify=changed)
+    detail = QtProperty(str, _field("detail"), notify=changed)  # 3 albums · 41 songs
+    tiles = QtProperty(list, _field("tiles", []), notify=changed)
+    othersTitle = QtProperty(str, _field("othersTitle"), notify=changed)  # "" when there are none
+    albums = QtProperty(QObject, _get_albums, constant=True)
+    others = QtProperty(QObject, _get_others, constant=True)
+
+
+VIEWS = ("albums", "artists", "songs")  # the sidebar's views built so far (R6.3)
+TITLES = {"albums": "Albums", "artists": "Artists", "songs": "Songs"}
+
+
+class Library(QObject):
+    """One root and its index, as the sidebar and the views see them: which view is open and the
+    way back from a page (R6.3), Albums and its genre chips, Artists, Songs, and the pages."""
+
+    changed = Signal()  # the card's line, the counts, the genre chips
     scanningChanged = Signal()
+    viewChanged = Signal()
     _progress = Signal(int, int)
     _finished = Signal()
 
@@ -87,14 +307,131 @@ class Library(QObject):
         super().__init__(parent)
         self._root, self._index, self._home, self._pool = root, index, home, pool
         self._songs = SongsModel(index.read, parent=self)
+        self._albums = AlbumsModel(index.read, self)
+        self._artists = ArtistsModel(index.read, self)
+        self._album = AlbumPage(index.read, self)
+        self._artist = ArtistPage(index.read, self)
+        self._view = "albums"
+        self._history: list[tuple[str, int]] = []  # the views a page was opened from
+        self._genre = ""
+        self._albums_mode = "grid"
+        self._chips: tuple[list[str], list[str]] = ([], [])
+        self._playing = ""
         self._scanning = False
         self._done = self._of = 0
         self._thread: threading.Thread | None = None
         self.last: scanner.Result | BaseException | None = None  # the last scan's outcome
         self._progress.connect(self._on_progress)
         self._finished.connect(self._on_finished)
+        self._counts = (0, 0, 0)
+        self.reload()
+
+    def reload(self) -> None:
+        """Reads the lists, the counts and the chips afresh (after a scan), and the open page; a
+        page whose album or artist went shows the view it was opened from."""
         self._songs.reload()
-        self._counts = counts(index.read())
+        self._albums.reload()
+        self._artists.reload()
+        c = self._index.read()
+        self._counts = counts(c)
+        self._chips = genre_chips(c)
+        if self._genre and self._genre not in self._chips[0] + self._chips[1]:
+            self.set_genre("")
+        pages: dict[str, AlbumPage | ArtistPage] = {"album": self._album, "artist": self._artist}
+        page = pages.get(self._view)
+        if page is not None and not page.load(page.property("id")):
+            self.back()
+        self._mark_playing()
+        self.changed.emit()
+
+    # ---------- going between the views ----------
+
+    @Slot(str)
+    def show(self, view: str) -> None:
+        """Opens one of the sidebar's views (R6.3), forgetting the pages opened on the way."""
+        if view not in VIEWS:
+            raise ValueError(f"no such view: {view}")
+        self._history.clear()
+        self._go(view)
+
+    @Slot(int)
+    def openAlbum(self, album_id: int) -> None:  # noqa: N802
+        """Opens an album's page (L02-album) from the view open now."""
+        current = (self._view, self._artist.property("id") if self._view == "artist" else -1)
+        if self._album.load(album_id):
+            self._history.append(current)
+            self._go("album")
+
+    @Slot(int)
+    def openArtist(self, artist_id: int) -> None:  # noqa: N802
+        """Opens an artist's page from the view open now."""
+        current = (self._view, self._album.property("id") if self._view == "album" else -1)
+        if artist_id >= 0 and self._artist.load(artist_id):
+            self._history.append(current)
+            self._go("artist")
+
+    @Slot()
+    def back(self) -> None:
+        """Back to the view or page this one was opened from (Albums when none)."""
+        view, page = self._history.pop() if self._history else ("albums", -1)
+        if view == "album" and not self._album.load(page):
+            view = "albums"
+        if view == "artist" and not self._artist.load(page):
+            view = "artists"
+        self._go(view)
+
+    def _go(self, view: str) -> None:
+        self._view = view
+        self.viewChanged.emit()
+
+    def go(self, step: dict[str, str]) -> None:
+        """A tour's step (A1.6): {"view": "albums"}, or a page by its name: {"view": "album",
+        "album": "Glass Harbor"}, {"view": "artist", "artist": "Lumen Drift"}."""
+        view = step["view"]
+        c = self._index.read()
+        if view == "album":
+            r = c.execute("SELECT id FROM album WHERE title = ?", (step["album"],)).fetchone()
+            self.show("albums")
+            self.openAlbum(r[0] if r else -1)
+        elif view == "artist":
+            r = c.execute("SELECT id FROM artist WHERE name = ?", (step["artist"],)).fetchone()
+            self.show("artists")
+            self.openArtist(r[0] if r else -1)
+        else:
+            self.show(view)
+
+    # ---------- Albums' genre chips ----------
+
+    @Slot(str)
+    def setGenre(self, genre: str) -> None:  # noqa: N802
+        """Shows only the albums of that genre ("": every album), R2.6's chips."""
+        self.set_genre(genre)
+
+    def set_genre(self, genre: str) -> None:
+        self._genre = genre
+        self._albums.filter_genre(genre)
+        self.changed.emit()
+
+    @Slot(str)
+    def setAlbumsMode(self, mode: str) -> None:  # noqa: N802
+        """Albums as a grid of covers or a list (R2.6, the header's view switch, R6.4)."""
+        if mode not in ("grid", "list"):
+            raise ValueError(f"no such mode: {mode}")
+        self._albums_mode = mode
+        self.viewChanged.emit()
+
+    @Slot(int, result=str)
+    def firstSong(self, album_id: int) -> str:  # noqa: N802
+        """The path of an album's first song, by disc and track ("" when it has none): Play."""
+        r = (
+            self._index.read()
+            .execute(
+                f"SELECT path FROM song WHERE album_id = ? ORDER BY {SORTS['album']} LIMIT 1",
+                (album_id,),
+            )
+            .fetchone()
+        )
+        return r[0] if r else ""
 
     # ---------- the scan ----------
 
@@ -129,15 +466,27 @@ class Library(QObject):
     @Slot()
     def _on_finished(self) -> None:
         self._scanning = False
-        self._songs.reload()
-        self._counts = counts(self._index.read())
+        self.reload()
         self.scanningChanged.emit()
-        self.changed.emit()
 
     @Slot(str)
     def show_playing(self, path: str) -> None:
-        """Marks the song at `path` as playing in the Songs list ("": none)."""
-        self._songs.set_playing(path)
+        """Marks the song at `path`, and its album, as playing in the lists ("": none)."""
+        self._playing = path
+        self._mark_playing()
+
+    def _mark_playing(self) -> None:
+        r = (
+            self._index.read()
+            .execute("SELECT album_id FROM song WHERE path = ?", (self._playing,))
+            .fetchone()
+        )
+        album = r[0] if r and r[0] is not None else -1
+        self._songs.set_playing(self._playing)
+        self._album.property("songs").set_playing(self._playing)
+        self._artist.property("others").set_playing(self._playing)
+        self._albums.set_playing(album)
+        self._artist.property("albums").set_playing(album)
 
     def wait(self) -> None:
         """Until the scan's thread has ended (its result still to be delivered): for closing."""
@@ -152,6 +501,18 @@ class Library(QObject):
     def _get_songs(self) -> SongsModel:
         return self._songs
 
+    def _get_albums(self) -> AlbumsModel:
+        return self._albums
+
+    def _get_artists(self) -> ArtistsModel:
+        return self._artists
+
+    def _get_album(self) -> AlbumPage:
+        return self._album
+
+    def _get_artist(self) -> ArtistPage:
+        return self._artist
+
     def _get_scanning(self) -> bool:
         return self._scanning
 
@@ -161,6 +522,12 @@ class Library(QObject):
     def _get_count_text(self) -> str:
         return plural(self._counts[0], "song")
 
+    def _get_album_count_text(self) -> str:
+        return plural(self._albums.rowCount(), "album")
+
+    def _get_artist_count_text(self) -> str:
+        return plural(self._artists.rowCount(), "artist")
+
     def _get_empty_text(self) -> str:
         if self._counts[0]:
             return ""
@@ -168,12 +535,63 @@ class Library(QObject):
             return "Reading your music…"
         return f"No songs in {self._get_root()}"
 
+    def _get_view(self) -> str:
+        return self._view
+
+    def _get_section(self) -> str:
+        """The sidebar's item highlighted: the view open, or the one a page was opened from."""
+        if self._view in VIEWS:
+            return self._view
+        return next((v for v, _ in self._history if v in VIEWS), "albums")
+
+    def _get_back_text(self) -> str:
+        """Where the page's back link goes: the view or page it was opened from."""
+        view, _page = self._history[-1] if self._history else ("albums", -1)
+        if view == "album":
+            return str(self._album.property("title"))
+        if view == "artist":
+            return str(self._artist.property("name"))
+        return TITLES[view]
+
+    def _get_genres(self) -> list[str]:
+        return self._chips[0]
+
+    def _get_more_genres(self) -> list[str]:
+        return self._chips[1]
+
+    def _get_genre(self) -> str:
+        return self._genre
+
+    def _get_more_chosen(self) -> bool:
+        return bool(self._genre) and self._genre in self._chips[1]
+
+    def _get_more_text(self) -> str:
+        return self._genre if self._get_more_chosen() else "More…"
+
+    def _get_albums_mode(self) -> str:
+        return self._albums_mode
+
     root = QtProperty(str, _get_root, constant=True)
     songs = QtProperty(QObject, _get_songs, constant=True)
+    albums = QtProperty(QObject, _get_albums, constant=True)
+    artists = QtProperty(QObject, _get_artists, constant=True)
+    album = QtProperty(QObject, _get_album, constant=True)  # the album page's
+    artist = QtProperty(QObject, _get_artist, constant=True)  # the artist page's
     scanning = QtProperty(bool, _get_scanning, notify=scanningChanged)
     line = QtProperty(str, _get_line, notify=changed)
     countText = QtProperty(str, _get_count_text, notify=changed)
+    albumCountText = QtProperty(str, _get_album_count_text, notify=changed)
+    artistCountText = QtProperty(str, _get_artist_count_text, notify=changed)
     emptyText = QtProperty(str, _get_empty_text, notify=changed)  # what the Songs list says
+    view = QtProperty(str, _get_view, notify=viewChanged)  # albums, album, artists, artist, songs
+    section = QtProperty(str, _get_section, notify=viewChanged)
+    backText = QtProperty(str, _get_back_text, notify=viewChanged)
+    genres = QtProperty(list, _get_genres, notify=changed)  # the chips after All
+    moreGenres = QtProperty(list, _get_more_genres, notify=changed)  # More…'s
+    genre = QtProperty(str, _get_genre, notify=changed)  # the chip chosen; "" for All
+    moreText = QtProperty(str, _get_more_text, notify=changed)  # More…, or its genre chosen
+    moreChosen = QtProperty(bool, _get_more_chosen, notify=changed)  # a genre of More…'s chosen
+    albumsMode = QtProperty(str, _get_albums_mode, notify=viewChanged)  # Albums': grid or list
 
 
 class Player(QObject):
@@ -221,7 +639,10 @@ class Player(QObject):
 
     @Slot(str)
     def play(self, path: str) -> None:
-        """Plays the song at `path` under the root (the index's path) from its start (R7.1)."""
+        """Plays the song at `path` under the root (the index's path) from its start (R7.1); ""
+        (an album with no songs) does nothing."""
+        if not path:
+            return
         self.play_file(os.path.join(self._root, *path.split("/")))
 
     def play_file(self, path: str) -> None:

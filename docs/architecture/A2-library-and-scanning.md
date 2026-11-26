@@ -9,6 +9,7 @@ SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's 
 | `song` | One row per file: path under the root (unique), size, modification time, kind, length, bit rate, sample rate, every R4.1 field, an `audio_hash` (R12.5), the path-match state (R3.9) |
 | `song_genre` | Song and genre, one row per genre (R9.2) |
 | `album` | Album artist and title (R2.5.2), its cover's source and thumbnail, cached counts |
+| `artist` | Each artist, names that differ only in case as one (R2.5.4): the name shown, its sort key (R2.13), cached counts |
 | `folder` | One row per folder under the root that has audio beneath it: path, parent, counts of subfolders and songs (direct and beneath), its own cover's source, the mosaic's sources, the worst path-match state beneath it (A2.7) |
 | `playlist` | One row per playlist file: path, modification time, smart rule (R8.9) |
 | `playlist_entry` | Playlist, position, the path as written, the song it resolves to (or none: missing, R8.7) |
