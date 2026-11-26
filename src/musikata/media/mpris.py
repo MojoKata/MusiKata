@@ -12,12 +12,21 @@ QDBusArgument writes no int64 either. So an int64 inside a map (the Metadata's `
 made by D-Bus itself: an adaptor of MusiKata's own, `/org/musikata/MusiKata/int64`, has the value
 as a property declared int64, and a call to MusiKata itself for its properties (GetAll), which
 QtDBus answers without the bus, gives it back as D-Bus wrote it; read down to that value, the
-answer is sent on as it is (`int64`)."""
+answer is sent on as it is (`int64`).
+
+QtDBus runs a thread of its own, `QDBusConnection`, where a connection ends when it is let go. As it
+ends, Qt tells each object still connected to it (the objects registered on it are, by their
+`destroyed`), and for an object made in Python that is a call into Python, on that thread, while the
+GUI thread may be using or freeing the same object. So no object of MusiKata's outlives its place on
+the bus: `close` deletes what it registered, at once, on the thread that closes it, and the
+adaptors hold their Mpris weakly, so it goes when it is let go, never later in a collection that
+may run on any thread."""
 
 from __future__ import annotations
 
 import logging
 import os
+import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -30,6 +39,7 @@ from PySide6.QtDBus import (
     QDBusObjectPath,
 )
 from PySide6.QtGui import QWindow
+from shiboken6 import Shiboken
 
 from .controls import (
     NEXT,
@@ -255,12 +265,16 @@ class Mpris:
         self._int64_host = QObject()
         self._int64 = Int64Adaptor(self._int64_host)
         self._host = QObject()
-        self._root = RootAdaptor(self._host, self)
-        self._player = PlayerAdaptor(self._host, self)
+        # weakly: an Mpris and its adaptors in a cycle would wait for the collector (the docstring)
+        me = weakref.proxy(self)
+        self._root = RootAdaptor(self._host, me)
+        self._player = PlayerAdaptor(self._host, me)
         if not connection.registerObject(INT64_PATH, self._int64_host):
+            self._delete()
             raise RuntimeError(f"{INT64_PATH} is taken on this connection")
         if not connection.registerObject(PATH, self._host):
             connection.unregisterObject(INT64_PATH)
+            self._delete()
             raise RuntimeError(f"{PATH} is taken on this connection")
         # a second MusiKata takes a name of its own, as MPRIS has it
         self.service = SERVICE
@@ -322,10 +336,17 @@ class Mpris:
         self._player.Seeked.emit(microseconds(position))
 
     def close(self) -> None:
-        """Gives up the name and the objects."""
+        """Gives up the name and the objects, and deletes the objects (the module's docstring)."""
         self._bus.unregisterService(self.service)
         self._bus.unregisterObject(PATH)
         self._bus.unregisterObject(INT64_PATH)
+        self._delete()
+
+    def _delete(self) -> None:
+        """Deletes the objects made for the bus, their adaptors with them, on this thread: none is
+        left connected to the connection when QtDBus's thread ends it."""
+        Shiboken.delete(self._host)
+        Shiboken.delete(self._int64_host)
 
 
 def open_session(
