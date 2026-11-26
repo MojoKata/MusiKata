@@ -185,19 +185,21 @@ def test_a_root_that_goes_while_it_runs_is_found_gone_kept_and_rescanned_when_ba
     index, music, tmp_path, qtbot
 ):
     lib = library(index, music, tmp_path, watching=True, look_every=0.001)
+    reach = []
+    lib.reachChanged.connect(lambda: reach.append(lib.property("available")))
     scanned(lib, qtbot)
-    assert lib.watcher.known()
+    assert lib.watcher.known() and reach == []
     shutil.copytree(music, tmp_path / "copy")
     shutil.rmtree(music)  # unplugged: to a scan, as if every file had gone
     scanned(lib, qtbot)  # what a watched change or a focus gained starts
     assert lib.property("available") is False and len(songs(index)) == 4
-    pass
+    assert reach == [False]  # the player hears it: the song playing is the last (R2.10)
     shutil.copytree(tmp_path / "copy", music)  # plugged back: a look finds it, and rescans
     qtbot.waitUntil(lambda: lib.property("available"), timeout=10_000)
     qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=10_000)
     assert lib.property("banner") == {} and lib.property("dot") == "ok"
     assert lib.watcher.known() and lib.unplayable("A/1.wav") == ""
-    assert len(songs(index)) == 4
+    assert len(songs(index)) == 4 and reach == [False, True]
     lib.close()
 
 
@@ -239,9 +241,12 @@ def test_a_linked_folder_out_of_reach_makes_only_its_songs_unavailable(
     wav(usb / "Live" / "1.wav", 11)
     os.symlink(usb / "Live", music / "Live")
     lib = library(index, music, tmp_path, look_every=0.001)
+    reach = []
+    lib.reachChanged.connect(lambda: reach.append(lib.unplayable("Live/1.wav") == ""))
     scanned(lib, qtbot)
     shutil.move(usb, tmp_path / "unplugged")
     scanned(lib, qtbot)
+    assert reach == [False]
     live = os.path.join(MUSIC, "Live")
     assert lib.property("available") is True and "Live/1.wav" in songs(index)
     assert lib.property("banner")["title"].startswith(f"{live} isn't available")
@@ -251,7 +256,7 @@ def test_a_linked_folder_out_of_reach_makes_only_its_songs_unavailable(
     shutil.move(tmp_path / "unplugged", usb)  # back: a look finds it, and rescans
     qtbot.waitUntil(lambda: lib.property("banner") == {}, timeout=10_000)
     qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=10_000)
-    assert lib.property("dot") == "ok"
+    assert lib.property("dot") == "ok" and reach == [False, True]
     lib.close()
 
 

@@ -27,6 +27,7 @@ Rectangle {
         property string name
         property bool on: false
         property bool active: true
+        property string note: ""  // why it can't act now, its tooltip in place of its name
         property real iconSize: 17
         property color tint: Theme.text
         width: 32
@@ -34,6 +35,7 @@ Rectangle {
         opacity: active ? 1 : 0.4
         Accessible.role: Accessible.Button
         Accessible.name: button.name
+        Accessible.description: button.note
         Rectangle {
             anchors.fill: parent
             radius: width / 2
@@ -48,7 +50,7 @@ Rectangle {
         HoverHandler { id: hover; cursorShape: button.active ? Qt.PointingHandCursor : Qt.ArrowCursor }
         TapHandler { enabled: button.active; onTapped: button.clicked() }
         ToolTip.visible: hover.hovered
-        ToolTip.text: button.name
+        ToolTip.text: button.note || button.name
         ToolTip.delay: 600
     }
 
@@ -143,7 +145,8 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             icon: "next"
             name: qsTr("Next")
-            active: bar.hasSong
+            note: bar.player.nextNote  // the song after this one can't play now (R2.10)
+            active: bar.hasSong && note === ""
             onClicked: bar.player.next()
         }
         BarButton {

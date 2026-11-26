@@ -169,6 +169,9 @@ def load(
         root, playback(), refuse=library.unplayable, read=index.read, playback=shared.playback
     )
     player.nowPlaying.connect(library.show_playing)
+    library.reachChanged.connect(
+        player.reach_changed
+    )  # the song playing ends, nothing after (R2.10)
     library.property("folders").play.connect(player.play_songs)
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)

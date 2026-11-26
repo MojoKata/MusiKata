@@ -13,6 +13,7 @@ heard are each only noticed by listening."""
 
 import os
 import random
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -180,6 +181,39 @@ def test_a_next_song_gone_or_out_of_reach_is_told_as_nothing_and_says_why_in_its
     engine.ended.emit(engine.ticket)
     qtbot.waitUntil(lambda: p.property("error") == "Its music folder isn't there", timeout=WAIT)
     assert p.property("path") == "LD/GH/02.flac" and engine.played() == ["01.flac"]
+
+
+WAITS = "Playing waits until ~/Music is back"
+
+
+def test_a_root_gone_while_a_song_plays_lets_it_end_and_opens_nothing_after_it(made, qtbot):
+    """R2.10: the song playing goes on to its end, as what the engine has can, and nothing is
+    opened after it; Next and Up next say why, and Next leaves the song playing."""
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    qtbot.waitUntil(lambda: engine.told == ["02.flac"], timeout=WAIT)
+    assert p.property("nextNote") == "" and p.property("upNext").property("note") == ""
+    for song in SONGS:
+        p.refused[song["path"]] = WAITS
+    p.reach_changed()  # the root went
+    qtbot.waitUntil(lambda: engine.told == ["02.flac", ""], timeout=WAIT)  # told: nothing
+    assert p.property("nextNote") == WAITS and p.property("upNext").property("note") == WAITS
+    assert p.property("playing") and p.property("error") == "" and ("stop",) not in engine.asked
+    p.reach_changed()  # nothing changed since: nothing told
+    p.next()  # says why, and does nothing
+    assert p.property("path") == "LD/GH/01.flac" and p.property("playing")
+    engine.ended.emit(engine.ticket)  # the song played to its end
+    qtbot.waitUntil(lambda: p.property("error") == WAITS, timeout=WAIT)
+    assert p.property("path") == "LD/GH/02.flac" and not p.property("playing")
+    assert engine.played() == ["01.flac"] and engine.told == ["02.flac", ""]
+    p.refused.clear()
+    p.reach_changed()  # back
+    assert p.property("nextNote") == "" and p.property("upNext").property("note") == ""
+    p.toggle()
+    wait_playing(qtbot, p, engine, 2)
+    assert engine.played() == ["01.flac", "02.flac"]
+    qtbot.waitUntil(lambda: engine.told[-1] == "03.flac", timeout=WAIT)
 
 
 # ---------- ReplayGain (R7.5) ----------
@@ -729,6 +763,33 @@ def test_the_bar_shows_the_song_and_its_buttons_play_it(shell, qtbot, qtlog):
     qtbot.waitUntil(lambda: rows.property("count") == 3, timeout=WAIT)
     click(shell, find(shell, "closeUpNext"))
     qtbot.waitUntil(lambda: not find(shell, "upNext").isVisible(), timeout=WAIT)
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
+    assert layout.faults(shell.window) == []
+
+
+@pytest.mark.slow
+def test_a_root_gone_while_a_song_plays_greys_next_and_up_next_says_why(
+    shell, tmp_path, qtbot, qtlog
+):
+    p, engine, lib = shell.player, shell.engine_, shell.library
+    p.go({"queue": "Glass Harbor"})
+    qtbot.waitExposed(shell.window)
+    click(shell, find(shell, "playPause"))
+    qtbot.waitUntil(lambda: p.property("playing") and engine.told == ["02.flac"], timeout=WAIT)
+    nxt = find(shell, "next")
+    assert nxt.property("active") is True and nxt.property("note") == ""
+    shutil.rmtree(tmp_path / "Music")  # its drive unplugged
+    with qtbot.waitSignal(lib.reachChanged, timeout=WAIT):
+        lib.retry()
+    why = f"Playing waits until {os.path.join('~', 'Music')} is back"
+    qtbot.waitUntil(lambda: engine.told == ["02.flac", ""], timeout=WAIT)
+    assert nxt.property("active") is False and nxt.property("note") == why
+    click(shell, nxt)
+    assert p.property("title") == "Tidewater" and p.property("playing")
+    click(shell, find(shell, "queueButton"))
+    qtbot.waitUntil(lambda: find(shell, "upNext").isVisible(), timeout=WAIT)
+    assert find(shell, "upNextLine").property("text") == why
+    shell.window.grabWindow()
     assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
     assert layout.faults(shell.window) == []
 

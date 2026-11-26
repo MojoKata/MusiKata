@@ -424,6 +424,7 @@ class Library(QObject):
     viewChanged = Signal()  # the view, and its header's title, modes and sorts
     searchChanged = Signal()
     rootChosen = Signal(str)  # Choose another folder… (R2.10): the folder chosen, a whole path
+    reachChanged = Signal()  # the root, or a linked folder, went or came back (R2.10)
     _progress = Signal(int, int)
     _finished = Signal(object)
     _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
@@ -490,6 +491,7 @@ class Library(QObject):
         self._given = given
         self._missing = missing  # the root isn't there (R2.10)
         self._links: frozenset[str] = frozenset()  # linked folders that can't be reached
+        self._reach = (missing, self._links)  # as reachChanged last said
         self._held: list[str] = []  # songs gone, waiting on the user's answer (R2.10.1)
         self._kept: set[str] = set()  # songs gone the user said to keep, not asked about again
         self._removing: list[str] = []  # songs gone the user said to remove, waiting their turn
@@ -807,7 +809,15 @@ class Library(QObject):
             self._watcher.deleteLater()
             self._watcher = None
         self._presence.start()
+        self._tell_reach()
         self.changed.emit()
+
+    def _tell_reach(self) -> None:
+        """Says `reachChanged` when the root, or a linked folder, went or came back since it was
+        last said: what plays next is told again (Player.reach_changed)."""
+        if (self._missing, self._links) != self._reach:
+            self._reach = (self._missing, self._links)
+            self.reachChanged.emit()
 
     def _found_there(self, whole: bool, result: scanner.Result) -> None:
         """After a scan that found the root: the linked folders out of reach (a scan of the root
@@ -826,6 +836,7 @@ class Library(QObject):
             self._presence.start()
         else:
             self._presence.stop()
+        self._tell_reach()
 
     def _set_links(self, links: frozenset[str]) -> None:
         self._links = self._presence.links = links
@@ -848,6 +859,7 @@ class Library(QObject):
             self.rescan()
         if not self._links:
             self._presence.stop()
+        self._tell_reach()
         self.changed.emit()
 
     @Slot()
@@ -1252,7 +1264,13 @@ class Player(QObject):
     (R13.7): with Album, the album's gain when the album is played in order, which the queue says
     (`gain.in_album_order`: the song before it in the queue is the album's song before it, or the
     one after it the album's song after it), and the track's otherwise; a song that follows itself
-    (repeat One) keeps the gain it had. The engine is told the device chosen there (R7.7)."""
+    (repeat One) keeps the gain it had. The engine is told the device chosen there (R7.7).
+
+    A song whose root, or linked folder, isn't there doesn't play, and says why (`refuse`,
+    R2.10). When the root goes while a song plays (`reach_changed`), the song goes on to its end,
+    as far as what the engine has of it can, and nothing is opened after it: the engine is told
+    again that nothing follows, Next does nothing and says why (`nextNote`), and so does Up next;
+    when the song ends, the next one is shown, cued, saying why."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
@@ -1296,6 +1314,8 @@ class Player(QObject):
         self._playing_key: int | None = None  # the queue's entry it plays; None: outside the queue
         self._followed: tuple[int, int | None] | None = None  # the ticket and entry last told to
         # follow it (0 and None: nothing); None when nothing was told yet
+        self._told_path = ""  # and its path ("": nothing, or a song that can't play now)
+        self._next_note = ""  # why the song after this one can't play now (R2.10); "" if it can
         self._level = 1.0  # the ReplayGain of the song playing (R7.5)
         self._told_level = 1.0  # and of the song last told to follow it
         self._follows: set[int] = set()  # every ticket told to follow it
@@ -1493,8 +1513,9 @@ class Player(QObject):
     @Slot()
     def next(self) -> None:
         """Next: the song after this one plays, or a paused or cued one is cued there; past the
-        end with repeat Off, the queue has played out and nothing plays."""
-        if self.queue.current is None:
+        end with repeat Off, the queue has played out and nothing plays. Nothing while the song
+        after this one can't play (`nextNote` says why, R2.10): the song playing goes on."""
+        if self.queue.current is None or self._next_note:
             return
         playing = self._on and not self._paused
         entry = self.queue.next()
@@ -1709,16 +1730,33 @@ class Player(QObject):
         self.positionChanged.emit()
         self._queue_changed()
 
+    @Slot()
+    def reach_changed(self) -> None:
+        """The root, or a linked folder, went or came back (R2.10; Library.reachChanged): what
+        follows the song playing is told again, and Next and Up next say why it can't play."""
+        self._queue_changed()
+
     def _queue_changed(self) -> None:
+        self._next_note = self._why_next()
+        self._up_next.set_note(self._next_note)
         self._up_next.refresh()
         self.queueChanged.emit()
         self._tell_following()
+
+    def _why_next(self) -> str:
+        """Why the song after the current one can't play now: its root, or its linked folder,
+        isn't there (R2.10); "" when it can, or when none follows."""
+        entry = self.queue.following()
+        info = self._song(entry.song) if entry is not None else None
+        if info is None or self._refuse is None:
+            return ""
+        return self._refuse(info.path)
 
     def _tell_following(self) -> None:
         """Tells the engine what follows the song playing, when that changed (A4.2): the queue's
         next song, which it opens ahead and joins with no gap; nothing for a song outside the
         queue, or when the next one is gone from the index or its root isn't there (its turn
-        then says why)."""
+        then says why), which may change while the song plays (R2.10)."""
         if not self._requested or self._playing_key is None:
             return
         current = self.queue.current
@@ -1726,12 +1764,12 @@ class Player(QObject):
         if current is not None and current.key == self._playing_key:
             entry = self.queue.following()
         key = entry.key if entry is not None else None
-        if self._followed is not None and self._followed[1] == key:
-            return
         path = ""
         info = self._song(entry.song) if entry is not None else None
         if info is not None and not (self._refuse is not None and self._refuse(info.path)):
             path = self._whole(info.path)
+        if self._followed is not None and self._followed[1] == key and self._told_path == path:
+            return
         ticket = next(self._tickets) if path else 0
         level = 1.0
         if ticket and entry is not None and current is not None:
@@ -1743,7 +1781,7 @@ class Player(QObject):
                 level = self._replaygain(entry.song, current.song, after_song)
         if ticket:
             self._follows.add(ticket)
-        self._followed, self._told_level = (ticket, key), level
+        self._followed, self._told_level, self._told_path = (ticket, key), level, path
         self._follow.emit(self._requested, ticket, path, level)
 
     # ---------- what the engine says ----------
@@ -1870,6 +1908,9 @@ class Player(QObject):
     def _get_failed(self) -> bool:
         return bool(self._error)
 
+    def _get_next_note(self) -> str:
+        return self._next_note
+
     def _get_time_name(self) -> str:
         if not self._path:
             return ""
@@ -1924,6 +1965,7 @@ class Player(QObject):
     title = QtProperty(str, _get_title, notify=changed)
     line = QtProperty(str, _get_line, notify=changed)  # Lumen Drift — Glass Harbor; or the error
     failed = QtProperty(bool, _get_failed, notify=changed)  # the line is why it couldn't play
+    nextNote = QtProperty(str, _get_next_note, notify=queueChanged)  # why Next waits; "" if not
     timeName = QtProperty(str, _get_time_name, notify=positionChanged)  # 1:38 of 4:18
     cover = QtProperty(str, _get_cover, notify=changed)
     rating = QtProperty(int, _get_rating, notify=changed)

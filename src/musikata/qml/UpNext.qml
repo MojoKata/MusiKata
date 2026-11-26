@@ -40,8 +40,8 @@ Rectangle {
         anchors.topMargin: 2
         width: parent.width - 40
         elide: Text.ElideRight
-        text: panel.model.line
-        color: Theme.muted
+        text: panel.model.note || panel.model.line  // why the songs up next can't play (R2.10)
+        color: panel.model.note ? Theme.err : Theme.muted
         font { family: Theme.sans; pixelSize: 12 }
     }
     Item {

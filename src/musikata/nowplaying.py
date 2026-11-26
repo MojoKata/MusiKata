@@ -158,6 +158,12 @@ class UpNextModel(QAbstractListModel):
         self._info: dict[int, SongInfo] = {}
         self._lengths: dict[int, float] = {}  # every queued song's length, for the line
         self._line = ""
+        self._note = ""  # why the songs up next can't play now (R2.10)
+
+    def set_note(self, note: str) -> None:
+        """Why the song after the current one can't play now ("" when it can), shown in place of
+        the line from the next `refresh`."""
+        self._note = note
 
     def refresh(self) -> None:
         """The rows afresh, after the queue changed."""
@@ -227,5 +233,9 @@ class UpNextModel(QAbstractListModel):
     def _get_empty_text(self) -> str:
         return "" if self._rows else EMPTY
 
+    def _get_note(self) -> str:
+        return self._note
+
     line = QtProperty(str, _get_line, notify=changed)  # Playing from … · 7 up next · 33 min
     emptyText = QtProperty(str, _get_empty_text, notify=changed)  # what an empty Up next says
+    note = QtProperty(str, _get_note, notify=changed)  # why they can't play now; "" when they can
