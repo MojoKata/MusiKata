@@ -12,11 +12,21 @@ last ones. The engine says the next song began (`joined`) when the device has pl
 first sample, so the GUI changes then, not when it was decoded. A seek (A4.6) replaces what the
 ring holds with the song from the place sought.
 
+Each song comes with its ReplayGain (R7.5), which the feed multiplies in on the way into the ring,
+ramped at a join (A4.4). The volume is applied last, as the device takes the samples (A4.4): after
+the ring, so a change is heard at once rather than two seconds on, and ramped over 50 ms, so moving
+it makes no zipper noise; the sink's own volume stays whole.
+
+The output is the device chosen in Settings, else the system's default (R7.7). When the device in
+use goes away (`QMediaDevices.audioOutputsChanged`), playback pauses, a new sink opens on the
+default device at its own rate, and the stream goes on from the sample the old device had played
+when the user presses play (A4.6).
+
 The GUI thread talks to the engine by queued signals only (the `Player` bridge, bridges.py), and
 hears back the same way; each song asked for carries a ticket of the bridge's, which comes back
 with what the engine says of it. What opens a song and which device it plays on are given to the
-engine, so a test can hand in generated audio and Qt's device of its choice. Gain, the equalizer
-and devices that come and go are the rest of slice 4's (A4.4 to A4.6)."""
+engine, so a test can hand in generated audio and Qt's device of its choice. The equalizer is
+slice 9's (R19)."""
 
 from __future__ import annotations
 
@@ -37,7 +47,7 @@ from PySide6.QtCore import (
 from PySide6.QtMultimedia import QAudioDevice, QAudioFormat, QAudioSink, QMediaDevices, QtAudio
 from shiboken6 import Shiboken
 
-from musikata_core.audio import stream
+from musikata_core.audio import gain, stream
 from musikata_core.audio.decode import DecodeError, Decoder
 from musikata_core.audio.join import Feed, Playing, Song
 from musikata_core.audio.stream import Stream
@@ -76,6 +86,24 @@ def gain_of(level: float) -> float:
     )
 
 
+def device_id(device: QAudioDevice) -> str:
+    """A device's id as text, as Settings keeps it (R13.7)."""
+    return bytes(device.id().data()).decode("utf-8", "replace")
+
+
+def chosen_output(
+    chosen: str, outputs: Callable[[], list[QAudioDevice]] = QMediaDevices.audioOutputs
+) -> QAudioDevice:
+    """The device chosen in Settings, by its id, when it is there; else the system's default
+    (R7.7), which is a null device when there is none."""
+    if chosen:
+        found = next((d for d in outputs() if device_id(d) == chosen), None)
+        if found is not None:
+            return found
+        log.info("the sound device chosen in Settings (%s) isn't there: the default plays", chosen)
+    return QMediaDevices.defaultAudioOutput()
+
+
 def output_format(device: QAudioDevice) -> QAudioFormat:
     """Float samples at the device's own rate (A4.1), in the channels `channels_for` chooses."""
     fmt = QAudioFormat()
@@ -86,17 +114,19 @@ def output_format(device: QAudioDevice) -> QAudioFormat:
 
 
 class RingDevice(QIODevice):
-    """What the sink reads: the stream's samples as bytes. Only copies them out. Open as it is
-    made, unbuffered: QIODevice's own buffer would take from the ring ahead of the device."""
+    """What the sink reads: the stream's samples as bytes, at the volume (A4.4: last, ramped).
+    Only copies them out, multiplied. Open as it is made, unbuffered: QIODevice's own buffer would
+    take from the ring ahead of the device."""
 
-    def __init__(self, source: Stream) -> None:
+    def __init__(self, source: Stream, volume: gain.Volume | None = None) -> None:
         super().__init__()
         self._stream = source
+        self._volume = volume if volume is not None else gain.Volume()
         self._frame = 4 * source.channels
         self.open(QIODevice.OpenModeFlag.ReadOnly | QIODevice.OpenModeFlag.Unbuffered)
 
     def readData(self, maxlen: int) -> bytes:
-        return stream.to_bytes(self._stream.take(maxlen // self._frame))
+        return stream.to_bytes(self._volume.apply(self._stream.take(maxlen // self._frame)))
 
     def writeData(self, data: bytes | bytearray | memoryview, size: int) -> int:
         return -1
@@ -114,6 +144,7 @@ class Engine(QObject):
     with."""
 
     began = Signal(int, str, float)  # the ticket, the path, its length in seconds (-1: unknown)
+    outputChanged = Signal(str)  # the device in use went away: playing moved to this one, paused
     joined = Signal(int, str, float)  # the next song began, the one before played to its end
     moved = Signal(float)  # where the song is, in what the device has played
     sought = Signal(int)  # a seek asked for with this ticket was done, or couldn't be
@@ -125,32 +156,53 @@ class Engine(QObject):
     def __init__(
         self,
         opener: Opener = DecodedSong,
-        output: Callable[[], QAudioDevice] = QMediaDevices.defaultAudioOutput,
+        output: Callable[[], QAudioDevice] | None = None,
+        fallback: Callable[[], QAudioDevice] = QMediaDevices.defaultAudioOutput,
+        outputs: Callable[[], list[QAudioDevice]] = QMediaDevices.audioOutputs,
     ) -> None:
+        """`output` gives the device to play on (by default the one chosen, `choose_device`, else
+        the system's default); `fallback` the one to move to when it goes away (R7.7), and
+        `outputs` the devices there are, looked at when Qt says they changed."""
         super().__init__()
-        self._opener, self._output = opener, output
+        self._opener, self._output, self._fallback = opener, output, fallback
+        self._outputs = outputs
+        self._chosen = ""  # the device chosen in Settings, by its id; "" for the default
         self._timer: QTimer | None = None
+        self._devices: QMediaDevices | None = None
+        self._device: QAudioDevice | None = None  # the one in use
         self._sink: QAudioSink | None = None
+        self._started = False  # the sink was started (a sink opened by a move waits for play)
         self._io: RingDevice | None = None
         self._feed: Feed | None = None
         self._paused = False
         self._reported = -1.0
-        self._gain = 1.0  # the volume, as the sink's linear gain (R6.5)
+        self._level = 1.0  # the volume, as a linear gain (R6.5)
+        self._volume: gain.Volume | None = None  # applied to what the device takes (A4.4)
 
     @Slot()
     def setup(self) -> None:
-        """On the playback thread, as it starts: the timer that keeps the ring full."""
+        """On the playback thread, as it starts: the timer that keeps the ring full, and the
+        devices watched (A4.6)."""
         self._timer = QTimer(self)
         self._timer.setInterval(round(stream.BLOCK_SECONDS * 1000))
         self._timer.timeout.connect(self._tick)
+        self._devices = QMediaDevices(self)
+        self._devices.audioOutputsChanged.connect(self._outputs_changed)
 
     # ---------- what the GUI asks ----------
 
-    @Slot(str, int)
-    def play(self, path: str, ticket: int) -> None:
-        """Plays the file at `path` from its start, in place of what was playing."""
+    @Slot(str)
+    def choose_device(self, chosen: str) -> None:
+        """The device chosen in Settings, by its id ("" for the system's default, R7.7): the next
+        song plays on it."""
+        self._chosen = chosen
+
+    @Slot(str, int, float)
+    def play(self, path: str, ticket: int, level: float = 1.0) -> None:
+        """Plays the file at `path` from its start, in place of what was playing, its samples
+        multiplied by `level` (its ReplayGain, R7.5)."""
         self._halt()
-        device = self._output()
+        device = self._output() if self._output is not None else chosen_output(self._chosen)
         if device.isNull():
             self._failed(ticket, path, NO_DEVICE)
             return
@@ -163,27 +215,40 @@ class Engine(QObject):
             return
         ring = Stream(rate, channels)
         self._feed = Feed(ring, lambda p: self._opener(p, rate, channels))
-        self._feed.start(ticket, path, song)
+        self._feed.start(ticket, path, song, level)
         if not self._fill(ring.ring.capacity):  # the whole ring before the first pull
             return
-        self._sink = QAudioSink(device, fmt)
-        self._sink.setVolume(self._gain)
-        self._sink.setBufferSize(stream.frames_of(stream.DEVICE_SECONDS, rate) * 4 * channels)
-        self._io = RingDevice(ring)
-        self._sink.start(self._io)
-        if self._sink.error() != QtAudio.Error.NoError:
-            self._fail(f"the sound device didn't open ({self._sink.error().name})")
+        if not self._open_sink(device, fmt, ring, start=True):
             return
         self.began.emit(ticket, path, self._length(song))
         assert self._timer is not None  # setup ran as the thread started
         self._timer.start()
 
-    @Slot(int, int, str)
-    def follow(self, after: int, ticket: int, path: str) -> None:
+    def _open_sink(
+        self, device: QAudioDevice, fmt: QAudioFormat, ring: Stream, start: bool
+    ) -> bool:
+        """A sink on `device` reading `ring` at the volume, started or (after a move) waiting for
+        play; False when it didn't open (and playing has stopped)."""
+        rate, channels = fmt.sampleRate(), fmt.channelCount()
+        self._device = device
+        self._sink = QAudioSink(device, fmt)
+        self._sink.setBufferSize(stream.frames_of(stream.DEVICE_SECONDS, rate) * 4 * channels)
+        self._volume = gain.Volume(self._level, stream.frames_of(gain.RAMP_SECONDS, rate))
+        self._io = RingDevice(ring, self._volume)
+        self._started = start
+        if start:
+            self._sink.start(self._io)
+        if self._sink.error() != QtAudio.Error.NoError:
+            self._fail(f"the sound device didn't open ({self._sink.error().name})")
+            return False
+        return True
+
+    @Slot(int, int, str, float)
+    def follow(self, after: int, ticket: int, path: str, level: float = 1.0) -> None:
         """The song asked for with `after` is to be followed by `path`, asked for with `ticket`
-        (0: by nothing), joined to it with no gap (A4.2)."""
+        (0: by nothing), joined to it with no gap (A4.2), its samples multiplied by `level`."""
         if self._feed is not None:
-            self._feed.follow(after, ticket, path)
+            self._feed.follow(after, ticket, path, level)
 
     @Slot(int, float)
     def seek(self, ticket: int, seconds: float) -> None:
@@ -205,18 +270,25 @@ class Engine(QObject):
 
     @Slot()
     def resume(self) -> None:
+        """Plays on; after a move to another device (A4.6), starts its sink from the sample the
+        old one had played."""
         if self._sink is not None and self._paused:
-            self._sink.resume()
+            if self._started:
+                self._sink.resume()
+            else:
+                assert self._io is not None
+                self._started = True
+                self._sink.start(self._io)
             self._paused = False
             self.pausedChanged.emit(False)
 
     @Slot(float)
-    def set_volume(self, gain: float) -> None:
-        """The volume, a linear gain from 0 to 1 (`gain_of`): the sink applies it last, after
-        everything else (A4.4), at once and to every song after."""
-        self._gain = gain
-        if self._sink is not None:
-            self._sink.setVolume(gain)
+    def set_volume(self, level: float) -> None:
+        """The volume, a linear gain from 0 to 1 (`gain_of`), applied last as the device takes
+        the samples (A4.4), ramped to from where it is; and to every song after."""
+        self._level = level
+        if self._volume is not None:
+            self._volume.set(level)
 
     @Slot()
     def stop(self) -> None:
@@ -268,6 +340,9 @@ class Engine(QObject):
             return
         error = self._sink.error()
         if error not in (QtAudio.Error.NoError, QtAudio.Error.UnderrunError):
+            if self._gone():  # the device went: playing moves, as when the list says so
+                self._move()
+                return
             self._fail(f"the sound device stopped ({error.name})")
             return
         ring = self._feed.stream
@@ -292,6 +367,65 @@ class Engine(QObject):
             self._reported = position
             self.moved.emit(position)
 
+    def _drop_sink(self) -> None:
+        """The sink stopped and let go of, and what it read."""
+        if self._sink is not None:
+            self._sink.stop()
+            Shiboken.delete(self._sink)
+            self._sink = None
+        if self._io is not None:
+            self._io.close()
+            Shiboken.delete(self._io)
+            self._io = None
+        self._device, self._volume, self._started = None, None, False
+
+    # ---------- the device going away (A4.6, R7.7) ----------
+
+    def _gone(self) -> bool:
+        """Whether the device in use is no longer among the system's outputs."""
+        if self._device is None:
+            return False
+        ours = device_id(self._device)
+        return all(device_id(d) != ours for d in self._outputs())
+
+    @Slot()
+    def _outputs_changed(self) -> None:
+        if self._sink is not None and self._gone():
+            self._move()
+
+    def _move(self) -> None:
+        """The device in use went away: playing pauses, and goes on into a new sink on the
+        default device, at its rate, from the sample the old device had played; it starts when
+        the user presses play (A4.6)."""
+        assert self._sink is not None and self._feed is not None and self._device is not None
+        place = self._heard()
+        self._report(place)
+        was = self._device.description()
+        self._drop_sink()
+        device = self._fallback()
+        if device.isNull():
+            self._fail(NO_DEVICE)
+            return
+        fmt = output_format(device)
+        rate, channels = fmt.sampleRate(), fmt.channelCount()
+        ring = Stream(rate, channels)
+        failure = self._feed.move(ring, lambda p: self._opener(p, rate, channels), place)
+        if failure is not None:
+            self._fail(failure.why, failure.ticket)
+            return
+        if not self._fill(ring.ring.capacity) or not self._open_sink(device, fmt, ring, False):
+            return
+        log.warning(
+            "the sound device %s went away: paused, and moved to %s at %d Hz",
+            was, device.description(), rate,
+        )  # fmt: skip
+        self._reported = -1.0
+        self._report(0)
+        if not self._paused:
+            self._paused = True
+            self.pausedChanged.emit(True)
+        self.outputChanged.emit(device.description())
+
     def _fail(self, why: str, ticket: int | None = None) -> None:
         heard = self._feed.heard if self._feed is not None else None
         path = heard.path if heard is not None else ""
@@ -312,14 +446,7 @@ class Engine(QObject):
         if self._timer is not None:
             self._timer.stop()
         was = self._feed is not None
-        if self._sink is not None:
-            self._sink.stop()
-            Shiboken.delete(self._sink)
-            self._sink = None
-        if self._io is not None:
-            self._io.close()
-            Shiboken.delete(self._io)
-            self._io = None
+        self._drop_sink()
         if self._feed is not None:
             self._feed.close()
             self._feed = None

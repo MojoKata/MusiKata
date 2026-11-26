@@ -26,7 +26,8 @@ from typing import Any, Protocol
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
-from musikata_core import albums, db, scanner, watch, workers
+from musikata_core import albums, db, scanner, settings, watch, workers
+from musikata_core.audio import gain
 from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
 
@@ -62,6 +63,7 @@ from .nowplaying import (
     SongInfo,
     UpNextModel,
     bar_line,
+    read_loudness,
     read_songs,
     song_of_path,
 )
@@ -1235,20 +1237,27 @@ class Player(QObject):
     that can't play stops there and says why. Each song asked of the engine carries a ticket, and
     what the engine says of a ticket no longer asked for is passed over.
     `read` reads the index, where a song's id becomes its path and its words; without it (a test
-    of the engine alone) a path plays on its own, outside any queue."""
+    of the engine alone) a path plays on its own, outside any queue.
+
+    Each song asked of the engine carries its ReplayGain (R7.5), by `playback`'s mode and pre-amp
+    (R13.7): with Album, the album's gain when the album is played in order, which the queue says
+    (`gain.in_album_order`: the song before it in the queue is the album's song before it, or the
+    one after it the album's song after it), and the track's otherwise; a song that follows itself
+    (repeat One) keeps the gain it had. The engine is told the device chosen there (R7.7)."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
     queueChanged = Signal()  # shuffle, repeat, Up next open
     volumeChanged = Signal()
     nowPlaying = Signal(str)  # the path of the song playing or cued now, "" when none
-    _play = Signal(str, int)
-    _follow = Signal(int, int, str)
+    _play = Signal(str, int, float)
+    _follow = Signal(int, int, str, float)
     _seek = Signal(int, float)
     _pause = Signal()
     _resume = Signal()
     _stop = Signal()
     _set_gain = Signal(float)
+    _choose = Signal(str)
 
     def __init__(
         self,
@@ -1258,8 +1267,10 @@ class Player(QObject):
         refuse: Callable[[str], str] | None = None,
         read: Callable[[], sqlite3.Connection] | None = None,
         rng: random.Random | None = None,
+        playback: settings.Playback | None = None,
     ) -> None:
         super().__init__(parent)
+        self._settings = playback if playback is not None else settings.Playback()
         self._root = root
         self._refuse = refuse  # why a song can't play now (Library.unplayable, R2.10)
         self._read = read
@@ -1276,6 +1287,8 @@ class Player(QObject):
         self._playing_key: int | None = None  # the queue's entry it plays; None: outside the queue
         self._followed: tuple[int, int | None] | None = None  # the ticket and entry last told to
         # follow it (0 and None: nothing); None when nothing was told yet
+        self._level = 1.0  # the ReplayGain of the song playing (R7.5)
+        self._told_level = 1.0  # and of the song last told to follow it
         self._follows: set[int] = set()  # every ticket told to follow it
         self._seeking = 0  # seeks asked for and not yet done: the position is the place sought
         self._on = False  # the engine has a song, playing or paused
@@ -1291,6 +1304,8 @@ class Player(QObject):
         self._resume.connect(self._engine.resume)
         self._stop.connect(self._engine.stop)
         self._set_gain.connect(self._engine.set_volume)
+        self._choose.connect(self._engine.choose_device)
+        self._choose.emit(self._settings.device or "")  # heard as the thread starts
         self._engine.began.connect(self._on_began)
         self._engine.joined.connect(self._on_joined)
         self._engine.sought.connect(self._on_sought)
@@ -1587,7 +1602,10 @@ class Player(QObject):
             return
         self._error = ""
         self._show(info, info.path)
-        self._start_engine(self._whole(info.path), entry.key)
+        before = self.queue.played[-1].song if self.queue.played else None
+        after = self.queue.following()
+        level = self._replaygain(entry.song, before, after.song if after is not None else None)
+        self._start_engine(self._whole(info.path), entry.key, level)
         self._queue_changed()
 
     def _cue(self) -> None:
@@ -1619,15 +1637,36 @@ class Player(QObject):
             self._path = path
             self.nowPlaying.emit(path)
 
-    def _start_engine(self, path: str, key: int | None = None) -> None:
+    def _start_engine(self, path: str, key: int | None = None, level: float | None = None) -> None:
         """The engine plays `path`, the queue's entry `key` (None: outside the queue), under a new
-        ticket; what follows it is told after."""
+        ticket, at ReplayGain `level` (None: a file not in the index, as songs without tags play);
+        what follows it is told after."""
         if not self._started:
             self._thread.start()
             self._started = True
         self._requested = next(self._tickets)
         self._playing(key)
-        self._play.emit(path, self._requested)
+        self._level = self._replaygain(None, None, None) if level is None else level
+        self._play.emit(path, self._requested, self._level)
+
+    def _replaygain(self, song: int | None, before: int | None, after: int | None) -> float:
+        """The multiplier ReplayGain gives `song` (R7.5), played between `before` and `after` in
+        the queue (None: nothing there); a song the index doesn't have plays as one without
+        tags."""
+        found: dict[int, tuple[gain.Loudness, gain.AlbumPlace | None]] = {}
+        if song is not None and self._read is not None:
+            found = read_loudness(self._read(), [s for s in (song, before, after) if s is not None])
+
+        def place_of(other: int | None) -> gain.AlbumPlace | None:
+            return found[other][1] if other is not None and other in found else None
+
+        loudness = found[song][0] if song is not None and song in found else gain.Loudness()
+        in_order = gain.in_album_order(place_of(before), place_of(song), place_of(after))
+        level = gain.replaygain(
+            loudness, self._settings.replaygain, in_order, self._settings.replaygain_default
+        )
+        log.debug("ReplayGain for song %s: x%.3f (in album order: %s)", song, level, in_order)
+        return level
 
     def _playing(self, key: int | None) -> None:
         self._playing_key = key
@@ -1681,10 +1720,18 @@ class Player(QObject):
         if info is not None and not (self._refuse is not None and self._refuse(info.path)):
             path = self._whole(info.path)
         ticket = next(self._tickets) if path else 0
+        level = 1.0
+        if ticket and entry is not None and current is not None:
+            if entry.song == current.song:
+                level = self._level  # repeat One, or the song queued twice: as it plays now
+            else:
+                after = self.queue.after_following()
+                after_song = after.song if after is not None else None
+                level = self._replaygain(entry.song, current.song, after_song)
         if ticket:
             self._follows.add(ticket)
-        self._followed = (ticket, key)
-        self._follow.emit(self._requested, ticket, path)
+        self._followed, self._told_level = (ticket, key), level
+        self._follow.emit(self._requested, ticket, path, level)
 
     # ---------- what the engine says ----------
 
@@ -1721,6 +1768,7 @@ class Player(QObject):
             self._start(entry)  # gone from the index since: it says so
             return
         self._playing(entry.key)
+        self._level = self._told_level
         self._error = ""
         self._show(info, info.path)
         self._on, self._paused = True, False

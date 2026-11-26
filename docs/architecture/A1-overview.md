@@ -126,7 +126,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.playlists` | files | M3U and M3U8, smart playlists (R8) |
 | `musikata_core.organize` | files | Moving and renaming files, removing songs to the trash (R12, R2.11) |
 | `musikata_core.history` | files | The change history and Undo (A3.5, R4.9) |
-| `musikata_core.audio` | playback | `decode`, `join`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream` (A4, R7, R19) |
+| `musikata_core.audio` | playback | `decode`, `join`, `seam`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream` (A4, R7, R19) |
 | `musikata_core.analysis` | analysis | `peaks` and `spectrum` (A5.1, A5.2) |
 | `musikata_core.online` | online | `http`, `musicbrainz`, `coverart`, `lrclib` (A7) |
 | `musikata_core.update` | online | Checking for, fetching and checking a release (R1.9) |

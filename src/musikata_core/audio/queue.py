@@ -134,6 +134,20 @@ class Queue:
             return self._order[self._cursor + 1]
         return self._next_lap()[0] if self._repeat == ALL else None
 
+    def after_following(self) -> Entry | None:
+        """The song `ended` would give after the one `following` gives, without moving: what
+        follows the song to be joined, so ReplayGain can tell whether its album plays in order
+        (R7.5). None when nothing would. While shuffling with repeat All, a lap after the next one
+        isn't drawn yet: for a queue of one song, it is that song again."""
+        if self.current is None:
+            return None
+        if self._repeat == ONE:
+            return self.current
+        rest = self._order[self._cursor + 1 : self._cursor + 3]
+        while self._repeat == ALL and len(rest) < 2:  # a queue of one song laps twice
+            rest += self._next_lap()[: 2 - len(rest)]
+        return rest[1] if len(rest) > 1 else None
+
     def previous(self) -> Entry | None:
         """Previous (R6.5): the song before the current one; the first stays the first. A queue
         that has played out goes back to its last song."""

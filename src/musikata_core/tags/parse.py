@@ -141,6 +141,54 @@ def replaygain(value: str | None) -> float | None:
     return float(m.group(1).replace(",", ".")) if m else None
 
 
+R128_OFFSET = 5.0  # dB from EBU R 128's -23 LUFS, which Opus's R128_* gains are to, to ReplayGain's
+# 89 dB (-18 LUFS), as foobar2000, rsgain and opusgain take it
+
+
+def r128(value: str | None) -> float | None:
+    """An Opus R128_TRACK_GAIN or R128_ALBUM_GAIN (RFC 7845): a whole number of 1/256 dB to
+    -23 LUFS, as a ReplayGain gain in dB; None when it isn't a whole number that fits 16 bits."""
+    m = re.fullmatch(r"\s*([+-]?\d{1,6})\s*", value or "")
+    if not m or not -32768 <= int(m.group(1)) <= 32767:
+        return None
+    return int(m.group(1)) / 256 + R128_OFFSET
+
+
+RG_FIELDS = ("rg_track_gain", "rg_track_peak", "rg_album_gain", "rg_album_peak")
+
+
+def replaygain_of(raw: Raw) -> dict[str, float | None]:
+    """The four ReplayGain fields from REPLAYGAIN_* keys, in any case, as Vorbis comments and
+    APEv2 tags (mp3gain's, foobar2000's on MP3) hold them."""
+    by_key = {k.upper(): v for k, v in raw.items()}
+    return {
+        f: replaygain(text(by_key.get(f.replace("rg", "REPLAYGAIN").upper()))) for f in RG_FIELDS
+    }
+
+
+def rva2_replaygain(rva2: Sequence[tuple[str, float, float]]) -> dict[str, float | None]:
+    """The ReplayGain fields from ID3v2.4's RVA2 frames, (identification, master volume's gain in
+    dB, its peak), as Quod Libet and Mutagen's EasyID3 write them: "track" and "album"."""
+    out: dict[str, float | None] = dict.fromkeys(RG_FIELDS)
+    for desc, gain, peak in rva2:
+        which = desc.strip().lower()
+        if which in ("track", "album"):
+            out[f"rg_{which}_gain"] = gain
+            out[f"rg_{which}_peak"] = peak if peak > 0 else None
+    return out
+
+
+def with_replaygain(tags: Tags, more: Mapping[str, float | None]) -> Tags:
+    """`tags` with ReplayGain from another of the file's tags where its own has none (RVA2 beside
+    TXXX, an MP3's APEv2 tag beside its ID3): gain and peak go together, from one or the other."""
+    fields = dict(tags.__dict__)
+    for which in ("track", "album"):
+        gain, peak = f"rg_{which}_gain", f"rg_{which}_peak"
+        if fields[gain] is None and more.get(gain) is not None:
+            fields[gain], fields[peak] = more[gain], more.get(peak)
+    return Tags(**fields)
+
+
 # ---------- each kind's fields ----------
 
 # Vorbis comments (FLAC, Ogg, Opus): keys upper-cased; several values are several fields
@@ -154,7 +202,8 @@ _VORBIS = {
 def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     """Vorbis comments, keys in any case (read.py upper-cases them): A3.2's middle column. An
     album artist under "ALBUM ARTIST" (foobar2000's older form) is read too; DESCRIPTION is the
-    comment when COMMENT isn't there."""
+    comment when COMMENT isn't there; an Opus file's R128_TRACK_GAIN and R128_ALBUM_GAIN are its
+    ReplayGain gains (`r128`)."""
     get = raw.get
     track, track_total = number_pair(text(get("TRACKNUMBER")))
     disc, disc_total = number_pair(text(get("DISCNUMBER")))
@@ -162,6 +211,12 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     fields = {k: text(get(v)) for k, v in _VORBIS.items()}
     fields["albumartist"] = fields["albumartist"] or text(get("ALBUM ARTIST"))
     fields["comment"] = fields["comment"] or text(get("DESCRIPTION"))
+    gains = replaygain_of(raw)
+    # Opus's own gains (RFC 7845) win over REPLAYGAIN_* there; they carry no peak
+    for which in ("track", "album"):
+        opus = r128(text(get(f"R128_{which.upper()}_GAIN")))
+        if opus is not None:
+            gains[f"rg_{which}_gain"] = opus
     return Tags(
         **fields,
         track=track,
@@ -173,10 +228,10 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
         genres=genres(get("GENRE") or ()),
         compilation=flag(text(get("COMPILATION"))),
         rating=vorbis_rating(text(get("RATING")), text(get("FMPS_RATING"))),
-        rg_track_gain=replaygain(text(get("REPLAYGAIN_TRACK_GAIN"))),
-        rg_track_peak=replaygain(text(get("REPLAYGAIN_TRACK_PEAK"))),
-        rg_album_gain=replaygain(text(get("REPLAYGAIN_ALBUM_GAIN"))),
-        rg_album_peak=replaygain(text(get("REPLAYGAIN_ALBUM_PEAK"))),
+        rg_track_gain=gains["rg_track_gain"],
+        rg_track_peak=gains["rg_track_peak"],
+        rg_album_gain=gains["rg_album_gain"],
+        rg_album_peak=gains["rg_album_peak"],
         has_cover=has_cover,
     )
 
@@ -192,11 +247,13 @@ def from_id3(
     popms: Sequence[tuple[str, int]] = (),
     comments: Sequence[tuple[str, str]] = (),
     has_cover: bool = False,
+    rva2: Sequence[tuple[str, float, float]] = (),
 ) -> Tags:
     """ID3v2 frames by id (TCON already as genre names: read.py takes them from Mutagen, which
     turns ID3v1's numbers, "(17)", into names, R9.3), TXXX frames as "TXXX:<description>", each
-    user's POPM, and COMM frames as (description, text). The comment is the COMM without a
-    description (A3.2), else the first."""
+    user's POPM, COMM frames as (description, text), and RVA2 frames as `rva2_replaygain` takes
+    them. The comment is the COMM without a description (A3.2), else the first. ReplayGain is
+    TXXX's, else RVA2's."""
     get = raw.get
     track, track_total = number_pair(text(get("TRCK")))
     disc, disc_total = number_pair(text(get("TPOS")))
@@ -214,7 +271,7 @@ def from_id3(
                 return text(values)
         return None
 
-    return Tags(
+    tags = Tags(
         **{k: text(get(v)) for k, v in _ID3.items()},
         track=track,
         tracktotal=track_total,
@@ -232,6 +289,7 @@ def from_id3(
         rg_album_peak=replaygain(txxx("REPLAYGAIN_ALBUM_PEAK")),
         has_cover=has_cover,
     )
+    return with_replaygain(tags, rva2_replaygain(rva2))
 
 
 _MP4 = {

@@ -1,10 +1,11 @@
 """The shared settings (R13.9, A2.10): `settings.json` in the shared settings folder (R1.5), what
 belongs to this computer and this person, the configured root (R2.1) among it.
 
-This much is what the configured root needs: where the file is, reading it in whatever shape a
-person, a sync tool or another version of MusiKata left it, and writing the root back, every field
-it doesn't know kept (A2.10). The rest of the shared settings and the root's own `settings.json`
-come with Settings (R13).
+This much is what the configured root and playing need: where the file is, reading it in whatever
+shape a person, a sync tool or another version of MusiKata left it, and writing the root back,
+every field it doesn't know kept (A2.10); and Playback's output device and ReplayGain (R13.7),
+read only, until Settings (R13) writes them. The rest of the shared settings and the root's own
+`settings.json` come with Settings.
 
 A value it can't use is reported in the App log and its default used (R13.9); a file of a newer
 format is read for what it can and never written (A2.10)."""
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sys
 import uuid
@@ -44,17 +46,32 @@ def shared_path(env: Mapping[str, str], platform: str = sys.platform) -> str:
     return os.path.join(shared_dir(env, platform), NAME)
 
 
+REPLAYGAIN_MODES = ("album", "track", "off")  # R7.5, R13.7: Album the default
+
+
+@dataclass(frozen=True)
+class Playback:
+    """R13.7's Playback as read: the output device chosen, by its id (None: the system's default,
+    R7.7); ReplayGain's mode, one of REPLAYGAIN_MODES (R7.5); and the pre-amp in dB for songs
+    without ReplayGain tags (R7.5's -6 dB)."""
+
+    device: str | None = None
+    replaygain: str = "album"
+    replaygain_default: float = -6.0
+
+
 @dataclass(frozen=True)
 class Shared:
     """The shared settings as read: the configured root (None: none yet, the first start, R2.1),
     Watch for changes (R13.2), this computer's id and name (A2.8); `data`, the file as read, which
     a rewrite keeps; `newer`, a newer MusiKata's format, never written; and what couldn't be used,
-    for the log."""
+    for the log. `playback` is R13.7's (`Playback`)."""
 
     root: str | None = None
     watch: bool = True
     computer_id: str | None = None
     computer_name: str | None = None
+    playback: Playback = field(default_factory=Playback)
     data: Mapping[str, object] = field(default_factory=dict)
     newer: bool = False
     problems: tuple[str, ...] = ()
@@ -74,6 +91,44 @@ def _root(value: object, home: str, problems: list[str]) -> str | None:
         problems.append(f"library.root isn't a whole path: {value!r}")
         return None
     return os.path.normpath(value)
+
+
+def _playback(value: object, problems: list[str]) -> Playback:
+    """playback: what of it can be used, the rest its defaults (R13.9)."""
+    if not isinstance(value, dict):
+        problems.append(f"playback isn't a group: {value!r}")
+        return Playback()
+    default = Playback()
+    device = value.get("device")
+    if device is not None and not (isinstance(device, str) and device):
+        problems.append(f"playback.device isn't a device's id: {device!r}; the system's default")
+        device = None
+    mode = value.get("replaygain", default.replaygain)
+    if isinstance(mode, str) and mode.strip().lower() in REPLAYGAIN_MODES:
+        mode = mode.strip().lower()  # "Album", as a person writes it
+    else:
+        problems.append(f"playback.replaygain isn't album, track or off: {mode!r}; album")
+        mode = default.replaygain
+    return Playback(device, mode, _decibels(value, "replaygain_default", problems))
+
+
+def _decibels(group: Mapping[str, object], key: str, problems: list[str]) -> float:
+    """A number of dB, or a number written as text ("-6", "-6 dB"); its default when it is
+    neither."""
+    value = group.get(key, getattr(Playback, key))
+    number: float | None = None
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value.strip().removesuffix("dB").strip())
+        except ValueError:
+            number = None
+    if number is None or not math.isfinite(number):
+        default: float = getattr(Playback, key)
+        problems.append(f"playback.{key} isn't a number of dB: {value!r}; {default:g}")
+        return default
+    return number
 
 
 def parse(text: str, home: str) -> Shared:
@@ -111,11 +166,13 @@ def parse(text: str, home: str) -> Shared:
     cid, name = computer.get("id"), computer.get("name")
     if cid is not None and not (isinstance(cid, str) and cid):
         problems.append(f"computer.id isn't an id: {cid!r}; a new one is made")
+    playback = _playback(data.get("playback", {}), problems)
     return Shared(
         root=root,
         watch=watch,
         computer_id=cid if isinstance(cid, str) and cid else None,
         computer_name=name if isinstance(name, str) else None,
+        playback=playback,
         data=data,
         newer=newer,
         problems=tuple(problems),

@@ -143,7 +143,10 @@ def load(
     library = Library(
         root, index, home_of(env), pool, clock=clock, watching=True, missing=missing, given=given
     )
-    player = Player(root, playback(), refuse=library.unplayable, read=index.read)
+    shared = settings.load(settings.shared_path(env), home_of(env))  # Playback's (R13.7)
+    player = Player(
+        root, playback(), refuse=library.unplayable, read=index.read, playback=shared.playback
+    )
     player.nowPlaying.connect(library.show_playing)
     library.property("folders").play.connect(player.play_songs)
     engine = QQmlApplicationEngine()

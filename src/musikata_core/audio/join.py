@@ -15,16 +15,28 @@ decoded.
 The songs are told by tickets, given by the caller: the same file can be in the queue twice, or
 follow itself with repeat One. What follows a song can change until the device has taken the next
 song's first frame: what the device hasn't taken is then decoded again from where it has got to,
-with the new song after it."""
+with the new song after it.
+
+Each song comes with its ReplayGain, as a multiplier (gain.py, R7.5), applied to its frames as they
+go into the ring; where it differs from the song before's, it is ramped there over 50 ms from the
+join (R7.6.1, A4.4). Where songs of different rates meet, each resampler is primed with its song
+continued past the seam (seam.py), so the join doesn't click (R7.6). When the device changes
+(A4.6, R7.7), `move` goes on into a stream at the new device's rate from the same instant of the
+song."""
 
 from __future__ import annotations
 
 import itertools
 import logging
+import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
+import numpy as np
+from numpy.typing import NDArray
+
+from . import gain, seam
 from .decode import DecodeError, Resampler, seek_plan
 from .stream import BLOCK_SECONDS, STEP_BLOCKS, Block, Stream, frames_of
 
@@ -59,7 +71,9 @@ Resampling = Callable[[int, int, int], Resampler]  # (rate, device, channels) to
 class Playing:
     """A song on its way to the device: its ticket and path, the song, the place in the stream
     of its frame `offset` (its first frame there: 0 from its start, a seek's frame after one), the
-    sample it decodes next, and what is still to decode (None once all of it has gone in)."""
+    sample it decodes next, and what is still to decode (None once all of it has gone in). `gain`
+    multiplies its frames (its ReplayGain, R7.5), ramped from `ramp_from` (the gain the song
+    before ended at) when it joined with another."""
 
     ticket: int
     path: str
@@ -69,6 +83,8 @@ class Playing:
     reached: int = 0
     blocks: Iterator[Block] | None = None
     primed: list[Block] = field(default_factory=list)
+    gain: float = 1.0
+    ramp_from: float | None = None
 
 
 @dataclass(frozen=True)
@@ -104,8 +120,8 @@ class Feed:
         self._opener, self._resampling = opener, resampling
         self.flight: list[Playing] = []  # the first is heard; the last is being decoded
         self._ahead: Playing | None = None  # opened to follow the last, not yet gone in
-        self._followers: dict[int, tuple[int, str]] = {}  # a ticket to the ticket and path told
-        # to follow it
+        self._followers: dict[int, tuple[int, str, float]] = {}  # a ticket to the ticket, path
+        # and gain told to follow it
         self._pending: list[Block] = []  # resampled, waiting for room in the ring
         self._done = False  # the last song has all gone in, and nothing follows it
         # the resampler the songs go through, from the place of the first frame it gives
@@ -113,15 +129,18 @@ class Feed:
         self._base = 0  # the place of the first frame it gives
         self._given = 0  # the samples given it
         self._drop = 0  # the frames it gives still to drop (a seek's)
+        self._made = 0  # the frames it has given, those dropped included
+        self._history = np.zeros((0, stream.channels), np.float32)  # the last samples given it
 
     @property
     def heard(self) -> Playing | None:
         """The song the device plays."""
         return self.flight[0] if self.flight else None
 
-    def start(self, ticket: int, path: str, song: Song) -> None:
-        """`song` plays from its start, first in an empty stream."""
-        playing = Playing(ticket, path, song, mark=self.stream.written)
+    def start(self, ticket: int, path: str, song: Song, gain: float = 1.0) -> None:
+        """`song` plays from its start, first in an empty stream, its frames multiplied by
+        `gain`."""
+        playing = Playing(ticket, path, song, mark=self.stream.written, gain=gain)
         self.flight = [playing]
         self._decode(playing, 0)
 
@@ -137,7 +156,8 @@ class Feed:
     def _run(self, rate: int, base: int, drop: int = 0) -> None:
         """A resampler of its own from `rate`, its first frame at place `base`."""
         self._resampler = self._resampling(rate, self.stream.rate, self.stream.channels)
-        self._base, self._given, self._drop = base, 0, drop
+        self._base, self._given, self._drop, self._made = base, 0, drop, 0
+        self._history = np.zeros((0, self.stream.channels), np.float32)
 
     def _decode(self, playing: Playing, frame: int) -> None:
         """`playing` decoded from its frame `frame` at the device's rate, which goes to place
@@ -187,14 +207,31 @@ class Feed:
     def _resample(self, block: Block) -> None:
         assert self._resampler is not None
         self._given += len(block)
+        if self._resampler.rate != self.stream.rate:  # kept to prime the seam with (seam.py)
+            self._history = np.concatenate([self._history, block])[-seam.FIT :]
         self._out(self._resampler.resample(block))
 
     def _out(self, frames: Block) -> None:
+        self._made += len(frames)
         if self._drop:
             cut = min(self._drop, len(frames))
             frames, self._drop = frames[cut:], self._drop - cut
         if len(frames):
-            self._pending.append(frames)
+            place = self.stream.written + sum(len(f) for f in self._pending)
+            self._pending.append(gain.apply(frames, self._gains(place, len(frames))))
+
+    def _steps(self) -> list[gain.Step]:
+        return [gain.Step(p.mark, p.gain, p.ramp_from) for p in self.flight]
+
+    def _gains(self, place: int, frames: int) -> NDArray[np.float32] | float:
+        """The gain of each of `frames` frames from `place` (A4.4): one for all of them, unless a
+        ramp or a join falls among them."""
+        steps, ramp = self._steps(), self._ramp()
+        first = next((p for p in reversed(steps) if p.place <= place), steps[0])  # in place order
+        later = any(place < p.place < place + frames for p in steps)
+        if not later and (first.start is None or place - first.place >= ramp):
+            return first.gain
+        return gain.gains(place, frames, steps, ramp)
 
     def _feed_pending(self) -> None:
         while self._pending and self.stream.ring.free:
@@ -266,14 +303,14 @@ class Feed:
     def _open(self, last: Playing) -> None:
         """Opens the song to follow `last` and decodes its first blocks (A4.2); one that can't
         be opened isn't joined, and `last` ends there."""
-        ticket, path = self._followers[last.ticket]
+        ticket, path, level = self._followers[last.ticket]
         try:
             song = self._opener(path)
         except Exception as e:  # noqa: BLE001  (a song that won't open isn't played, here)
             self._unjoinable(last, path, e)
             return
         blocks = song.blocks(frames_of(BLOCK_SECONDS, song.rate))
-        playing = Playing(ticket, path, song, blocks=blocks)
+        playing = Playing(ticket, path, song, blocks=blocks, gain=level)
         try:
             playing.primed = list(itertools.islice(blocks, PRIME_BLOCKS))
         except Exception as e:  # noqa: BLE001
@@ -300,15 +337,52 @@ class Feed:
             following.mark = self._base + frames_until(
                 self._given, following.song.rate, self.stream.rate
             )
-        else:
+        elif following is None:
             self._out(self._resampler.flush())
-            if following is None:
-                self._done = True
-                return
+            self._done = True
+            return
+        else:
+            self._end_primed()
             following.mark = self.stream.written + sum(len(f) for f in self._pending)
-            self._run(following.song.rate, following.mark)
+            self._start_primed(following)
+        at = gain.gain_at(following.mark - 1, self._steps(), self._ramp())
+        following.ramp_from = None if at == following.gain else at
         self.flight.append(following)
         self._ahead = None
+
+    def _ramp(self) -> int:
+        return frames_of(gain.RAMP_SECONDS, self.stream.rate)
+
+    def _end_primed(self) -> None:
+        """The last song's resampler to its end before a song of another rate: given the song
+        continued past its end (seam.py) and flushed, and what it made of the continuation
+        dropped, so its last frames are what they would be if the song went on (R7.6)."""
+        assert self._resampler is not None
+        resampler = self._resampler
+        end = self._base + frames_until(self._given, resampler.rate, self.stream.rate)
+        if resampler.rate == self.stream.rate:
+            self._out(resampler.flush())
+            return
+        more = seam.continued(self._history, seam.EXTEND)
+        tail = np.concatenate([resampler.resample(more), resampler.flush()])
+        self._out(tail[: max(0, end - self._base - self._made)])
+
+    def _start_primed(self, following: Playing) -> None:
+        """A resampler of its own for `following`, a song of another rate starting at its mark:
+        given first the song continued back before its start (seam.py), on an instant where its
+        samples and the device's frames fall together, and what it makes of that dropped, so its
+        first frames are what they would be if the song had been going already (R7.6)."""
+        rate = following.song.rate
+        if rate == self.stream.rate or not following.primed:
+            self._run(rate, following.mark)
+            return
+        common = math.gcd(rate, self.stream.rate)
+        step_in, step_out = rate // common, self.stream.rate // common
+        k = -(-seam.EXTEND // step_in)
+        self._run(rate, following.mark - k * step_out, k * step_out)
+        start = np.concatenate(following.primed)[: seam.FIT]
+        self._resample(seam.preceding(start, k * step_in))
+        self._history = np.zeros((0, self.stream.channels), np.float32)  # only the song's own
 
     # ---------- what the device has played ----------
 
@@ -333,15 +407,15 @@ class Feed:
 
     # ---------- changes ----------
 
-    def follow(self, after: int, ticket: int, path: str) -> bool:
+    def follow(self, after: int, ticket: int, path: str, gain: float = 1.0) -> bool:
         """The song with ticket `after` is to be followed by `path` with `ticket` (0: by
-        nothing). What is in the stream after it is taken back and decoded again while the
-        device has taken none of the song that followed it; once it has, nothing changes and this
-        is False."""
+        nothing), its frames multiplied by `gain`. What is in the stream after it is taken back
+        and decoded again while the device has taken none of the song that followed it; once it
+        has, nothing changes and this is False."""
         at = next((i for i, p in enumerate(self.flight) if p.ticket == after), None)
         if at is None:
             return False
-        want = (ticket, path) if ticket else None
+        want = (ticket, path, gain) if ticket else None
         if self._followers.get(after) == want:
             return True
         if at + 1 < len(self.flight) and self.flight[at + 1].mark < self.stream.taken:
@@ -369,5 +443,38 @@ class Feed:
             later.song.close()
         del self.flight[1:]
         playing.mark, playing.offset = self.stream.taken, max(0, frame)
+        playing.ramp_from = None  # what it ramped from is no longer before it
         self._again()
         return True
+
+    def move(self, stream: Stream, opener: Opener, frame: int) -> Failure | None:
+        """The device changed (A4.6, R7.7): from now on the songs go into `stream`, at the new
+        device's rate and channels, opened by `opener` for it. The song the device had played up
+        to place `frame` of the old stream goes on from the same instant of it (to the frame, at
+        the new rate), opened again; the songs after it are let go of, and the one to follow it
+        is opened again when it is due. A Failure when the song can't be opened again."""
+        self.hear(frame)
+        playing = self.heard
+        old = self.stream.rate
+        for later in self.flight[1:]:
+            later.song.close()
+        del self.flight[1:]
+        self._drop_ahead()
+        self.stream, self._opener = stream, opener
+        self._pending, self._done = [], False
+        if playing is None:
+            return None
+        self._followers = {k: v for k, v in self._followers.items() if k == playing.ticket}
+        at = max(0, frame - playing.mark) + playing.offset  # its frame at the old rate
+        playing.song.close()
+        try:
+            playing.song = opener(playing.path)
+        except Exception as e:  # noqa: BLE001  (a song that won't open again stops here)
+            self.flight = []
+            if not isinstance(e, DecodeError):
+                log.error("opening %s again failed", playing.path, exc_info=e)
+            return Failure(playing.ticket, why_of(e))
+        playing.mark, playing.offset = stream.written, at * stream.rate // old
+        playing.ramp_from = None
+        self._decode(playing, playing.offset)
+        return None

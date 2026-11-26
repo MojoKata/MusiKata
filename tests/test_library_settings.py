@@ -118,6 +118,45 @@ def test_watch_that_isnt_true_or_false_is_on(watch, problems):
     assert len(got.problems) == problems
 
 
+def test_a2_10s_playback_gives_the_device_replaygain_and_its_pre_amp():
+    example = {"device": None, "replaygain": "album", "replaygain_default": -6.0, "resume": True}
+    got = parse({"format": 1, "playback": example})
+    assert got.playback == settings.Playback(None, "album", -6.0) == settings.Shared().playback
+    dac = "alsa_output.usb-DAC.analog-stereo"
+    chosen = parse({"format": 1, "playback": {"device": dac, "replaygain": "track",
+                                              "replaygain_default": -9}})  # fmt: skip
+    assert chosen.playback == settings.Playback(dac, "track", -9.0)
+    assert chosen.problems == () and parse({"format": 1}).playback == settings.Playback()
+
+
+@pytest.mark.parametrize(
+    "playback, want, problem",
+    [
+        ("loud", settings.Playback(), "playback isn't a group"),
+        ({"device": 3}, settings.Playback(), "isn't a device's id"),
+        ({"device": ""}, settings.Playback(), "isn't a device's id"),
+        ({"replaygain": " Track "}, settings.Playback(replaygain="track"), ""),
+        ({"replaygain": "OFF"}, settings.Playback(replaygain="off"), ""),
+        ({"replaygain": "smart"}, settings.Playback(), "isn't album, track or off"),
+        ({"replaygain": None}, settings.Playback(), "isn't album, track or off"),
+        ({"replaygain_default": "-8.5 dB"}, settings.Playback(replaygain_default=-8.5), ""),
+        ({"replaygain_default": "-3"}, settings.Playback(replaygain_default=-3.0), ""),
+        ({"replaygain_default": "quiet"}, settings.Playback(), "isn't a number of dB"),
+        ({"replaygain_default": True}, settings.Playback(), "isn't a number of dB"),
+        ({"replaygain_default": None}, settings.Playback(), "isn't a number of dB"),
+    ],
+)
+def test_playback_values_broken_in_another_case_or_as_text(playback, want, problem):
+    got = parse({"format": 1, "playback": playback})
+    assert got.playback == want
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_a_pre_amp_that_isnt_finite_takes_its_default():
+    got = parse('{"format": 1, "playback": {"replaygain_default": NaN}}')  # Python's json reads it
+    assert got.playback.replaygain_default == -6.0 and "isn't a number of dB" in got.problems[0]
+
+
 @pytest.mark.parametrize("computer, cid", [({"id": "x"}, "x"), ({"id": ""}, None),
                                            ({"id": 7}, None), ("x", None), ({}, None)])  # fmt: skip
 def test_a_computer_missing_or_with_a_broken_id_has_none(computer, cid):

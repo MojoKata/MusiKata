@@ -104,7 +104,7 @@ and mutation testing finds them only slowly.
   thread.
 - Work crosses threads by Qt signals queued to the receiver, or through the ring buffers of A4.1
   and A4.3; no object is changed from two threads.
-- The sound device's callback only copies samples out of the ring buffer.
+- The sound device's callback only copies samples out of the ring buffer, at the volume (A4.4).
 
 ## QML
 

@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from musikata_core.audio import decode, join, stream
+from musikata_core.audio import decode, gain, join, seam, stream
 from musikata_core.audio.decode import DecodeError
 
 RATE = 100  # the device's and the numbered songs' rate: a frame a hundredth of a second
@@ -101,11 +101,11 @@ class Device:
         self.made.setdefault(path, []).append(song)
         return song
 
-    def start(self, path, ticket=1):
+    def start(self, path, ticket=1, gain=1.0):
         song = self.songs[path]
         song = song() if callable(song) else song
         self.made.setdefault(path, []).append(song)
-        self.feed.start(ticket, path, song)
+        self.feed.start(ticket, path, song, gain)
         return self
 
     def fill(self):
@@ -136,8 +136,8 @@ def played(*parts):
     return np.concatenate([numbered(*p) for p in parts])
 
 
-def follow(device, after, ticket, path):
-    return device.feed.follow(after, ticket, path)
+def follow(device, after, ticket, path, gain=1.0):
+    return device.feed.follow(after, ticket, path, gain)
 
 
 # ---------- the join ----------
@@ -457,7 +457,8 @@ def test_songs_of_one_rate_join_as_if_they_were_one_song():
 
 def test_songs_of_other_rates_and_channels_join_each_at_its_exact_length():
     # a mono song at 44.1 kHz, a stereo one at 96 kHz, one at the device's 48 kHz: each in the
-    # stream exactly as it plays alone, starting where the one before ended, so nothing drifts
+    # stream as it plays alone, starting where the one before ended, so nothing drifts; only
+    # their edges at the seams differ, primed there (seam.py)
     mono = sine(44100, 12_345)[:, :1].repeat(2, axis=1)  # folded to the device's two channels
     songs = {"a": Wave(mono, 44100), "b": Wave(sine(96000, 7_777), 96000),
              "c": Wave(sine(48000, 4_800), 48000)}  # fmt: skip
@@ -469,8 +470,195 @@ def test_songs_of_other_rates_and_channels_join_each_at_its_exact_length():
     parts = [alone(mono, 44100, 48000), alone(songs["b"].samples, 96000, 48000),
              songs["c"].samples]  # fmt: skip
     assert [len(p) for p in parts] == [13_437, 3_889, 4_800]
-    assert np.array_equal(d.out(), np.concatenate(parts))
-    assert d.began == ["b", "c"] and d.stream.short == 0
+    out, whole = d.out(), np.concatenate(parts)
+    assert len(out) == len(whole) and d.began == ["b", "c"] and d.stream.short == 0
+    away = np.ones(len(whole), bool)
+    for seam_at in (13_437, 13_437 + 3_889):
+        away[seam_at - 40 : seam_at + 40] = False
+    assert np.array_equal(out[away], whole[away])
+    assert np.abs(out - whole).max() < 0.5  # at the seams: what the resamplers made up, changed
+
+
+def chord(times):
+    """Two tones, 1 and 7 kHz, at the instants `times` (seconds), in stereo."""
+    x = 0.25 * np.sin(2 * np.pi * 1000 * times) + 0.25 * np.sin(2 * np.pi * 7000 * times)
+    return np.stack([x, x], axis=1).astype(np.float32)
+
+
+def tone(hz):
+    def at(times):
+        x = 0.5 * np.sin(2 * np.pi * hz * times)
+        return np.stack([x, x], axis=1).astype(np.float32)
+
+    return at
+
+
+@pytest.mark.parametrize("signal", [tone(440), tone(5000), chord], ids=["440", "5k", "chord"])
+@pytest.mark.parametrize(
+    "rate_a, rate_b",
+    [(44100, 96000), (96000, 44100), (44100, 48000), (48000, 44100), (22050, 48000)],
+)
+def test_a_tone_going_on_across_songs_of_other_rates_doesnt_click_at_the_seam(
+    signal, rate_a, rate_b
+):
+    """The tone the two songs make together, each at its own rate (b's first sample where the
+    stream puts it), heard through the seam with no more error than resampling makes anywhere:
+    a resampler of each song's own, unprimed, was off by up to a quarter of full scale there."""
+    n = rate_a * 3 // 10
+    seam_at = join.frames_until(n, rate_a, 48000)
+    a = signal(np.arange(n) / rate_a)
+    b = signal(seam_at / 48000 + np.arange(rate_b // 5) / rate_b)
+    d = Device({"a": Wave(a, rate_a), "b": Wave(b, rate_b)}, rate=48000, step=480).start("a")
+    follow(d, 1, 2, "b")
+    d.run()
+    out = d.out()
+    near = slice(seam_at - 300, seam_at + 300)
+    heard = signal(np.arange(len(out)) / 48000)
+    assert np.abs(out[near] - heard[near]).max() < 1e-4
+    assert d.began == ["b"] and d.feed.flight[0].mark == seam_at
+
+
+def test_a_seam_after_silence_or_a_song_too_short_to_predict_is_primed_with_silence():
+    quiet = np.zeros((441, 2), np.float32)
+    d = Device({"a": Wave(quiet, 44100), "b": Wave(sine(96000, 9600), 96000)}, rate=48000,
+               step=480).start("a")  # fmt: skip
+    follow(d, 1, 2, "b")
+    d.run()
+    out = d.out()
+    assert np.abs(out[:400]).max() < 1e-6 and len(out) == 480 + 4800
+    assert np.abs(seam.continued(np.zeros((0, 2), np.float32), 4)).max() == 0
+    assert seam.continued(np.ones((3, 1), np.float32), 0).shape == (0, 1)
+    assert len(seam.predictor(np.array([0.5]))) == 1  # one sample: nothing to fit
+    assert np.allclose(seam.continued(np.full((64, 1), 0.5, np.float32), 8), 0.5, atol=1e-3)
+
+
+def test_a_prediction_never_goes_past_full_scale():
+    rising = np.linspace(0.0, 0.99, 64, dtype=np.float32)[:, None]
+    assert np.abs(seam.continued(rising, 200)).max() <= 1.0
+    assert np.abs(seam.preceding(rising[::-1].copy(), 200)).max() <= 1.0
+
+
+# ---------- gain (R7.5, R7.6.1, A4.4) ----------
+
+
+def level(rate, n, value=0.5):
+    """A song holding one level, as a step shows its gain plainly."""
+    return Wave(np.full((n, 2), value, np.float32), rate)
+
+
+def test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join():
+    d = Device({"a": level(48000, 4800), "b": level(48000, 9600)}, rate=48000, step=480)
+    d.start("a", gain=1.0)
+    follow(d, 1, 2, "b", 0.5)
+    d.run()
+    out, ramp = d.out()[:, 0], join.frames_of(gain.RAMP_SECONDS, 48000)
+    assert ramp == 2400 and len(out) == 14_400
+    assert np.all(out[:4800] == 0.5) and np.all(out[4800 + ramp :] == 0.25)
+    steps = np.diff(out[4799 : 4800 + ramp + 1])
+    assert np.all(steps <= 0) and np.abs(steps).max() <= 0.25 / ramp * 1.001  # no click
+    assert out[4800] < 0.5 and out[4800 + ramp - 1] == 0.25
+
+
+def test_a_join_with_no_change_of_gain_isnt_ramped_and_a_song_alone_has_its_gain():
+    d = Device({"a": level(100, 300), "b": level(100, 300)}).start("a", gain=0.5)
+    follow(d, 1, 2, "b", 0.5)
+    d.run()
+    assert np.all(d.out() == 0.25) and d.feed.heard.ramp_from is None
+
+
+def test_a_change_of_gain_across_rates_ramps_from_the_seam_too():
+    d = Device({"a": level(44100, 4410), "b": level(96000, 9600)}, rate=48000, step=480)
+    d.start("a", gain=0.5)
+    follow(d, 1, 2, "b", 1.0)
+    d.run()
+    out = d.out()[:, 0]
+    assert (
+        np.abs(out[200:4600] - 0.25).max() < 1e-3 and np.abs(out[4800 + 2600 :] - 0.5).max() < 1e-3
+    )
+    assert np.abs(np.diff(out[4700:7300])).max() < 0.25 / 2400 * 1.5
+
+
+def test_a_song_shorter_than_the_ramp_hands_on_the_gain_it_reached():
+    d = Device({"a": level(100, 300), "b": level(100, 2), "c": level(100, 300)}).start("a")
+    follow(d, 1, 2, "b", 0.0)
+    d.run(until=lambda: d.began == ["b"])
+    follow(d, 2, 3, "c", 0.0)
+    d.run()
+    out = d.out()[:, 0]  # the ramp is 5 frames at 100 Hz: b's two take it 2/5 of the way down
+    assert np.allclose(out[300:302], [0.4, 0.3]) and np.allclose(
+        out[302:307], [0.24, 0.18, 0.12, 0.06, 0.0]
+    )
+
+
+def test_a_next_song_told_again_with_another_gain_goes_in_with_that_one():
+    d = Device({"a": level(100, 200), "b": level(100, 100)}).start("a")
+    follow(d, 1, 2, "b", 1.0)
+    d.fill()
+    assert follow(d, 1, 2, "b", 0.5)
+    d.run()
+    assert np.all(d.out()[210:, 0] == 0.25)
+
+
+def test_a_seek_plays_the_song_on_at_its_gain_with_no_ramp():
+    d = Device({"a": level(100, 300), "b": level(100, 3000)}).start("a")
+    follow(d, 1, 2, "b", 0.5)
+    d.run(until=lambda: d.stream.taken >= 302)
+    assert d.feed.heard.ramp_from == 1.0
+    assert d.feed.seek(2, 1000)
+    assert d.feed.heard.ramp_from is None
+    d.run()
+    assert np.all(d.out()[310:, 0] == 0.25)
+
+
+# ---------- the device changing (A4.6, R7.7) ----------
+
+
+def test_a_new_device_goes_on_from_the_frame_the_old_one_had_played():
+    d = Device({"a": Tune(0, 900), "b": Tune(100_000, 100)}).start("a")
+    follow(d, 1, 2, "b")
+    d.run(until=lambda: d.stream.taken >= 300)
+    old = d.made["a"][0]
+    new = stream.Stream(RATE, 2)
+    assert d.feed.move(new, d.open, 250) is None  # the device had played 250 of the 300 taken
+    assert old.closed and d.feed.stream is new and d.feed.heard.mark == 0
+    assert d.feed.position(0) == 2.5
+    d.stream, d.read = new, []
+    d.run()
+    assert np.array_equal(d.out(), played((0, 250, 650), (100_000, 0, 100)))
+    assert d.began == ["b"]
+
+
+def test_a_new_device_of_another_rate_hears_the_song_on_from_the_same_instant():
+    a = sine(44100, 44100)
+    d = Device({"a": Wave(a, 44100)}, rate=48000, step=480).start("a")
+    d.run(until=lambda: d.stream.taken >= 9600)
+    d.songs["a"] = Wave(a[:, :1], 44100)  # opened again for a device of one channel
+    new = stream.Stream(96000, 1)
+    assert d.feed.move(new, d.open, 4800) is None  # 0.1 s in
+    assert d.feed.position(0) == 0.1
+    d.stream, d.read = new, []
+    d.run()
+    out = d.out()
+    assert len(out) == 96000 - 9600
+    on = 0.5 * np.sin(2 * np.pi * 440 * (0.1 + np.arange(2000) / 96000))
+    assert np.abs(out[:2000, 0] - on).max() < 1e-3  # resampled from there, no click at its start
+
+
+def test_a_song_that_cant_be_opened_for_the_new_device_fails():
+    d = Device({"a": Tune(0, 900)}).start("a")
+    d.run(until=lambda: d.stream.taken >= 100)
+    d.songs["a"] = DecodeError("couldn't open a: gone")
+    failure = d.feed.move(stream.Stream(RATE, 2), d.open, 50)
+    assert failure == join.Failure(1, "couldn't open a: gone") and d.feed.heard is None
+    assert join.Feed(stream.Stream(RATE, 2), d.open).move(stream.Stream(RATE, 1), d.open, 0) is None
+
+
+def test_a_song_whose_opener_breaks_for_the_new_device_is_logged(caplog):
+    d = Device({"a": Tune(0, 900)}).start("a")
+    d.run(until=lambda: d.stream.taken >= 100)
+    d.songs["a"] = RuntimeError("a bug")
+    failure = d.feed.move(stream.Stream(RATE, 2), d.open, 50)
+    assert failure.why == "decoding failed (RuntimeError)" and "a bug" in caplog.text
 
 
 # ---------- the stream's own steps ----------

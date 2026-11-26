@@ -159,11 +159,26 @@ A table row is traced whole, its cells as written.
 |---|---|---|
 | R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #0 |
 
+## 7.5. ReplayGain
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.5 | Track, Album (the default) or Off, a setting (R13) | test_album_is_the_album_gain_in_order_and_the_track_gain_otherwise, test_track_off_and_the_pre_amp_are_the_settings, test_a2_10s_playback_gives_the_device_replaygain_and_its_pre_amp, test_playback_values_broken_in_another_case_or_as_text, later: #0 |
+| R7.5 | Album uses the album gain when the album is played in order and the track gain otherwise | test_album_is_the_album_gain_in_order_and_the_track_gain_otherwise, test_a_song_with_one_gain_uses_it_whichever_is_asked_for, test_an_album_is_in_order_from_any_of_its_songs_on_and_a_song_alone_isnt, test_an_album_played_in_order_plays_at_its_album_gain_song_after_song, test_an_album_from_its_second_song_on_is_in_order_and_one_song_alone_isnt, test_songs_out_of_their_albums_order_play_at_their_track_gains, test_a_song_repeated_keeps_its_gain_and_a_file_outside_the_index_has_the_pre_amp, test_a_gain_is_held_under_the_peak_so_it_never_clips, test_no_gain_takes_a_peak_past_full_scale, test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join |
+| R7.5 | Songs without ReplayGain tags play at a pre-amp of −6 dB so they aren't louder than those with them | test_a_song_without_replaygain_plays_at_the_pre_amp, test_songs_out_of_their_albums_order_play_at_their_track_gains, test_track_off_and_the_pre_amp_are_the_settings, test_a_song_plays_at_the_replaygain_it_was_asked_with |
+| R7.5 | MusiKata reads ReplayGain | test_each_kind_gives_its_replaygain_as_its_taggers_write_it, test_an_mp3s_replaygain_in_rva2_frames_or_an_apev2_tag, test_opus_r128_gains_win_over_its_replaygain_keys_and_carry_no_peak, test_replaygain_reads_db_and_peaks_in_their_written_forms |
+
 ## 7.6. Between songs
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
 | R7.6 | Playback is gapless | test_a_song_runs_into_the_next_with_no_frame_lost_or_added, test_any_songs_join_frame_for_frame_whatever_the_device_reads, test_songs_of_one_rate_join_as_if_they_were_one_song, test_songs_of_the_queue_join_in_one_stream_the_sink_never_stopped, test_a_next_song_changed_before_the_device_reached_it_is_replaced_with_no_gap, test_a_seek_into_the_last_seconds_opens_the_next_song_and_joins_it, test_an_mp3s_start_delay_and_end_padding_from_its_lame_header_are_left_out, test_an_aac_files_priming_and_padding_from_its_itunsmpb_tag_are_left_out, test_an_aac_files_priming_and_padding_from_its_edit_list_are_left_out |
-| R7.6 | This holds across songs of different sample rates and kinds | test_songs_of_other_rates_and_channels_join_each_at_its_exact_length, test_each_kind_decodes_to_its_length_and_pitch_at_the_devices_rate, test_an_opus_files_pre_skip_and_end_are_left_out |
+| R7.6 | This holds across songs of different sample rates and kinds | test_songs_of_other_rates_and_channels_join_each_at_its_exact_length, test_a_tone_going_on_across_songs_of_other_rates_doesnt_click_at_the_seam, test_each_kind_decodes_to_its_length_and_pitch_at_the_devices_rate, test_an_opus_files_pre_skip_and_end_are_left_out |
 | R7.6 | Crossfading is | statement |
-| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | later: #0 |
+| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join, test_a_change_of_gain_across_rates_ramps_from_the_seam_too, test_no_frame_of_a_ramp_steps_more_than_its_slope_allows, test_a_join_with_no_change_of_gain_isnt_ramped_and_a_song_alone_has_its_gain, test_a_song_shorter_than_the_ramp_hands_on_the_gain_it_reached, later: #0 |
+
+## 7.7. Output
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.7 | The output device is the system's default unless one is chosen in Settings (R13) | test_the_device_chosen_is_played_on_when_it_is_there_else_the_default, test_the_engine_plays_on_the_device_chosen_in_settings, test_a_device_that_goes_away_pauses_and_moves_to_the_default_from_the_same_sample, test_another_device_going_away_changes_nothing, test_a_new_device_goes_on_from_the_frame_the_old_one_had_played, test_a_new_device_of_another_rate_hears_the_song_on_from_the_same_instant, tier 3: on each platform headphones or a USB DAC unplugged while a song plays pause it and play goes on from the same place on the default device, later: #0 |

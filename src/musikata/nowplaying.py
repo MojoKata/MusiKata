@@ -24,6 +24,8 @@ from PySide6.QtCore import (
     Signal,
 )
 
+from musikata_core.albums import ALBUM_ORDER
+from musikata_core.audio.gain import AlbumPlace, Loudness
 from musikata_core.audio.queue import ALL, ONE, Entry, Queue
 
 from .models import artist_text, cover_url, length_text, time_text, title_of
@@ -67,6 +69,30 @@ def read_songs(c: sqlite3.Connection, ids: Iterable[int]) -> dict[int, SongInfo]
                 path, title_of(title, path), artist or "", album or "", length,
                 rating or 0, cover_url(thumb),
             )  # fmt: skip
+    return out
+
+
+def read_loudness(
+    c: sqlite3.Connection, ids: Iterable[int]
+) -> dict[int, tuple[Loudness, AlbumPlace | None]]:
+    """The ReplayGain tags of the songs with these ids, and each one's album and place in its
+    order (R7.5), by id; a song gone from the index is left out, one in no album has no place."""
+    wanted = list(dict.fromkeys(ids))
+    out: dict[int, tuple[Loudness, AlbumPlace | None]] = {}
+    marks = ", ".join("?" * len(wanted))
+    rows = c.execute(
+        "SELECT id, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, album_id"
+        f" FROM song WHERE id IN ({marks})",
+        wanted,
+    ).fetchall()
+    places: dict[int, AlbumPlace] = {}
+    for album in {r[5] for r in rows if r[5] is not None}:
+        order = c.execute(
+            f"SELECT id FROM song WHERE album_id = ? ORDER BY {ALBUM_ORDER}", (album,)
+        )
+        places.update((song, AlbumPlace(album, i)) for i, (song,) in enumerate(order))
+    for song, track_gain, track_peak, album_gain, album_peak, _ in rows:
+        out[song] = (Loudness(track_gain, track_peak, album_gain, album_peak), places.get(song))
     return out
 
 

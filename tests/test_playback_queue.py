@@ -278,3 +278,26 @@ def test_shuffle_plays_every_song_once_before_any_plays_again(n, seed, laps):
 
 def test_the_repeats_are_the_buttons_order():
     assert queue.REPEATS == ("off", "all", "one")
+
+
+def test_the_song_after_the_next_is_what_the_queue_plays_then_without_moving():
+    q = queue.Queue(random.Random(3))
+    assert q.after_following() is None
+    q.play([1, 2, 3])
+    assert q.after_following().song == 3 and q.current.song == 1
+    q.next()
+    assert q.after_following() is None  # 3 is last
+    q.set_repeat(queue.ALL)
+    assert q.after_following().song == 1  # the next lap's first
+    q.next()
+    assert q.after_following().song == 2
+    q.set_repeat(queue.ONE)
+    assert q.after_following().song == 3
+    q.set_repeat(queue.ALL)
+    q.set_shuffle(True)
+    lap = q._next_lap()
+    assert q.after_following() == lap[1] and q.following() == lap[0]
+    one = queue.Queue()
+    one.play([9])
+    one.set_repeat(queue.ALL)
+    assert one.after_following().song == 9

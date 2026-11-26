@@ -22,7 +22,7 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
 from musikata import app, bridges, layout, models, nowplaying, player, tour
-from musikata_core import db
+from musikata_core import db, settings
 from musikata_core.audio.queue import ALL, ONE
 
 WAIT = 5_000
@@ -42,7 +42,7 @@ class FakeEngine(QObject):
     """The engine's signals and slots, playing nothing: a song begins as soon as it is asked
     for, and ends, fails, moves or joins the song told to follow when a test says so (`join`).
     `ticket` is the song playing's, `follower` the ticket and path told to follow it (`told`, each
-    in turn)."""
+    in turn); `levels` each song's ReplayGain as asked, by file name, in order."""
 
     began = Signal(int, str, float)
     joined = Signal(int, str, float)
@@ -60,21 +60,30 @@ class FakeEngine(QObject):
         self.ticket = 0
         self.follower = (0, "")
         self.told = []  # the songs told to follow, by file name ("" for nothing), in order
+        self.levels = []  # (file name, ReplayGain) of each song asked to play or follow
+        self.device = None  # the device chosen, as told
         self.holding = False
 
     @Slot()
     def setup(self):
         pass
 
-    @Slot(str, int)
-    def play(self, path, ticket):
+    @Slot(str)
+    def choose_device(self, chosen):
+        self.device = chosen
+
+    @Slot(str, int, float)
+    def play(self, path, ticket, level):
         self.asked.append(("play", path))
+        self.levels.append((os.path.basename(path), round(level, 4)))
         self.path, self.ticket, self.follower = path, ticket, (0, "")
         self.began.emit(ticket, path, 42.0)
 
-    @Slot(int, int, str)
-    def follow(self, after, ticket, path):
+    @Slot(int, int, str, float)
+    def follow(self, after, ticket, path, level):
         self.told.append(os.path.basename(path))
+        if path:
+            self.levels.append((os.path.basename(path), round(level, 4)))
         if after == self.ticket:
             self.follower = (ticket, path)
 
@@ -265,6 +274,105 @@ def test_a_next_song_gone_or_out_of_reach_is_told_as_nothing_and_says_why_in_its
     engine.ended.emit(engine.ticket)
     qtbot.waitUntil(lambda: p.property("error") == "Its music folder isn't there", timeout=WAIT)
     assert p.property("path") == "LD/GH/02.flac" and engine.played() == ["01.flac"]
+
+
+# ---------- ReplayGain (R7.5) ----------
+
+GAINED = [
+    {"path": f"LD/GH/0{n}.flac", "title": f"Track {n}", "artist": "Lumen Drift",
+     "album": "Glass Harbor", "track": n, "rg_track_gain": gain_, "rg_track_peak": 0.5,
+     "rg_album_gain": -6.0, "rg_album_peak": 0.6}
+    for n, gain_ in ((1, -7.0), (2, -5.0), (3, -9.0))
+] + [{"path": "MO/Kindling.mp3", "title": "Kindling", "album": "Embers", "track": 1}]  # fmt: skip
+ALBUM, UNTAGGED = 0.5012, 0.5012  # -6 dB: the album's gain, and R7.5's pre-amp
+TRACK = {"01.flac": 0.4467, "02.flac": 0.5623, "03.flac": 0.3548}  # -7, -5, -9 dB
+
+
+@pytest.fixture
+def gained(tmp_path, qapp):
+    """Players over an index of GAINED, each with a fake engine, closed after the test:
+    gained(playback=None) gives the player, the engine and the songs' ids by file name."""
+    index = db.Index(str(tmp_path / "gained.db"))
+    fill(index, GAINED)
+    by_name = {os.path.basename(p): i for p, i in index.read().execute("SELECT path, id FROM song")}
+    made = []
+
+    def make(playback=None):
+        engine = FakeEngine()
+        p = bridges.Player(str(tmp_path), engine, read=index.read, rng=random.Random(5),
+                           playback=playback)  # fmt: skip
+        made.append(p)
+        return p, engine, by_name
+
+    yield make
+    for p in made:
+        p.close()
+    index.close()
+
+
+def test_an_album_played_in_order_plays_at_its_album_gain_song_after_song(gained, qtbot):
+    p, engine, ids_ = gained()
+    p.playAlbum(_album_id(p, "Glass Harbor"))
+    qtbot.waitUntil(lambda: ("02.flac", ALBUM) in engine.levels, timeout=WAIT)
+    engine.join()
+    qtbot.waitUntil(lambda: len(engine.levels) == 3, timeout=WAIT)
+    assert engine.levels == [("01.flac", ALBUM), ("02.flac", ALBUM), ("03.flac", ALBUM)]
+
+
+def test_an_album_from_its_second_song_on_is_in_order_and_one_song_alone_isnt(gained, qtbot):
+    p, engine, ids_ = gained()
+    p.play_songs([ids_["02.flac"], ids_["03.flac"]], "Glass Harbor")
+    qtbot.waitUntil(lambda: len(engine.levels) == 2, timeout=WAIT)
+    assert engine.levels == [("02.flac", ALBUM), ("03.flac", ALBUM)]
+    p.play("LD/GH/03.flac")  # alone: its own gain
+    qtbot.waitUntil(lambda: len(engine.levels) == 3, timeout=WAIT)
+    assert engine.levels[2] == ("03.flac", TRACK["03.flac"])
+
+
+def test_songs_out_of_their_albums_order_play_at_their_track_gains(gained, qtbot):
+    p, engine, ids_ = gained()
+    p.play_songs([ids_["03.flac"], ids_["01.flac"], ids_["Kindling.mp3"]], "Shuffled")
+    qtbot.waitUntil(lambda: len(engine.levels) == 2, timeout=WAIT)
+    engine.join()
+    qtbot.waitUntil(lambda: len(engine.levels) == 3, timeout=WAIT)
+    assert engine.levels == [("03.flac", TRACK["03.flac"]), ("01.flac", TRACK["01.flac"]),
+                             ("Kindling.mp3", UNTAGGED)]  # fmt: skip
+
+
+def test_track_off_and_the_pre_amp_are_the_settings(gained, qtbot):
+    p, engine, ids_ = gained(settings.Playback(replaygain="track", replaygain_default=-12.0))
+    p.play_songs([ids_["01.flac"], ids_["02.flac"]], "Glass Harbor")
+    qtbot.waitUntil(lambda: len(engine.levels) == 2, timeout=WAIT)
+    assert engine.levels == [("01.flac", TRACK["01.flac"]), ("02.flac", TRACK["02.flac"])]
+    p.play_songs([ids_["Kindling.mp3"]], "Embers")
+    qtbot.waitUntil(lambda: len(engine.levels) == 3, timeout=WAIT)
+    assert engine.levels[2] == ("Kindling.mp3", 0.2512)  # -12 dB
+    off, engine, _ = gained(settings.Playback(replaygain="off"))
+    off.play_songs([ids_["01.flac"], ids_["Kindling.mp3"]], "")
+    qtbot.waitUntil(lambda: len(engine.levels) == 2, timeout=WAIT)
+    assert engine.levels == [("01.flac", 1.0), ("Kindling.mp3", 1.0)]
+
+
+def test_a_song_repeated_keeps_its_gain_and_a_file_outside_the_index_has_the_pre_amp(gained, qtbot):
+    p, engine, ids_ = gained()
+    p.queue.set_repeat(ONE)
+    p.play_songs([ids_["01.flac"], ids_["02.flac"]], "Glass Harbor")
+    qtbot.waitUntil(lambda: len(engine.levels) == 2, timeout=WAIT)
+    one = TRACK["01.flac"]  # repeat One plays a song, not its album, in order
+    assert engine.levels == [("01.flac", one), ("01.flac", one)]
+    p.play_file("/elsewhere/a.flac")
+    qtbot.waitUntil(lambda: engine.levels[-1][0] == "a.flac", timeout=WAIT)
+    assert engine.levels[-1] == ("a.flac", UNTAGGED)
+
+
+def test_the_device_chosen_in_settings_is_told_to_the_engine(gained, qtbot):
+    p, engine, ids_ = gained(settings.Playback(device="alsa_output.usb-DAC"))
+    p.play_songs([ids_["01.flac"]], "")
+    qtbot.waitUntil(lambda: engine.device == "alsa_output.usb-DAC", timeout=WAIT)
+
+
+def _album_id(p, title):
+    return p._read().execute("SELECT id FROM album WHERE title = ?", (title,)).fetchone()[0]
 
 
 def test_a_song_outside_the_queue_has_nothing_told_to_follow_it(made, tmp_path, qtbot):
