@@ -525,6 +525,7 @@ class SongsModel(PagedModel):
         self._sort, self._descending = sort, False
         self._where, self._params = where, params
         self._playing = ""  # the path of the song playing
+        self.source = ""  # the list's name, where the queue says it plays from (R7.2)
 
     def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
         order = song_order(self._sort, self._descending)
@@ -556,6 +557,17 @@ class SongsModel(PagedModel):
         if path != self._playing:
             self._playing = path
             self._changed("playing")
+
+    def queue_from(self, row: int) -> tuple[list[int], str]:
+        """Row `row`'s song and the rest of the list after it, in the list's order, as a search
+        leaves it (R7.1), and the list's name; none past the rows."""
+        ids = self._ids or []
+        return (ids[row:] if 0 <= row < self._count else []), self.source
+
+    def songs_at(self, row: int) -> list[int]:
+        """Row `row`'s song, as Play next and Add to queue take it (R7.2)."""
+        ids = self._ids or []
+        return [ids[row]] if 0 <= row < min(self._count, len(ids)) else []
 
 
 class AlbumsModel(PagedModel):

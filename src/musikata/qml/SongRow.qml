@@ -2,10 +2,12 @@ import QtQuick
 import "."
 
 // A row of the Songs list: what the model gives, laid out in the view's columns; the song playing
-// has its title in the accent. A double click asks for it to be played.
+// has its title in the accent. A double click asks for it to be played, a right click for its menu
+// (SongMenu).
 Rectangle {
     id: row
     signal activated()
+    signal menu()
     required property var columns       // [x, width] of each column, from SongsView
     required property string path
     required property bool playing
@@ -23,6 +25,7 @@ Rectangle {
 
     HoverHandler { id: hover }
     TapHandler { onDoubleTapped: row.activated() }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: row.menu() }
 
     component Cell: Text {
         property int column

@@ -3,7 +3,7 @@ import QtQuick.Controls.Basic
 import "."
 
 // The selection bar (R2.9.6, L06-folders-cards): what is selected, "2 folders · 21 songs selected";
-// Play, which plays its first song (the queue comes with slice 4); the actions of later slices
+// Play, which plays the songs selected, from the first (R7.1); the actions of later slices
 // (Add to playlist, Edit tags, Infer from path, Organize…) faded, saying so in their tooltips; and
 // ✕, which clears it.
 Rectangle {

@@ -5,7 +5,8 @@ folder and list are folders.py's, R2.9), and the scans,
 run one at a time on a thread of their own with the worker processes reading the files (A1.3,
 A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4); the root's
 card, and a root that isn't there (R2.1.1, R2.10).
-`Player`: the song playing, played on the playback thread (player.py, A4.1).
+`Player`: the song playing and the queue (R7.1 to R7.3), the now-playing bar (R6.5) and Up next
+(R7.2), the songs played on the playback thread (player.py, A4.1).
 
 What the root's card and the pages say is decided here, as text (`docs/process/coding.md`: QML only
 lays out and binds)."""
@@ -14,15 +15,18 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import BrokenExecutor, Executor
+from typing import Any, Protocol
 
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
 from musikata_core import albums, db, scanner, watch, workers
+from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
 
 from .folders import MODES as folders_modes
@@ -47,8 +51,19 @@ from .models import (
     size_text,
     song_headers,
     tiles,
+    time_text,
+    title_of,
 )
-from .player import Engine, PlaybackThread
+from .nowplaying import (
+    REPEAT_NAMES,
+    RESTART_AFTER,
+    SongInfo,
+    UpNextModel,
+    bar_line,
+    read_songs,
+    song_of_path,
+)
+from .player import Engine, PlaybackThread, gain_of
 
 log = logging.getLogger(__name__)
 
@@ -266,6 +281,7 @@ class AlbumPage(QObject):
             (album_id,),
         ).fetchall()
         same, self._id = album_id == self._id, album_id
+        self._songs.source = title
         self._values = {
             "title": title,
             "artist": artist_text(artist),
@@ -283,11 +299,6 @@ class AlbumPage(QObject):
             self._songs.select("album_id = ?", (album_id,))
         self.changed.emit()
         return True
-
-    def first_song(self) -> str:
-        """The path of the album's first song ("" when it has none)."""
-        row = self._songs.row(0)
-        return row["path"] if row else ""
 
     def _get_id(self) -> int:
         return self._id
@@ -341,6 +352,7 @@ class ArtistPage(QObject):
                 " (SELECT id FROM album WHERE artist_id = ?))",
                 (artist_id, artist_id),
             )
+        self._others.source = name
         self._values = {
             "name": name,
             "detail": artist_line(albums, songs),
@@ -435,6 +447,7 @@ class Library(QObject):
         self._copied: dict[str, str] = {}  # copies made while watching (scanner.scan)
         self._searcher = Searcher(self)
         self._songs = SongsModel(index.read, parent=self, searcher=self._searcher)
+        self._songs.source = "Songs"
         self._albums = AlbumsModel(index.read, self, searcher=self._searcher)
         self._artists = ArtistsModel(index.read, self, self._searcher)
         self._folders = FolderView(index.read, remembered, self, self._searcher)
@@ -663,19 +676,6 @@ class Library(QObject):
             raise ValueError(f"no such mode: {mode}")
         self._albums_mode = mode
         self.viewChanged.emit()
-
-    @Slot(int, result=str)
-    def firstSong(self, album_id: int) -> str:  # noqa: N802
-        """The path of an album's first song, by disc and track ("" when it has none): Play."""
-        r = (
-            self._index.read()
-            .execute(
-                f"SELECT path FROM song WHERE album_id = ? ORDER BY {albums.ALBUM_ORDER} LIMIT 1",
-                (album_id,),
-            )
-            .fetchone()
-        )
-        return r[0] if r else ""
 
     # ---------- the scans ----------
 
@@ -1205,19 +1205,42 @@ class Library(QObject):
     albumsMode = QtProperty(str, _get_albums_mode, notify=viewChanged)  # Albums': grid or list
 
 
-class Player(QObject):
-    """The song playing, as QML sees it: its path under the root, whether it plays or is paused,
-    where it is and how long it is, and why the last one couldn't play. The engine does the work
-    on the playback thread (player.py); the two hear each other only by queued signals, so
-    nothing here waits on it. The thread starts with the first song."""
+class Queueable(Protocol):
+    """A list of songs QML plays from (R7.1) or queues from (R7.2): the Songs list, an album's or
+    an artist's songs, Folders."""
 
-    changed = Signal()  # the path, playing, paused, the length, the error
+    def queue_from(self, row: int) -> tuple[list[int], str]:
+        """The songs a double click on row `row` plays (it and the rest of the list after it),
+        and the list's name."""
+        ...
+
+    def songs_at(self, row: int) -> list[int]:
+        """The songs row `row` stands for: its own, or those beneath a folder."""
+        ...
+
+
+class Player(QObject):
+    """The song playing and the queue (R7.1 to R7.3), as QML sees them: the now-playing bar (R6.5)
+    and Up next (R7.2). The engine does the playing on the playback thread (player.py); the two
+    hear each other only by queued signals, so nothing here waits on it. The thread starts with
+    the first song.
+
+    The queue's current song is shown whether or not it plays: cued, it waits paused at its start
+    for play (the tour's, and R1.8's restored queue). A song that ends starts the one after it
+    (R7.1), until the queue has played out; a song that can't play stops there and says why.
+    `read` reads the index, where a song's id becomes its path and its words; without it (a test
+    of the engine alone) a path plays on its own, outside any queue."""
+
+    changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
-    nowPlaying = Signal(str)  # the path of the song playing now, "" when none
+    queueChanged = Signal()  # shuffle, repeat, Up next open
+    volumeChanged = Signal()
+    nowPlaying = Signal(str)  # the path of the song playing or cued now, "" when none
     _play = Signal(str)
     _pause = Signal()
     _resume = Signal()
     _stop = Signal()
+    _set_gain = Signal(float)
 
     def __init__(
         self,
@@ -1225,22 +1248,33 @@ class Player(QObject):
         engine: Engine | None = None,
         parent: QObject | None = None,
         refuse: Callable[[str], str] | None = None,
+        read: Callable[[], sqlite3.Connection] | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         super().__init__(parent)
         self._root = root
         self._refuse = refuse  # why a song can't play now (Library.unplayable, R2.10)
+        self._read = read
         self._engine = engine if engine is not None else Engine()
         self._thread = PlaybackThread(self._engine)
         self._started = False
-        self._path = ""
+        self.queue = Queue(rng)
+        self._up_next = UpNextModel(read, self.queue, self)
+        self._up_next_open = False
+        self._info: SongInfo | None = None  # the shown song's words, when the index has it
+        self._path = ""  # the shown song's path under the root
+        self._requested = ""  # the whole path the engine was last asked to play
+        self._on = False  # the engine has a song, playing or paused
         self._paused = False
         self._position = self._length = 0.0
         self._error = ""
+        self._volume = 1.0
         self.last = ""  # how the last song stopped: "ended", "stopped" or "failed"
         self._play.connect(self._engine.play)
         self._pause.connect(self._engine.pause)
         self._resume.connect(self._engine.resume)
         self._stop.connect(self._engine.stop)
+        self._set_gain.connect(self._engine.set_volume)
         self._engine.began.connect(self._on_began)
         self._engine.moved.connect(self._on_moved)
         self._engine.pausedChanged.connect(self._on_paused)
@@ -1251,28 +1285,216 @@ class Player(QObject):
     def _under_root(self, path: str) -> str:
         return os.path.relpath(path, self._root).replace(os.sep, "/")
 
-    # ---------- what QML asks ----------
+    def _whole(self, path: str) -> str:
+        return os.path.join(self._root, *path.split("/"))
+
+    # ---------- what QML asks: playing from a list (R7.1) ----------
 
     @Slot(str)
     def play(self, path: str) -> None:
-        """Plays the song at `path` under the root (the index's path) from its start (R7.1); ""
-        (an album with no songs) does nothing. A song whose root, or linked folder, isn't there
-        doesn't play, and `error` says why (R2.10); the song playing goes on to its end."""
+        """Plays the song at `path` under the root (the index's path) from its start, as a queue
+        of its own; "" (an album with no songs) does nothing. A song whose root, or linked folder,
+        isn't there doesn't play, and `error` says why (R2.10); the song playing goes on."""
         if not path:
             return
-        why = self._refuse(path) if self._refuse is not None else ""
-        if why:
-            self._error = why
-            self.changed.emit()
+        song = song_of_path(self._read(), path) if self._read is not None else None
+        if song is None:
+            why = self._refuse(path) if self._refuse is not None else ""
+            if why:
+                self._error = why
+                self.changed.emit()
+                return
+            self.play_file(self._whole(path))
             return
-        self.play_file(os.path.join(self._root, *path.split("/")))
+        self.play_songs([song], "")
 
-    def play_file(self, path: str) -> None:
-        """Plays the file at `path`, a whole path, from its start."""
-        if not self._started:
-            self._thread.start()
-            self._started = True
-        self._play.emit(path)
+    def play_songs(self, songs: Sequence[int], source: str, start: int | None = 0) -> None:
+        """The queue becomes `songs` from `source` (R7.1), and its first song plays; `start` None
+        plays from a random one while shuffling (Play on an album)."""
+        entry = self.queue.play(songs, start, source)
+        if entry is not None:
+            self._start(entry)
+        else:
+            self._queue_changed()
+
+    @Slot(QObject, int)
+    def playFrom(self, songs: Queueable, row: int) -> None:  # noqa: N802
+        """A double click on a song of a list: it plays, and the rest of the list after it is the
+        queue (R7.1)."""
+        ids, source = songs.queue_from(row)
+        self.play_songs(ids, source)
+
+    @Slot(int)
+    def playAlbum(self, album_id: int) -> None:  # noqa: N802
+        """Play on an album: its songs by disc and track, from its first (R7.1)."""
+        self.play_songs(*self._album(album_id), start=None)
+
+    @Slot(int)
+    def shuffleAlbum(self, album_id: int) -> None:  # noqa: N802
+        """An album's Shuffle (R2.6): shuffle on, and the album from a song chosen at random."""
+        self.queue.set_shuffle(True)
+        self.play_songs(*self._album(album_id), start=None)
+
+    def _album(self, album_id: int) -> tuple[list[int], str]:
+        if self._read is None:
+            return [], ""
+        c = self._read()
+        ids = [
+            r[0]
+            for r in c.execute(
+                f"SELECT id FROM song WHERE album_id = ? ORDER BY {albums.ALBUM_ORDER}",
+                (album_id,),
+            )
+        ]
+        r = c.execute("SELECT title FROM album WHERE id = ?", (album_id,)).fetchone()
+        return ids, r[0] if r else ""
+
+    def cue(self, songs: Sequence[int], source: str, at: int = 0) -> None:
+        """The queue becomes `songs` from `source`, cued at its song `at` (those before it played)
+        and paused there, nothing playing: as R1.8 restores it, and as the tour shows it."""
+        self.queue.play(songs, 0, source)
+        if 0 < at < len(self.queue):
+            self.queue.jump(self.queue.upcoming[at - 1].key)
+        self._cue()
+
+    def go(self, step: dict[str, Any]) -> None:
+        """A tour's step (A1.6): {"queue": "Glass Harbor"} cues that album at its first song,
+        paused, nothing playing; with "at": 3, at its fourth, the three before it played; "added":
+        the titles of songs then added with Add to queue; "upNext": True opens Up next, which is
+        closed otherwise."""
+        if "queue" in step and self._read is not None:
+            c = self._read()
+            r = c.execute("SELECT id FROM album WHERE title = ?", (step["queue"],)).fetchone()
+            songs, source = self._album(r[0] if r else -1)
+            self.cue(songs, source, int(step.get("at", 0)))
+            for title in step.get("added", []):
+                found = c.execute("SELECT id FROM song WHERE title = ?", (title,)).fetchone()
+                if found is not None:
+                    self.queue.add([found[0]])
+            self._queue_changed()
+        self.set_up_next(bool(step.get("upNext")))
+
+    # ---------- what QML asks: changing the queue (R7.2) ----------
+
+    @Slot(QObject, int)
+    def playNext(self, songs: Queueable, row: int) -> None:  # noqa: N802
+        """A song list's Play next: the row's songs right after the current one."""
+        self._added(self.queue.play_next(songs.songs_at(row)))
+
+    @Slot(QObject, int)
+    def addToQueue(self, songs: Queueable, row: int) -> None:  # noqa: N802
+        """A song list's Add to queue: the row's songs after those added before."""
+        self._added(self.queue.add(songs.songs_at(row)))
+
+    def _added(self, entries: list[Entry]) -> None:
+        """Songs went into the queue: shown at once when nothing was there (cued, not started)."""
+        if entries and self.queue.current is entries[0]:
+            self._cue()
+        else:
+            self._queue_changed()
+
+    @Slot(int)
+    def playRow(self, row: int) -> None:  # noqa: N802
+        """A double click on a row of Up next: that song plays."""
+        found = self._up_next.entry(row)
+        if found is not None:
+            entry = self.queue.jump(found[0].key)
+            if entry is not None:
+                self._start(entry)
+
+    @Slot(int)
+    def removeRow(self, row: int) -> None:  # noqa: N802
+        """Up next's ×: the song out of the queue; the song playing stays."""
+        found = self._up_next.entry(row)
+        if found is not None and self.queue.remove(found[0].key):
+            self._queue_changed()
+
+    @Slot(int, int)
+    def moveRow(self, row: int, to: int) -> None:  # noqa: N802
+        """Up next's drag: a song to come dropped above row `to` (the line drawn there), where it
+        then plays; below the songs to come, it goes last among them."""
+        found = self._up_next.entry(row)
+        if found is None or found[1] != "next":
+            return
+        first = 1 if self.queue.current is not None else 0  # the songs to come follow it
+        place = to - first - (1 if to > row else 0)  # its own row leaves the list first
+        if self.queue.move(found[0].key, place):
+            self._queue_changed()
+
+    @Slot()
+    def toggleUpNext(self) -> None:  # noqa: N802
+        """The bar's queue button: Up next opens, or closes again."""
+        self.set_up_next(not self._up_next_open)
+
+    @Slot()
+    def closeUpNext(self) -> None:  # noqa: N802
+        self.set_up_next(False)
+
+    def set_up_next(self, open_: bool) -> None:
+        if open_ != self._up_next_open:
+            self._up_next_open = open_
+            self.queueChanged.emit()
+
+    # ---------- what QML asks: the bar's buttons (R6.5, R7.3) ----------
+
+    @Slot()
+    def toggle(self) -> None:
+        """Play/pause and the space bar (R6.9): a song playing pauses, a paused one resumes, a
+        cued one starts."""
+        if self._on and not self._paused:
+            self._pause.emit()
+        elif self._on:
+            self._resume.emit()
+        elif self.queue.current is not None:
+            self._start(self.queue.current)
+
+    @Slot()
+    def next(self) -> None:
+        """Next: the song after this one plays, or a paused or cued one is cued there; past the
+        end with repeat Off, the queue has played out and nothing plays."""
+        if self.queue.current is None:
+            return
+        playing = self._on and not self._paused
+        entry = self.queue.next()
+        self._go(entry, playing)
+
+    @Slot()
+    def previous(self) -> None:
+        """Previous: a song past its first few seconds starts again; else the song before it."""
+        playing = self._on and not self._paused
+        if self.queue.current is not None and self._on and self._position > RESTART_AFTER:
+            entry: Entry | None = self.queue.current
+        else:
+            entry = self.queue.previous()
+        self._go(entry, playing)
+
+    def _go(self, entry: Entry | None, playing: bool) -> None:
+        if entry is None:
+            self._stop_engine()
+            self._finish("stopped")
+        elif playing:
+            self._start(entry)
+        else:
+            self._cue()
+
+    @Slot()
+    def toggleShuffle(self) -> None:  # noqa: N802
+        self.queue.set_shuffle(not self.queue.shuffle)
+        self._queue_changed()
+
+    @Slot()
+    def cycleRepeat(self) -> None:  # noqa: N802
+        self.queue.cycle_repeat()
+        self._queue_changed()
+
+    @Slot(float)
+    def setVolume(self, level: float) -> None:  # noqa: N802
+        """The bar's volume (R6.5), from 0 to 1."""
+        level = min(1.0, max(0.0, level))
+        if level != self._volume:
+            self._volume = level
+            self._set_gain.emit(gain_of(level))
+            self.volumeChanged.emit()
 
     @Slot()
     def pause(self) -> None:
@@ -1286,49 +1508,152 @@ class Player(QObject):
     def stop(self) -> None:
         self._stop.emit()
 
+    def play_file(self, path: str) -> None:
+        """Plays the file at `path`, a whole path, from its start, outside the queue (--play)."""
+        self._info = None
+        self._start_engine(path)
+
     def close(self) -> None:
         """Stops the song and ends the playback thread: for closing."""
         self._thread.close()
+
+    # ---------- playing the queue's songs ----------
+
+    def _start(self, entry: Entry) -> None:
+        """The queue's current song plays from its start; one gone from the index, or whose root
+        isn't there, is cued instead, `error` saying why."""
+        info = self._song(entry.song)
+        if info is None:
+            self._stop_engine()
+            self._show(None, "")
+            self._error = "That song is no longer in the library"
+            log.warning("couldn't play song %d: it is no longer in the index", entry.song)
+            self._queue_changed()
+            return
+        why = self._refuse(info.path) if self._refuse is not None else ""
+        if why:
+            self._stop_engine()
+            self._show(info, info.path)
+            self._error = why
+            self._queue_changed()
+            return
+        self._error = ""
+        self._show(info, info.path)
+        self._start_engine(self._whole(info.path))
+        self._queue_changed()
+
+    def _cue(self) -> None:
+        """The queue's current song shown, paused at its start, nothing playing."""
+        self._stop_engine()
+        entry = self.queue.current
+        info = self._song(entry.song) if entry is not None else None
+        self._error = ""
+        self._show(info, info.path if info is not None else "")
+        self._queue_changed()
+
+    def _song(self, song: int) -> SongInfo | None:
+        if self._read is None:
+            return None
+        return read_songs(self._read(), [song]).get(song)
+
+    def _show(self, info: SongInfo | None, path: str) -> None:
+        """The song the bar shows, before the engine has it: its words, its length as the index
+        has it, at its start."""
+        self._info = info
+        self._length = (info.length or 0.0) if info is not None else 0.0
+        self._position = 0.0
+        self._set_path(path)
+        self.changed.emit()
+        self.positionChanged.emit()
+
+    def _set_path(self, path: str) -> None:
+        if path != self._path:
+            self._path = path
+            self.nowPlaying.emit(path)
+
+    def _start_engine(self, path: str) -> None:
+        if not self._started:
+            self._thread.start()
+            self._started = True
+        self._requested = path
+        self._play.emit(path)
+
+    def _stop_engine(self) -> None:
+        """Stops what the engine plays, if anything; what it says of it is then nothing to act
+        on (`_requested` no longer names it)."""
+        self._requested = ""
+        if self._on or self._started:
+            self._stop.emit()
+        self._on = self._paused = False
+
+    def _finish(self, how: str, error: str = "") -> None:
+        """Nothing plays now: the queue's current song stays cued, if it has one (after a song
+        that failed, or Stop), else the bar is empty (the queue played out)."""
+        self.last, self._error = how, error
+        self._on = self._paused = False
+        self._position = 0.0
+        if self.queue.current is None or self._info is None:
+            self._info = None
+            self._length = 0.0
+            self._path = ""
+            self.nowPlaying.emit("")  # even when nothing was shown: it says playing has stopped
+        self.changed.emit()
+        self.positionChanged.emit()
+        self._queue_changed()
+
+    def _queue_changed(self) -> None:
+        self._up_next.refresh()
+        self.queueChanged.emit()
 
     # ---------- what the engine says ----------
 
     @Slot(str, float)
     def _on_began(self, path: str, length: float) -> None:
-        self._path, self._paused, self._error = self._under_root(path), False, ""
+        if path != self._requested:
+            return  # one asked for before the last request: another follows
+        self._on, self._paused = True, False
+        if self._info is None:
+            self._set_path(self._under_root(path))
         self._length, self._position = max(0.0, length), 0.0
         self.changed.emit()
         self.positionChanged.emit()
-        self.nowPlaying.emit(self._path)
 
     @Slot(float)
     def _on_moved(self, seconds: float) -> None:
-        self._position = seconds
-        self.positionChanged.emit()
+        if self._on:
+            self._position = seconds
+            self.positionChanged.emit()
 
     @Slot(bool)
     def _on_paused(self, paused: bool) -> None:
-        self._paused = paused
-        self.changed.emit()
-
-    def _done(self, how: str, error: str = "") -> None:
-        self.last, self._error = how, error
-        self._path, self._paused = "", False
-        self._position = self._length = 0.0
-        self.changed.emit()
-        self.positionChanged.emit()
-        self.nowPlaying.emit("")
+        if self._on:
+            self._paused = paused
+            self.changed.emit()
 
     @Slot(str)
     def _on_ended(self, path: str) -> None:
-        self._done("ended")
+        if path != self._requested:
+            return  # a song stopped for another
+        self._requested = ""
+        self._on = False
+        entry = self.queue.ended() if self._info is not None else None
+        if entry is not None:
+            self._start(entry)
+        else:
+            self._finish("ended")
 
     @Slot(str)
     def _on_stopped(self, path: str) -> None:
-        self._done("stopped")
+        if path == self._requested:  # Stop, asked for
+            self._requested = ""
+            self._finish("stopped")
 
     @Slot(str, str)
     def _on_failed(self, path: str, why: str) -> None:
-        self._done("failed", why)
+        if path != self._requested:
+            return
+        self._requested = ""
+        self._finish("failed", why)
 
     # ---------- what QML reads ----------
 
@@ -1336,7 +1661,7 @@ class Player(QObject):
         return self._path
 
     def _get_playing(self) -> bool:
-        return bool(self._path) and not self._paused
+        return self._on and not self._paused
 
     def _get_paused(self) -> bool:
         return self._paused
@@ -1350,9 +1675,80 @@ class Player(QObject):
     def _get_error(self) -> str:
         return self._error
 
+    def _get_title(self) -> str:
+        if self._info is not None:
+            return self._info.title
+        return title_of(None, self._path) if self._path else ""
+
+    def _get_line(self) -> str:
+        if self._error:
+            return self._error
+        return bar_line(self._info) if self._info is not None else ""
+
+    def _get_failed(self) -> bool:
+        return bool(self._error)
+
+    def _get_time_name(self) -> str:
+        if not self._path:
+            return ""
+        played = time_text(self._position)
+        return f"{played} of {self._get_length_text()}" if self._length else played
+
+    def _get_cover(self) -> str:
+        return self._info.cover if self._info is not None else ""
+
+    def _get_rating(self) -> int:
+        return self._info.rating if self._info is not None else 0
+
+    def _get_position_text(self) -> str:
+        return time_text(self._position) if self._path else ""
+
+    def _get_length_text(self) -> str:
+        return time_text(self._length) if self._path and self._length else ""
+
+    def _get_progress(self) -> float:
+        return min(1.0, self._position / self._length) if self._length else 0.0
+
+    def _get_shuffle(self) -> bool:
+        return self.queue.shuffle
+
+    def _get_repeat(self) -> str:
+        return self.queue.repeat
+
+    def _get_repeat_name(self) -> str:
+        return REPEAT_NAMES[self.queue.repeat]
+
+    def _get_shuffle_name(self) -> str:
+        return "Shuffle on" if self.queue.shuffle else "Shuffle off"
+
+    def _get_volume(self) -> float:
+        return self._volume
+
+    def _get_up_next(self) -> UpNextModel:
+        return self._up_next
+
+    def _get_up_next_open(self) -> bool:
+        return self._up_next_open
+
     path = QtProperty(str, _get_path, notify=changed)  # the song's path under the root; "": none
     playing = QtProperty(bool, _get_playing, notify=changed)  # a song plays, not paused
     paused = QtProperty(bool, _get_paused, notify=changed)
     position = QtProperty(float, _get_position, notify=positionChanged)  # seconds
     length = QtProperty(float, _get_length, notify=changed)  # seconds; 0 when unknown
     error = QtProperty(str, _get_error, notify=changed)  # why the last song couldn't play
+    title = QtProperty(str, _get_title, notify=changed)
+    line = QtProperty(str, _get_line, notify=changed)  # Lumen Drift — Glass Harbor; or the error
+    failed = QtProperty(bool, _get_failed, notify=changed)  # the line is why it couldn't play
+    timeName = QtProperty(str, _get_time_name, notify=positionChanged)  # 1:38 of 4:18
+    cover = QtProperty(str, _get_cover, notify=changed)
+    rating = QtProperty(int, _get_rating, notify=changed)
+    positionText = QtProperty(str, _get_position_text, notify=positionChanged)  # 1:38
+    lengthText = QtProperty(str, _get_length_text, notify=changed)  # 4:18; "" when unknown
+    progress = QtProperty(float, _get_progress, notify=positionChanged)  # 0 to 1
+    shuffle = QtProperty(bool, _get_shuffle, notify=queueChanged)
+    repeat = QtProperty(str, _get_repeat, notify=queueChanged)  # off, all, one
+    repeatName = QtProperty(str, _get_repeat_name, notify=queueChanged)  # Repeat all
+    shuffleName = QtProperty(str, _get_shuffle_name, notify=queueChanged)  # Shuffle on
+    volume = QtProperty(float, _get_volume, notify=volumeChanged)  # 0 to 1
+    upNext = QtProperty(QObject, _get_up_next, constant=True)
+    upNextOpen = QtProperty(bool, _get_up_next_open, notify=queueChanged)

@@ -218,8 +218,8 @@ def test_an_albums_page_says_what_it_holds(lib):
     assert page.property("chips")[0] == {"text": "Art embedded in 1 of 2", "tone": "warn"}
     songs = page.property("songs")
     assert [songs.row(i)["title"] for i in range(songs.count)] == ["Tidewater", "Glass Harbor"]
-    assert page.first_song() == "LD/GH/01.flac" == lib.firstSong(page.property("id"))
-    assert lib.firstSong(-1) == "" and lib.property("backText") == "Albums"
+    assert songs.queue_from(0) == (songs._ids, "Glass Harbor")  # what a double click queues
+    assert lib.property("backText") == "Albums"
 
 
 def test_an_artists_page_lists_their_albums_then_their_other_songs(lib):

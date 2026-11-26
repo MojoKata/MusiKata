@@ -7,8 +7,10 @@ thread or a slow disk never starves the device, and the device's pull only copie
 
 The GUI thread talks to the engine by queued signals only (the `Player` bridge, bridges.py), and
 hears back the same way. What opens a song and which device it plays on are given to the engine,
-so a test can hand in generated audio and Qt's device of its choice. The queue, gapless joins,
-seeking, gain, the equalizer and devices that come and go are slice 4's (A4.2 to A4.6)."""
+so a test can hand in generated audio and Qt's device of its choice. The engine plays one song at a
+time; the queue (musikata_core.audio.queue) is the Player bridge's, which hands it the next song
+when one ends. Gapless joins, seeking, gain, the equalizer and devices that come and go are the
+rest of slice 4's (A4.2 to A4.6)."""
 
 from __future__ import annotations
 
@@ -79,6 +81,15 @@ def channels_for(most: int) -> int:
     return 2 if most >= 2 else 1
 
 
+def gain_of(level: float) -> float:
+    """The sink's linear gain for the volume slider's `level` (0 to 1), which follows the ear:
+    half way is half as loud, not a quarter (Qt's logarithmic scale)."""
+    level = min(1.0, max(0.0, level))
+    return QtAudio.convertVolume(
+        level, QtAudio.VolumeScale.LogarithmicVolumeScale, QtAudio.VolumeScale.LinearVolumeScale
+    )
+
+
 def output_format(device: QAudioDevice) -> QAudioFormat:
     """Float samples at the device's own rate (A4.1), in the channels `channels_for` chooses."""
     fmt = QAudioFormat()
@@ -138,6 +149,7 @@ class Engine(QObject):
         self._path = ""
         self._paused = False
         self._reported = -1.0
+        self._gain = 1.0  # the volume, as the sink's linear gain (R6.5)
 
     @Slot()
     def setup(self) -> None:
@@ -169,6 +181,7 @@ class Engine(QObject):
         if not self._fill(self._stream.ring.capacity):  # the whole ring before the first pull
             return
         self._sink = QAudioSink(device, fmt)
+        self._sink.setVolume(self._gain)
         self._sink.setBufferSize(stream.frames_of(stream.DEVICE_SECONDS, rate) * 4 * channels)
         self._io = RingDevice(self._stream)
         self._sink.start(self._io)
@@ -193,6 +206,14 @@ class Engine(QObject):
             self._sink.resume()
             self._paused = False
             self.pausedChanged.emit(False)
+
+    @Slot(float)
+    def set_volume(self, gain: float) -> None:
+        """The volume, a linear gain from 0 to 1 (`gain_of`): the sink applies it last, after
+        everything else (A4.4), at once and to every song after."""
+        self._gain = gain
+        if self._sink is not None:
+            self._sink.setVolume(gain)
 
     @Slot()
     def stop(self) -> None:

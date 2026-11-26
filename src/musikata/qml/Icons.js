@@ -50,6 +50,12 @@ const STROKE = {
     wave: "M3 8V12M5.8 5.5V14.5M8.6 3.5V16.5M11.4 6.5V13.5M14.2 4.5V15.5M17 7.5V12.5",
     starLine: starPoints(9),
     refresh: "M13.25 4.37A6.5 6.5 0 1 0 15.63 13.25 M13.2 2.5L13.4 5.6L16.4 5.2",
+    repeat: "M5 9V7.5Q5 5.5 7 5.5H16 M15 11V12.5Q15 14.5 13 14.5H4 M13.5 3L16 5.5L13.5 8"
+        + "M6.5 12L4 14.5L6.5 17",
+    queue: "M3 4.5H17M3 9H17M3 13.5H10",
+    volume: "M3 7.5H6.5L10.5 4V16L6.5 12.5H3Z M13.5 7Q15.5 10 13.5 13 M15.8 4.8Q19.5 10 15.8 15.2",
+    popout: "M9 4H4V16H16V11 M10 10L16.5 3.5 M11.5 3.5H16.5V8.5",
+    expand: "M3.5 8V3.5H8 M16.5 8V3.5H12 M3.5 12V16.5H8 M16.5 12V16.5H12",
 }
 const FILL = {
     song: ellipse(5.8, 14.8, 2.4, 2) + ellipse(12.8, 12.8, 2.4, 2),
@@ -58,6 +64,12 @@ const FILL = {
     star: starPoints(9),
     play: "M6 3.5L16.5 10L6 16.5Z",
     pause: "M5 3.5H8.6V16.5H5Z M11.4 3.5H15V16.5H11.4Z",
+    next: "M4 4L13 10L4 16Z M13.5 5Q13.5 4 14.5 4H15.1Q16.1 4 16.1 5V15Q16.1 16 15.1 16H14.5"
+        + "Q13.5 16 13.5 15Z",
+    prev: "M16 4L7 10L16 16Z M6.5 5Q6.5 4 5.5 4H4.9Q3.9 4 3.9 5V15Q3.9 16 4.9 16H5.5Q6.5 16 6.5 15Z",
+    queue: "M13 11.5L17.5 14.5L13 17.5Z",
+    drag: ellipse(7.5, 5, 1.3, 1.3) + ellipse(7.5, 10, 1.3, 1.3) + ellipse(7.5, 15, 1.3, 1.3)
+        + ellipse(12.5, 5, 1.3, 1.3) + ellipse(12.5, 10, 1.3, 1.3) + ellipse(12.5, 15, 1.3, 1.3),
 }
 function stroke(name) { return STROKE[name] || "" }
 function fill(name) { return FILL[name] || "" }

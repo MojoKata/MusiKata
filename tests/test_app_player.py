@@ -195,6 +195,20 @@ def test_a_paused_song_stays_where_it_is_until_it_resumes(make, qtbot):
 
 
 @pytest.mark.slow
+def test_the_volume_reaches_the_sound_device_at_once_and_the_next_song_keeps_it(make, qtbot):
+    p = make(Tone(5.0))
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+    p.setVolume(0.5)
+    want = player.gain_of(0.5)
+    qtbot.waitUntil(lambda: p._engine._sink.volume() == pytest.approx(want, abs=0.01),
+                    timeout=WAIT)  # fmt: skip
+    p.play("b.flac")
+    qtbot.waitUntil(lambda: p.property("path") == "b.flac", timeout=WAIT)
+    assert p._engine._sink.volume() == pytest.approx(want, abs=0.01)
+
+
+@pytest.mark.slow
 def test_stop_stops_the_song_and_lets_go_of_it(make, qtbot):
     tone = Tone(5.0)
     p = make(tone)

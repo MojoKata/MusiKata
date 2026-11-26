@@ -143,9 +143,9 @@ def load(
     library = Library(
         root, index, home_of(env), pool, clock=clock, watching=True, missing=missing, given=given
     )
-    player = Player(root, playback(), refuse=library.unplayable)
+    player = Player(root, playback(), refuse=library.unplayable, read=index.read)
     player.nowPlaying.connect(library.show_playing)
-    library.property("folders").play.connect(player.play)
+    library.property("folders").play.connect(player.play_songs)
     engine = QQmlApplicationEngine()
     engine.addImageProvider("covers", Covers(root, index.read, cache_of(index, env)))
     engine.setInitialProperties({"library": library, "player": player})
@@ -338,7 +338,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if opts.tour:
         from .tour import Tour
 
-        Tour(session.window, session.library, opts.tour, opts.tour_only).start()
+        player = session.shell.player if session.shell is not None else None
+        Tour(session.window, session.library, opts.tour, opts.tour_only, player=player).start()
     else:
         session.window.show()
         if opts.play and session.shell is not None:

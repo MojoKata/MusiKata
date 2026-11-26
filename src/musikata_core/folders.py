@@ -310,19 +310,31 @@ def beneath(column: str, path: str) -> tuple[str, tuple[str, ...]]:
     return f"({column} >= ? AND {column} < ?)", (path + "/", path + "0")
 
 
-def first_song(c: sqlite3.Connection, path: str) -> str | None:
-    """The first song beneath a folder in the order Folders lists it (R2.9.2): its subfolders by
-    name, each first, then its own files by name; None when it holds none."""
-    for (child,) in c.execute(
-        "SELECT path FROM folder WHERE parent = ? ORDER BY name_key, path", (path,)
-    ).fetchall():
-        found = first_song(c, child)
-        if found is not None:
-            return found
-    row = c.execute(
-        "SELECT path FROM song WHERE folder = ? ORDER BY name_key, path LIMIT 1", (path,)
-    ).fetchone()
-    return str(row[0]) if row else None
+def songs_beneath(c: sqlite3.Connection, path: str) -> list[int]:
+    """The ids of the songs beneath a folder ("" for the root) in the order Folders lists them
+    (R2.9.2): its subfolders by name, each with what it holds, then its own files by name. Two
+    queries, whatever the depth: what Play on a folder queues (R7.1)."""
+    where, params = beneath("path", path)
+    children: dict[str, list[tuple[str, str]]] = {}
+    for child, parent, key in c.execute(
+        f"SELECT path, parent, name_key FROM folder WHERE {where}", params
+    ):
+        children.setdefault(parent or "", []).append((key, child))
+    files: dict[str, list[tuple[str, str, int]]] = {}
+    song_where, song_params = ("1", ()) if not path else beneath("path", path)
+    for song_id, song_path, folder, key in c.execute(
+        f"SELECT id, path, folder, name_key FROM song WHERE {song_where}", song_params
+    ):
+        files.setdefault(folder or "", []).append((key or "", song_path, song_id))
+    out: list[int] = []
+
+    def walk(folder: str) -> None:
+        for _key, child in sorted(children.get(folder, [])):
+            walk(child)
+        out.extend(song_id for _key, _path, song_id in sorted(files.get(folder, [])))
+
+    walk(path)
+    return out
 
 
 def count_songs(c: sqlite3.Connection, folders: Sequence[str], files: Sequence[str]) -> int:

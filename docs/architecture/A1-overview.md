@@ -137,6 +137,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.folders` | app | The Folders view: its model, the open folder, the selection (R2.9, A2.7) |
 | `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
+| `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
 | `musikata.media` | app | `mpris`, `smtc`, `nowplaying_mac`: the system's media controls (A4.5) |
 | `musikata.tour` | app | The tour (A1.6) |
 | `musikata.layout` | app | The tour's layout check: each text against the box it is drawn in (A1.6) |

@@ -373,8 +373,8 @@ def test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_b
     lib = shell.library
     f = lib.property("folders")
     m = f.property("model")
-    played = []
-    f.play.connect(played.append)
+    played = []  # what the player was handed, cued where there's no sound device
+    shell.player.nowPlaying.connect(played.append)
     lib.go({"view": "folders", "folder": "", "mode": "small"})
     settle(shell, qtbot)
     lumen, mara, _ = tiles(shell)

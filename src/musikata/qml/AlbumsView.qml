@@ -90,7 +90,7 @@ Item {
                 cover: cell.cover
                 playing: cell.playing
                 onOpen: view.library.openAlbum(cell.albumId)
-                onPlay: view.player.play(view.library.firstSong(cell.albumId))
+                onPlay: view.player.playAlbum(cell.albumId)
             }
         }
         ScrollBar.vertical: ScrollBar { }

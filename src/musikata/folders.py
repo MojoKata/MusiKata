@@ -57,8 +57,9 @@ INFER = {
     "later": "Tags from paths come in a later version",
 }
 # the selection bar's actions (R2.9.6) that come with later slices, and what their tooltips say:
-# Album art (slice 6) shows only when the songs are one album, and the right-click menu and
-# dragging (R6.10) come whole with the slices that fill them, so they're left out until then
+# Album art (slice 6) shows only when the songs are one album; the right-click menu holds only Play
+# next and Add to queue (R7.2) until the slices that fill the rest, and dragging (R6.10) comes whole
+# with its own
 LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
     {"label": "Edit tags", "icon": "genre", "later": "Editing tags comes in a later version"},
@@ -357,6 +358,47 @@ class FolderModel(PagedModel):
             self._playing = path
             self._changed("playing")
 
+    def source(self) -> str:
+        """The open folder's name, where the queue says it plays from (R7.2)."""
+        return index_folders.name_of(self._folder) if self._folder else ROOT_TITLE
+
+    def queue_from(self, row: int) -> tuple[list[int], str]:
+        """What a double click or a cover's play button on row `row` plays (R7.1): a file and the
+        files after it in the list, or a folder's songs, from its first; and their name."""
+        row_ = self.row(row)
+        if row_ is None:
+            return [], ""
+        if row_["kind"] == "folder":
+            return index_folders.songs_beneath(self._read(), row_["path"]), row_["name"]
+        files = [k // 2 for k in (self._ids or []) if k % 2]
+        song = int(row_["key"]) // 2
+        return files[files.index(song) :] if song in files else [song], self.source()
+
+    def songs_at(self, row: int) -> list[int]:
+        """The songs row `row` stands for (R7.2): a file's own, or those beneath a folder."""
+        row_ = self.row(row)
+        if row_ is None:
+            return []
+        if row_["kind"] == "folder":
+            return index_folders.songs_beneath(self._read(), row_["path"])
+        return [int(row_["key"]) // 2]
+
+    def selected_songs(self) -> list[int]:
+        """The songs the selection stands for, in the list's order, each once (R2.9.6): a
+        folder's from its first, then the next row's."""
+        c = self._read()
+        out: dict[int, None] = {}
+        for k in self._ids or []:
+            if k not in self._selected:
+                continue
+            if k % 2:
+                out[k // 2] = None
+                continue
+            r = c.execute("SELECT path FROM folder WHERE id = ?", (k // 2,)).fetchone()
+            if r is not None:
+                out.update(dict.fromkeys(index_folders.songs_beneath(c, r[0])))
+        return list(out)
+
     # ---------- the selection (R2.9.6) ----------
 
     def _key_at(self, n: int) -> int | None:
@@ -442,14 +484,14 @@ def _value(name: str, default: Any = "") -> Callable[[FolderView], Any]:
 
 class FolderView(QObject):
     """The open folder (R2.9): where it is, its count, the mode, going up and back, a folder of
-    songs' strip, the selection's count, and Play. `play` asks for a song to be played, by its path
-    under the root."""
+    songs' strip, the selection's count, and Play. `play` asks for songs to be played, by their
+    ids, with the name of where they're from (R7.1)."""
 
     changed = Signal()  # the folder, its counts and strip
     modeChanged = Signal()
     selectionChanged = Signal()
     opened = Signal()  # another folder opened: its search is gone
-    play = Signal(str)
+    play = Signal(object, str)  # songs to play, by id, the first first, and where they're from
 
     def __init__(
         self,
@@ -564,42 +606,31 @@ class FolderView(QObject):
 
     @Slot(int)
     def activate(self, n: int) -> None:
-        """Double-click or Enter on row n: a folder opens, a file plays."""
+        """Double-click or Enter on row n: a folder opens, a file plays, the files after it in
+        the list its queue (R7.1)."""
         row = self._model.row(n)
         if row is None:
             return
         if row["kind"] == "folder":
             self.open(row["path"])
         else:
-            self.play.emit(row["path"])
+            self._play(*self._model.queue_from(n))
 
     @Slot(int)
     def playRow(self, n: int) -> None:  # noqa: N802
-        """A cover's play button: a folder from its first song, or the file."""
-        row = self._model.row(n)
-        if row is None:
-            return
-        first = (
-            index_folders.first_song(self._read(), row["path"])
-            if row["kind"] == "folder"
-            else row["path"]
-        )
-        if first:
-            self.play.emit(first)
+        """A cover's play button: a folder's songs from its first, or the file and those after
+        it (R7.1)."""
+        self._play(*self._model.queue_from(n))
 
     @Slot()
     def playSelection(self) -> None:  # noqa: N802
-        """The selection bar's Play: its first song, in the list's order (the queue, which plays
-        the rest, comes with slice 4)."""
-        folders, files = self._model.selected()
-        c = self._read()
-        for path in folders:
-            first = index_folders.first_song(c, path)
-            if first:
-                self.play.emit(first)
-                return
-        if files:
-            self.play.emit(files[0])
+        """The selection bar's Play: the songs it stands for, in the list's order, from the first
+        (R2.9.6, R7.1)."""
+        self._play(self._model.selected_songs(), self._model.source())
+
+    def _play(self, songs: list[int], source: str) -> None:
+        if songs:
+            self.play.emit(songs, source)
 
     @Slot(str)
     def setMode(self, mode: str) -> None:  # noqa: N802

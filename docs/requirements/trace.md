@@ -127,3 +127,28 @@ A table row is traced whole, its cells as written.
 |---|---|---|
 | R2.13 | Artists, album artists and albums are shown as tagged and sorted by their sort names | test_without_a_sort_tag_a_leading_article_is_skipped_any_case, test_a_sort_tag_wins_over_the_name, test_sort_tags_win_for_the_album_artist_and_the_title, test_albums_by_album_artist_then_title_by_their_sort_names, test_artists_by_sort_name_with_their_counts_and_mosaic, test_the_songs_list_sorts_artists_by_their_sort_names, test_a_name_that_only_looks_like_an_article_is_kept, test_a_name_with_an_article_sorts_as_the_name_without_it |
 | R2.13 | The, A and An, a list in Settings (R13.3) | test_the_articles_are_a_list_others_can_be_added_to, test_case_and_leading_punctuation_are_set_aside, test_numbers_are_read_by_value, test_any_numbers_sort_by_value_in_a_name, test_no_name_has_no_key_so_it_sorts_last_in_sql |
+
+## 7.1. Playing
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.1 | Double-clicking a song, or pressing Enter on a selection | test_playing_a_song_puts_the_rest_of_its_list_after_it, test_a_double_click_plays_the_song_and_queues_the_rest_of_its_list, test_a_right_click_on_a_song_offers_play_next_and_add_to_queue, test_double_clicking_a_song_plays_it_and_marks_its_row, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, test_clicks_select_open_and_play_folders_and_the_crumbs_and_keys_go_up_and_back, test_an_albums_page_says_what_it_holds, later: #0 |
+| R7.1 | Play on an album, artist, genre or playlist does the same from its first song | test_play_on_an_album_plays_from_its_first_song, test_play_on_an_album_plays_it_from_its_first_song_and_shuffle_from_any, test_clicks_open_a_view_an_album_its_artist_and_go_back, test_play_plays_the_selections_first_song_and_activate_opens_or_plays, later: #0 |
+
+## 7.2. The queue
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.2 | The queue button in the now-playing bar opens Up next | test_the_queue_button_opens_up_next_and_closes_it_again, test_the_bar_shows_the_song_and_its_buttons_play_it, test_play_next_and_add_to_queue_put_a_rows_songs_where_they_say, test_up_next_lists_the_songs_played_last_the_latest_first, test_an_empty_up_next_says_so_and_a_song_gone_says_that, test_the_bar_and_up_next_keep_their_text_in_their_boxes_at_both_sizes |
+| R7.2 | Now Playing with No visualization shows the same queue at full size | later: #0 |
+| R7.2 | Songs can be reordered and removed there, and dropped onto it | test_a_row_of_up_next_plays_moves_or_goes_at_a_click, test_a_song_to_come_moves_where_it_is_dropped, test_remove_takes_a_song_to_come_or_played_out_and_the_current_one_stays, test_a_move_while_shuffling_leaves_the_order_shuffle_off_returns_to, later: #0 |
+| R7.2 | Every song list's context menu has Play next and Add to queue | test_play_next_goes_right_after_the_current_song_ahead_of_songs_added_before, test_add_to_queue_goes_after_the_songs_added_before_and_ahead_of_the_rest_of_the_list, test_songs_added_to_an_empty_or_played_out_queue_are_cued_there, test_play_next_and_add_to_queue_put_a_rows_songs_where_they_say, test_a_right_click_on_a_song_offers_play_next_and_add_to_queue, test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title, later: #0 |
+| R7.2 | The queue is kept across restarts | later: #0 |
+
+## 7.3. Shuffle and repeat
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R7.3 | Shuffle plays the queue in a random order without repeating a song until all have played | test_shuffle_plays_every_song_once_before_any_plays_again, test_a_seeded_shuffle_gives_the_same_order_every_time, test_shuffle_keeps_the_songs_added_first_and_off_puts_the_rest_back_in_order, test_a_shuffled_lap_with_repeat_all_never_starts_with_the_song_that_just_ended, test_shuffled_play_of_a_list_starts_from_the_song_chosen_or_one_at_random, test_shuffle_and_repeat_buttons_say_their_state, test_the_bar_shows_the_song_and_its_buttons_play_it |
+| R7.3 | Repeat cycles Off, All and One | test_repeat_cycles_off_all_one_and_off, test_repeat_all_plays_the_queue_again_from_its_start, test_repeat_one_plays_the_song_again_when_it_ends_and_next_still_moves_on, test_shuffle_and_repeat_buttons_say_their_state, test_the_bar_shows_the_song_and_its_buttons_play_it |
+| R7.3 | Both are kept across restarts | later: #0 |

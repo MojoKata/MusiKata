@@ -118,7 +118,7 @@ Item {
                         required property int albumId
                         width: 150
                         onOpen: page.library.openAlbum(albumId)
-                        onPlay: page.player.play(page.library.firstSong(albumId))
+                        onPlay: page.player.playAlbum(albumId)
                     }
                 }
             }
@@ -148,11 +148,14 @@ Item {
             }
         }
         delegate: TrackRow {
+            required property int index
             width: list.width
             columns: page.columns
             showAlbum: true
-            onActivated: page.player.play(path)
+            onActivated: page.player.playFrom(page.artist.others, index)
+            onMenu: songMenu.openFor(page.artist.others, index)
         }
         ScrollBar.vertical: ScrollBar { }
     }
+    SongMenu { id: songMenu; player: page.player }
 }

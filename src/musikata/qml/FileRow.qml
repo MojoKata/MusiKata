@@ -11,6 +11,7 @@ Rectangle {
     id: row
     signal tapped(int modifiers)
     signal activated()
+    signal menu()  // a right click: its songs' menu (SongMenu)
     required property var columns       // [x, width] of each column
     required property bool songs        // a folder of songs' columns
     required property string name
@@ -33,6 +34,7 @@ Rectangle {
     Accessible.selected: row.selected
 
     HoverHandler { id: hover }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: row.menu() }
     TapHandler {
         id: tap
         gesturePolicy: TapHandler.ReleaseWithinBounds

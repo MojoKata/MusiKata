@@ -3,9 +3,11 @@ import QtQuick.Controls.Basic
 import "."
 
 // An album's page (R2.6, L02-album): the way back, the cover, the line over the title, the title,
-// the artist (a click opens their page), songs, length and format; Play, and Shuffle, Edit tags
-// and Album art, which come with later slices (the queue, the Edit tags panel, album art); the
-// album's state chips; and its songs. Play plays its first song.
+// the artist (a click opens their page), songs, length and format; Play and Shuffle, and Edit tags
+// and Album art, which come with later slices (the Edit tags panel, album art); the album's state
+// chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
+// rest shuffled (R7.1, R7.3); a song's double click plays it and the rest after it, its right click
+// opens its menu (R7.2).
 Item {
     id: page
     required property var library
@@ -110,9 +112,15 @@ Item {
                 icon: "play"
                 primary: true
                 later: page.library.playNote  // the root isn't there (R2.10)
-                onClicked: page.player.play(page.library.firstSong(page.album.id))
+                onClicked: page.player.playAlbum(page.album.id)
             }
-            Btn { label: qsTr("Shuffle"); icon: "shuffle"; later: qsTr("Shuffle comes with the queue") }
+            Btn {
+                objectName: "shuffleAlbum"
+                label: qsTr("Shuffle")
+                icon: "shuffle"
+                later: page.library.playNote
+                onClicked: page.player.shuffleAlbum(page.album.id)
+            }
             Btn { label: qsTr("Edit tags"); icon: "genre"; later: qsTr("Editing tags comes in a later version") }
             Btn { label: qsTr("Album art"); icon: "image"; later: qsTr("Album art comes in a later version") }
         }
@@ -176,11 +184,14 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             model: page.album.songs
             delegate: TrackRow {
+                required property int index
                 width: songs.width
                 columns: table.columns
-                onActivated: page.player.play(path)
+                onActivated: page.player.playFrom(page.album.songs, index)
+                onMenu: songMenu.openFor(page.album.songs, index)
             }
             ScrollBar.vertical: ScrollBar { }
         }
     }
+    SongMenu { id: songMenu; player: page.player }
 }
