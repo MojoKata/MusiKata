@@ -100,6 +100,55 @@ def test_a_reload_after_a_scan_drops_the_pages_and_tells_the_view(index, qtbot):
     assert m.count == 1 and m.row(0)["title"] == os.path.splitext("a.flac")[0]
 
 
+def _signals(m):
+    seen = []
+    m.modelReset.connect(lambda: seen.append("reset"))
+    m.rowsInserted.connect(lambda _p, first, last: seen.append(("inserted", first, last)))
+    m.rowsRemoved.connect(lambda _p, first, last: seen.append(("removed", first, last)))
+    m.dataChanged.connect(lambda a, b, _r: seen.append(("changed", a.row(), b.row())))
+    return seen
+
+
+def test_a_refresh_after_a_watched_change_reads_the_rows_again_where_they_are(index, qtbot):
+    """A scan's rows (R2.4) come into a list without a reset: a view keeps its scroll position,
+    with rows added or taken away at the end and every row read again."""
+    fill(index, [{"path": f"{n}.flac", "title": f"Song {n}"} for n in range(3)])
+    m = models.SongsModel(index.read, "title")
+    m.reload()
+    assert m.row(0)["title"] == "Song 0"
+    seen = _signals(m)
+    fill(index, [{"path": "a.flac", "title": "A first"}])
+    m.refresh()
+    assert seen == [("inserted", 3, 3), ("changed", 0, 3)]
+    assert m.count == 4 and m.row(0)["title"] == "A first"  # the pages read again
+    index.write(lambda c: c.execute("DELETE FROM song WHERE path IN ('0.flac', '1.flac')")).result()
+    seen.clear()
+    m.refresh()
+    assert seen == [("removed", 2, 3), ("changed", 0, 1)] and m.count == 2
+    index.write(lambda c: c.execute("DELETE FROM song")).result()
+    seen.clear()
+    m.refresh()
+    assert seen == [("removed", 0, 1)] and m.count == 0
+
+
+def test_a_refresh_keeps_the_search_and_its_rows_come_in_place(index, qtbot):
+    fill(index, [{"path": f"{n}.flac", "title": f"Tide {n}"} for n in range(3)])
+    m = models.SongsModel(index.read, "title")
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.set_search("tide")
+    seen = _signals(m)
+    fill(index, [{"path": "x.flac", "title": "Tide 9"}, {"path": "y.flac", "title": "Other"}])
+    with qtbot.waitSignal(m.countChanged, timeout=5000):
+        m.refresh()
+    assert seen == [("inserted", 3, 3), ("changed", 0, 3)]
+    assert m.count == 4 and m.total() == 5 and m.shown_search() == "tide"
+    with qtbot.waitSignal(m.countChanged, timeout=5000):  # a new search shows its rows anew
+        m.set_search("other")
+        m.refresh()
+    assert "reset" in seen and m.count == 1
+    m.wait()
+
+
 # ---------- Albums and Artists ----------
 
 

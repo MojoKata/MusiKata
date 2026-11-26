@@ -321,6 +321,25 @@ class PagedModel(QAbstractListModel):
             self.endResetModel()
             self.countChanged.emit()
             return
+        self._find(keep=False)
+
+    def refresh(self) -> None:
+        """Reads the rows afresh where they are, after a scan: rows added or taken away at the
+        end and every row read again, never a reset, so a view keeps its scroll position (A2.4).
+        While a search filters it, the search thread finds its rows again, and they come the same
+        way."""
+        self._generation += 1
+        cols, table, where, params, order = self._query()
+        if self._query_of_search:
+            self._find(keep=True)
+            return
+        source = f"{table} WHERE {where}" if where else table
+        count = int(self._read().execute(f"SELECT COUNT(*) FROM {source}", params).fetchone()[0])
+        self._resize(count, count, None, "")
+
+    def _find(self, keep: bool) -> None:
+        """Sends the search to the search thread; its rows come with countChanged."""
+        cols, table, where, params, order = self._query()
         songs, song_params = search.condition(self._query_of_search)
         narrow, narrow_params = self._narrow(songs, song_params)
         found = f"({where}) AND {narrow}" if where else narrow
@@ -334,17 +353,42 @@ class PagedModel(QAbstractListModel):
             return total, [r[0] for r in c.execute(sql, (*params, *narrow_params))]
 
         self._pending = True
-        self._searcher.submit(self, work, lambda result: self._found(generation, text, result))
+        self._searcher.submit(
+            self, work, lambda result: self._found(generation, text, result, keep)
+        )
 
-    def _found(self, generation: int, text: str, result: tuple[int, list[int]] | None) -> None:
+    def _found(
+        self, generation: int, text: str, result: tuple[int, list[int]] | None, keep: bool = False
+    ) -> None:
         if generation != self._generation:
             return  # a newer search or reload has been asked for since
+        if keep and text == self._shown and result is not None:  # the same search, found again
+            self._resize(len(result[1]), result[0], result[1], text)
+            return
         self.beginResetModel()
         self._pages.clear()
         self._total, self._ids = result if result is not None else (self._total, [])
         self._count = len(self._ids)
         self._shown, self._pending = text, False
         self.endResetModel()
+        self.countChanged.emit()
+
+    def _resize(self, count: int, total: int, ids: list[int] | None, shown: str) -> None:
+        """The rows now `count`, without a reset: those past the old count added, or those past
+        the new one taken away, and every row read again."""
+        old = self._count
+        self._pages.clear()
+        self._total, self._ids, self._shown, self._pending = total, ids, shown, False
+        if count > old:
+            self.beginInsertRows(QModelIndex(), old, count - 1)
+            self._count = count
+            self.endInsertRows()
+        elif count < old:
+            self.beginRemoveRows(QModelIndex(), count, old - 1)
+            self._count = count
+            self.endRemoveRows()
+        if count:
+            self.dataChanged.emit(self.index(0), self.index(count - 1))
         self.countChanged.emit()
 
     def row(self, n: int) -> dict[str, Any] | None:

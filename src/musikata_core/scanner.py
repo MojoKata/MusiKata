@@ -2,7 +2,14 @@
 its row, read the changed and new ones on the worker processes in batches, write each batch in one
 transaction, with its rows of the search index (A2.5), and remove what's gone, unless it reappears
 elsewhere with the same audio hash, which is a move: its row keeps its id and the plays that hang
-on it."""
+on it.
+
+A partial scan (A2.4) does the same for the folders a watched change named (`Scope`): each named
+folder's own files, and the folders new under it, walked whole; the folders already known (walked
+before, and watched) are passed by, as their own watches report their changes. A move still has
+two ends when only one is in the scope: a new file takes the row of a song with its hash whose file
+is gone from wherever it was, and a song whose file went takes the row of a copy of it made while
+watching (a move by copying, then removing: `copied`)."""
 
 from __future__ import annotations
 
@@ -11,7 +18,7 @@ import logging
 import os
 import sqlite3
 import stat
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import BinaryIO, Literal
@@ -54,14 +61,43 @@ class Read:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class Scope:
+    """A partial scan's folders (A2.4): those named (paths under the root, "" for the root), and
+    the folders known, walked before and watched, each with its real path. A known folder under a
+    named one is passed by unless it is named too; one that isn't there any more is gone."""
+
+    folders: frozenset[str]
+    known: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class Tree:
+    """What a walk went through: each folder it walked (its path under the root, and its real
+    path), the known folders it passed by, and the real paths walked, so that a link leading back
+    to one is skipped (R2.3.2)."""
+
+    folders: dict[str, str] = field(default_factory=dict)
+    passed: set[str] = field(default_factory=set)
+    reals: set[str] = field(default_factory=set)
+
+
 @dataclass
 class Result:
+    """What a scan did, in counts, and for watching (A2.4): the folders it walked (path under the
+    root -> real path), the known ones it found gone, the files it read, and the copies made while
+    watching that a later scan may find were moves (audio hash -> path)."""
+
     added: int = 0
     changed: int = 0
     moved: int = 0
     removed: int = 0
     unreadable: int = 0
     unchanged: int = 0
+    folders: dict[str, str] = field(default_factory=dict, repr=False)
+    gone_folders: set[str] = field(default_factory=set, repr=False)
+    read: list[Seen] = field(default_factory=list, repr=False)
+    copied: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 # ---------- walking ----------
@@ -71,27 +107,46 @@ def _hidden(entry: os.DirEntry[str]) -> bool:
     """Hidden: a leading "." on Linux and macOS, the hidden attribute on Windows (R2.3.1)."""
     if entry.name.startswith("."):
         return True
-    attrs = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    return _hidden_attribute(entry.stat(follow_symlinks=False))
+
+
+def _hidden_attribute(st: os.stat_result) -> bool:
+    attrs = getattr(st, "st_file_attributes", 0)
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_HIDDEN", 0))
 
 
+def full_path(root: str, rel: str) -> str:
+    """A path under the root (with /, "" for the root itself) as the system's path."""
+    return os.path.join(root, *rel.split("/")) if rel else root
+
+
 def walk(
-    root: str, skip: Iterable[str] = (), images: dict[str, list[art.Image]] | None = None
+    root: str,
+    skip: Iterable[str] = (),
+    images: dict[str, list[art.Image]] | None = None,
+    *,
+    start: str = "",
+    known: Collection[str] = (),
+    tree: Tree | None = None,
 ) -> Iterator[Seen]:
     """Every audio file under root (R2.2's kinds), skipping hidden files and folders, folders
     holding .musikataignore, the folders the settings skip (paths under the root), and the root's
     .musikata (R2.3.1). Links are followed like folders; one leading back to a folder already
-    walked is skipped, and the log says so (R2.3.2). `images`, when given, gets each folder's
-    images (R5.1's kinds), for its albums' covers."""
+    walked is skipped, and the log says so (R2.3.2). `images`, when given, gets each folder walked
+    (with no images: an empty list) and its images (R5.1's kinds), for its albums' covers.
+
+    A partial scan (A2.4) walks from `start`, a folder under the root, and passes by the folders
+    `known` under it; `tree`, when given, gets the folders walked and passed, and its real paths
+    count as walked already."""
     skipped = {s.strip("/") for s in skip}
-    walked: set[str] = set()
+    tree = tree if tree is not None else Tree()
 
     def go(folder: str, rel: str) -> Iterator[Seen]:
         real = os.path.realpath(folder)
-        if real in walked:
+        if real in tree.reals:
             log.info("skipped %s: it leads back to %s, already walked", rel or ".", real)
             return
-        walked.add(real)
+        tree.reals.add(real)
         try:
             entries = sorted(os.scandir(folder), key=lambda e: e.name)
         except OSError as e:
@@ -99,35 +154,102 @@ def walk(
             return
         if any(entry.name == IGNORE for entry in entries):
             return
+        tree.folders[rel] = real
+        if images is not None:
+            images.setdefault(rel, [])
         for entry in entries:
             path = f"{rel}/{entry.name}" if rel else entry.name
             if _hidden(entry) or path in skipped:
                 continue
             try:
                 if entry.is_dir():  # follows links (R2.3.2)
-                    yield from go(entry.path, path)
+                    if path in known:
+                        tree.passed.add(path)
+                    else:
+                        yield from go(entry.path, path)
                 elif os.path.splitext(entry.name)[1].lower() in EXTENSIONS:
                     st = entry.stat()
                     yield Seen(path, st.st_size, st.st_mtime_ns)
                 elif images is not None and art.is_image(entry.name):
                     st = entry.stat()
-                    images.setdefault(rel, []).append(
-                        art.Image(entry.name, st.st_size, st.st_mtime_ns)
-                    )
+                    images[rel].append(art.Image(entry.name, st.st_size, st.st_mtime_ns))
             except OSError as err:
                 log.warning("couldn't read %s: %s", path, err)
 
-    yield from go(root, "")
+    yield from go(full_path(root, start), start)
 
 
-def plan(seen: Iterable[Seen], indexed: Mapping[str, tuple[int, int]]) -> Plan:
+def outside(root: str, folder: str, skip: Iterable[str] = ()) -> bool:
+    """Whether a folder under the root is out of the library now: not there, or it or a folder
+    above it hidden, skipped by the settings or holding .musikataignore (R2.3.1)."""
+    skipped = {s.strip("/") for s in skip}
+    if not os.path.isdir(root) or os.path.exists(os.path.join(root, IGNORE)):
+        return True
+    parts = folder.split("/") if folder else []
+    for n, name in enumerate(parts):
+        path = full_path(root, "/".join(parts[: n + 1]))
+        if name.startswith(".") or "/".join(parts[: n + 1]) in skipped:
+            return True
+        try:
+            if _hidden_attribute(os.stat(path, follow_symlinks=False)):
+                return True  # pragma: no cover - Windows' hidden attribute: tier 3 (R2.3.1)
+        except OSError:
+            return True  # not there
+        if not os.path.isdir(path) or os.path.exists(os.path.join(path, IGNORE)):
+            return True
+    return False
+
+
+def walk_scope(
+    root: str,
+    scope: Scope,
+    skip: Iterable[str] = (),
+    images: dict[str, list[art.Image]] | None = None,
+    tree: Tree | None = None,
+) -> Iterator[Seen]:
+    """The audio files a partial scan sees (A2.4): each named folder's own files and those of the
+    folders new under it, each named folder walked once, whether named or found new under another.
+    A named folder out of the library now (`outside`) is walked not at all."""
+    tree = tree if tree is not None else Tree()
+    named = sorted(scope.folders)
+    # the known folders count as walked (R2.3.2), but for the named ones, walked again here
+    tree.reals |= set(scope.known.values()) - {os.path.realpath(full_path(root, f)) for f in named}
+    for folder in named:
+        if folder in tree.folders or outside(root, folder, skip):
+            continue
+        yield from walk(root, skip, images, start=folder, known=scope.known, tree=tree)
+    tree.passed -= set(tree.folders)
+
+
+def in_scope(folder: str, scope: Scope, tree: Tree) -> bool:
+    """Whether a partial scan answers for what is in `folder`: a folder it walked, or one under a
+    named folder that no known folder it passed by holds (a folder gone, or out of the library)."""
+    if folder in tree.folders:
+        return True
+    while True:
+        if folder in scope.folders:
+            return True
+        if folder in tree.passed or not folder:
+            return False
+        folder = folder.rpartition("/")[0]
+
+
+def plan(
+    seen: Iterable[Seen],
+    indexed: Mapping[str, tuple[int, int]],
+    expected: Mapping[str, tuple[int, int]] | None = None,
+) -> Plan:
     """The files whose size or modification time differ from their row, or that have none, and
-    the rows no file was seen for (R2.3: an unchanged file costs one stat)."""
+    the rows no file was seen for (R2.3: an unchanged file costs one stat). A file `expected` with
+    that size and modification time (MusiKata's own write, A2.4) isn't read: the write updates its
+    row itself."""
     p = Plan()
     found: set[str] = set()
+    expected = expected or {}
     for s in seen:
         found.add(s.path)
-        if indexed.get(s.path) != (s.size, s.mtime_ns):
+        now = (s.size, s.mtime_ns)
+        if indexed.get(s.path) != now and expected.get(s.path) != now:
             p.read.append(s)
     p.gone = sorted(set(indexed) - found)
     return p
@@ -316,28 +438,120 @@ def write_batch(
     return res
 
 
+# a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
+ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
+       "error", *db.FIELDS)  # fmt: skip
+
+
+def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched) -> bool:
+    """A move by copying, then removing (A2.2, A2.4): the row of the song at `old`, whose file
+    went, becomes the song at `new`, a copy of it made while watching, which loses its own row; so
+    the song keeps its id, and what hangs on it. False when either row isn't there."""
+    keep = c.execute("SELECT id FROM song WHERE path = ?", (old,)).fetchone()
+    copy = c.execute("SELECT id FROM song WHERE path = ?", (new,)).fetchone()
+    if keep is None or copy is None:
+        return False
+    values = c.execute(f"SELECT {', '.join(ROW)} FROM song WHERE id = ?", copy).fetchone()
+    genres = [g for (g,) in c.execute(
+        "SELECT genre FROM song_genre WHERE song_id = ? ORDER BY position", copy
+    )]  # fmt: skip
+    albums.forget(c, [new], touched)
+    c.execute("DELETE FROM song_fts WHERE rowid = ?", copy)
+    c.execute("DELETE FROM song WHERE id = ?", copy)
+    sets = ", ".join(f"{k} = ?" for k in ROW)
+    c.execute(f"UPDATE song SET path = ?, {sets} WHERE id = ?", (new, *values, keep[0]))
+    c.execute("DELETE FROM song_genre WHERE song_id = ?", keep)
+    c.executemany(
+        "INSERT INTO song_genre VALUES (?, ?, ?)", [(keep[0], n, g) for n, g in enumerate(genres)]
+    )
+    albums.place(c, keep[0], touched)
+    search.index_songs(c, [keep[0]])
+    return True
+
+
+def _rows(
+    c: sqlite3.Connection, scope: Scope | None, tree: Tree
+) -> list[tuple[str, int, int, str]]:
+    """(path, size, modification time, audio hash) of the rows a scan answers for: all of them,
+    or a partial scan's (`in_scope`)."""
+    cols = "SELECT path, size, mtime_ns, audio_hash FROM song"
+    if scope is None or "" in scope.folders:
+        rows = c.execute(cols).fetchall()
+    else:
+        rows = []
+        for f in sorted(scope.folders):  # by the path's index: f/ up to f0, "0" following "/"
+            rows += c.execute(f"{cols} WHERE path >= ? AND path < ?", (f + "/", f + "0"))
+    if scope is None:
+        return rows
+    return [r for r in rows if in_scope(r[0].rpartition("/")[0], scope, tree)]
+
+
+def _elsewhere(
+    c: sqlite3.Connection,
+    root: str,
+    batch: list[Read],
+    indexed: Mapping[str, object],
+    moves: dict[str, str],
+) -> dict[str, str]:
+    """For a partial scan's new files, the other end of a move outside its scope (A2.4): a song
+    with the file's audio hash whose file is gone is a move, put in `moves`; one whose file is
+    still there makes the new file a copy (audio hash -> its path), which this returns."""
+    copies: dict[str, str] = {}
+    for r in batch:
+        h = r.audio_hash
+        if not h or r.seen.path in indexed or h in moves:
+            continue
+        others = [p for (p,) in c.execute("SELECT path FROM song WHERE audio_hash = ?", (h,))]
+        gone = next((p for p in others if not os.path.exists(full_path(root, p))), None)
+        if gone is not None:
+            moves[h] = gone
+        elif others:
+            copies[h] = r.seen.path
+    return copies
+
+
 def scan(
     root: str,
     index: db.Index,
     workers: Executor,
     skip: Iterable[str] = (),
     progress: Callable[[int, int], None] | None = None,
+    scope: Scope | None = None,
+    expected: Mapping[str, tuple[int, int]] | None = None,
+    copied: Mapping[str, str] | None = None,
 ) -> Result:
-    """One scan of the root into its index (A2.2). progress(done, of) after each batch, for the
-    root's card (R2.3)."""
+    """One scan of the root into its index (A2.2), or, given a `scope`, of the folders it names
+    (A2.4). progress(done, of) after each batch, for the root's card (R2.3). `expected`: files
+    MusiKata wrote itself, not read again (`plan`). `copied`: copies made while watching, by audio
+    hash, which a song whose file went takes over (`take_over`); the result's are those still
+    standing, with the new ones."""
     c = index.read()
-    indexed = {p: (s, m) for p, s, m in c.execute("SELECT path, size, mtime_ns FROM song")}
-    hashes = dict(c.execute("SELECT path, audio_hash FROM song WHERE audio_hash IS NOT NULL"))
     images: dict[str, list[art.Image]] = {}
-    work = plan(walk(root, skip, images), indexed)
+    tree = Tree()
+    if scope is None:
+        seen = list(walk(root, skip, images, tree=tree))
+    elif not os.path.isdir(root):  # gone with its drive (R2.10): nothing is taken for removed
+        log.warning("didn't rescan %s: it isn't there", root)
+        return Result()
+    else:
+        seen = list(walk_scope(root, scope, skip, images, tree))
+    rows = _rows(c, scope, tree)
+    indexed = {p: (s, m) for p, s, m, _h in rows}
+    hashes = {p: h for p, _s, _m, h in rows if h is not None}
+    work = plan(seen, indexed, expected)
     moves = {hashes[p]: p for p in work.gone if p in hashes}
     total = Result(
-        unchanged=len(indexed) - len(work.gone) - sum(s.path in indexed for s in work.read)
+        unchanged=len(indexed) - len(work.gone) - sum(s.path in indexed for s in work.read),
+        folders=dict(tree.folders),
+        read=list(work.read),
     )
+    copies = dict(copied or {})
     for i in range(0, len(work.read), BATCH):
         batch = list(
             workers.map(read_one, [root] * len(work.read[i : i + BATCH]), work.read[i : i + BATCH])
         )
+        if scope is not None:
+            copies.update(_elsewhere(c, root, batch, indexed, moves))
 
         def write(c: sqlite3.Connection, b: list[Read] = batch) -> Result:
             return write_batch(c, b, moves, images)
@@ -348,12 +562,22 @@ def scan(
         if progress:
             progress(min(i + BATCH, len(work.read)), len(work.read))
     # a gone row with a hash that a new file took is a move; every other gone row goes, those with
-    # no hash (a file that couldn't be read) included
+    # no hash (a file that couldn't be read) included, unless a copy made while watching takes it
     moved_from = {p for p in work.gone if p in hashes} - set(moves.values())
-    remove = [p for p in work.gone if p not in moved_from]
+    left = [p for p in work.gone if p not in moved_from]
+    gone = set(work.gone)
+    taken = {
+        p: copies[hashes[p]]
+        for p in left
+        if hashes.get(p) in copies
+        and copies[hashes[p]] not in gone
+        and os.path.exists(full_path(root, copies[hashes[p]]))
+    }
+    remove = [p for p in left if p not in taken]
 
     def delete(c: sqlite3.Connection) -> int:
         touched = albums.Touched()
+        total.moved += sum(take_over(c, old, new, touched) for old, new in taken.items())
         albums.forget(c, remove, touched)
         search.forget(c, remove)
         c.executemany("DELETE FROM song WHERE path = ?", [(p,) for p in remove])
@@ -362,5 +586,14 @@ def scan(
         return len(remove)
 
     total.removed = index.write(delete).result()
-    log.info("scanned %s: %s", root, total)
+    used = {hashes[p] for p in taken}
+    total.copied = {h: p for h, p in copies.items() if h not in used and p not in gone}
+    if scope is None:
+        log.info("scanned %s: %s", root, total)
+    else:
+        total.gone_folders = {
+            f for f in scope.known if f not in tree.folders and in_scope(f, scope, tree)
+        }
+        named = ", ".join(f or "." for f in sorted(scope.folders))
+        log.info("rescanned %s in %s: %s", named, root, total)
     return total

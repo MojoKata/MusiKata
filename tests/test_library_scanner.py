@@ -9,13 +9,16 @@ that hashed the tags would call every retagged song new."""
 import logging
 import os
 import shutil
+import stat
 import sys
+import types
 from concurrent.futures import ThreadPoolExecutor
 
 import mutagen
 import pytest
+from fakes import wav
 
-from musikata_core import db, scanner, workers
+from musikata_core import albums, art, db, scanner, workers
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -59,7 +62,7 @@ def test_the_walk_notes_each_folders_images_for_its_albums_covers(tmp_path):
     found = [s.path for s in scanner.walk(r, images=images)]
     assert found == ["a/1.mp3", "b/2.flac"]
     assert {k: sorted(i.name for i in v) for k, v in images.items()} == {
-        "a": ["Back.PNG", "cover.jpg"], "c": ["folder.webp"], "": ["top.jpg"]
+        "a": ["Back.PNG", "cover.jpg"], "b": [], "c": ["folder.webp"], "": ["top.jpg"]
     }  # fmt: skip
     assert images["a"][0].size == 1
 
@@ -232,3 +235,220 @@ def test_an_unreadable_file_that_goes_takes_its_row_with_it(tmp_path):
     assert first.unreadable == 1 and second.removed == 1
     assert _rows(index) == {}
     index.close()
+
+
+# ---------- partial scans (A2.4) ----------
+
+
+def _scan(music, index, scope=None, **kw):
+    with ThreadPoolExecutor(1) as pool:
+        return scanner.scan(str(music), index, pool, scope=scope, **kw)
+
+
+def _scope(*folders, known=None):
+    return scanner.Scope(frozenset(folders), known or {})
+
+
+@pytest.fixture
+def lib(tmp_path):
+    music = tmp_path / "Music"
+    music.mkdir()
+    index = db.Index(str(tmp_path / "musikata.db"))
+    yield music, index
+    index.close()
+
+
+def test_a_partial_scan_reads_only_the_folders_named_passing_by_the_known_ones_under_them(lib):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    wav(music / "A" / "Sub" / "2.wav", 2)
+    wav(music / "B" / "3.wav", 3)
+    known = _scan(music, index).folders
+    assert set(known) == {"", "A", "A/Sub", "B"}
+    wav(music / "A" / "4.wav", 4)
+    wav(music / "A" / "Sub" / "5.wav", 5)
+    wav(music / "B" / "6.wav", 6)
+    os.remove(music / "B" / "3.wav")
+    res = _scan(music, index, _scope("A", known=known))
+    assert (res.added, res.removed, res.unchanged) == (1, 0, 1)
+    assert [s.path for s in res.read] == ["A/4.wav"]
+    assert set(res.folders) == {"A"} and res.gone_folders == set()
+    assert set(_rows(index)) == {"A/1.wav", "A/4.wav", "A/Sub/2.wav", "B/3.wav"}
+
+
+def test_a_folder_new_under_a_named_one_is_walked_whole_and_one_gone_takes_its_rows(lib):
+    music, index = lib
+    wav(music / "A" / "Old" / "1.wav", 1)
+    wav(music / "A" / "Old" / "Deep" / "2.wav", 2)
+    known = _scan(music, index).folders
+    shutil.rmtree(music / "A" / "Old")
+    wav(music / "A" / "New" / "Deep" / "3.wav", 3)
+    res = _scan(music, index, _scope("A", "A/New", known=known))  # named twice: walked once
+    assert (res.added, res.removed) == (1, 2)
+    assert set(res.folders) == {"A", "A/New", "A/New/Deep"}
+    assert res.gone_folders == {"A/Old", "A/Old/Deep"}
+    assert set(_rows(index)) == {"A/New/Deep/3.wav"}
+
+
+def test_a_named_folder_ignored_hidden_or_gone_takes_its_rows_and_its_folders_with_it(lib):
+    music, index = lib
+    for n, path in enumerate(("A/1.wav", "A/Sub/2.wav", "B/3.wav", "C/4.wav", "D/5.wav")):
+        wav(music / path, n)
+    known = _scan(music, index).folders
+    _touch(str(music / "A" / scanner.IGNORE), b"")
+    os.rename(music / "B", music / ".B")
+    shutil.rmtree(music / "C")
+    res = _scan(music, index, _scope("", "A", "B", "C", known=known))
+    assert res.removed == 4 and set(_rows(index)) == {"D/5.wav"}
+    assert res.gone_folders == {"A", "A/Sub", "B", "C"} and set(res.folders) == {""}  # D passed by
+
+
+def test_what_puts_a_folder_outside_the_library_now(tmp_path):
+    root = str(tmp_path)
+    for p in ("a/b/x", ".hidden/x", "skip/x", "ignored/in/x"):
+        _touch(os.path.join(root, p))
+    _touch(os.path.join(root, "ignored", scanner.IGNORE), b"")
+    assert not scanner.outside(root, "") and not scanner.outside(root, "a/b")
+    assert scanner.outside(root, ".hidden") and scanner.outside(root, "skip", ["skip/"])
+    assert scanner.outside(root, "ignored/in") and scanner.outside(root, "a/gone")
+    assert scanner.outside(root, "a/b/x")  # a file, not a folder
+    assert scanner.outside(str(tmp_path / "none"), "")
+
+
+def test_the_hidden_attribute_is_windows_hidden_flag(monkeypatch):
+    """R2.3.1 on Windows: the walk reads the attribute from each entry's stat; elsewhere stat has
+    no attributes, and nothing is hidden by them."""
+    monkeypatch.setattr(stat, "FILE_ATTRIBUTE_HIDDEN", 2, raising=False)
+    assert scanner._hidden_attribute(types.SimpleNamespace(st_file_attributes=2 | 32))
+    assert not scanner._hidden_attribute(types.SimpleNamespace(st_file_attributes=32))
+    assert not scanner._hidden_attribute(types.SimpleNamespace())
+
+
+def test_a_move_between_two_named_folders_keeps_its_row(lib):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    (music / "B").mkdir()
+    known = _scan(music, index).folders
+    before = _rows(index)["A/1.wav"][0]
+    os.rename(music / "A" / "1.wav", music / "B" / "1.wav")
+    res = _scan(music, index, _scope("A", "B", known=known))
+    assert (res.moved, res.added, res.removed) == (1, 0, 0)
+    assert _rows(index) == {"B/1.wav": (before, None, None)}
+
+
+def test_a_move_into_a_named_folder_from_one_not_named_keeps_its_row(lib):
+    """The file's old folder may be rescanned later, or not at all: the new file takes the row
+    of the song with its hash whose file is gone, wherever that was (A2.2, A2.4)."""
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    wav(music / "A" / "2.wav", 2)
+    wav(music / "C" / "2.wav", 2)  # a copy, still there: not taken
+    (music / "B").mkdir()
+    known = _scan(music, index).folders
+    rows = _rows(index)
+    os.rename(music / "A" / "1.wav", music / "B" / "1.wav")
+    res = _scan(music, index, _scope("B", known=known))
+    assert (res.moved, res.added) == (1, 0) and _rows(index)["B/1.wav"][0] == rows["A/1.wav"][0]
+    res = _scan(music, index, _scope("A", known=known))  # its old folder, later: nothing gone
+    assert (res.moved, res.removed, res.unchanged) == (0, 0, 1)
+    assert set(_rows(index)) == {"A/2.wav", "B/1.wav", "C/2.wav"}
+
+
+def test_a_copy_then_its_original_removed_is_a_move_whichever_folder_is_scanned_first(lib):
+    """A move between drives (a folder joined by a link, R2.3.2) copies, then removes: the copy's
+    folder is rescanned while the original is still there, and the original's later. The song
+    keeps its row (A2.2) at its new path, and the copy's row goes."""
+    music, index = lib
+    wav(music / "A" / "1.wav", 1, "Signal Fires")
+    wav(music / "A" / "2.wav", 2)
+    (music / "B").mkdir()
+    known = _scan(music, index).folders
+    rows = _rows(index)
+    shutil.copy2(music / "A" / "1.wav", music / "B" / "1.wav")
+    shutil.copy2(music / "A" / "2.wav", music / "B" / "2.wav")
+    res = _scan(music, index, _scope("B", known=known))
+    assert res.added == 2 and set(res.copied.values()) == {"B/1.wav", "B/2.wav"}
+    os.remove(music / "A" / "1.wav")
+    os.remove(music / "B" / "2.wav")  # the copy goes instead: the original stays itself
+    copied = res.copied
+    res = _scan(music, index, _scope("A", "B", known=known), copied=copied)
+    assert (res.moved, res.removed) == (1, 1) and res.copied == {}
+    after = _rows(index)
+    assert after == {
+        "B/1.wav": (rows["A/1.wav"][0], "Signal Fires", None),
+        "A/2.wav": rows["A/2.wav"],
+    }
+    fts = index.read().execute("SELECT rowid FROM song_fts WHERE song_fts MATCH 'signal'")
+    assert [r for (r,) in fts] == [rows["A/1.wav"][0]]
+
+
+def test_a_copy_whose_original_stays_stays_a_song_of_its_own(lib):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    (music / "B").mkdir()
+    known = _scan(music, index).folders
+    shutil.copy2(music / "A" / "1.wav", music / "B" / "1.wav")
+    copied = _scan(music, index, _scope("B", known=known)).copied
+    res = _scan(music, index, _scope("A", known=known), copied=copied)
+    assert (res.moved, res.removed, res.unchanged) == (0, 0, 1) and res.copied == copied
+    assert set(_rows(index)) == {"A/1.wav", "B/1.wav"}
+    assert not scanner.take_over(index.read(), "A/none.wav", "B/1.wav", None)
+
+
+def test_a_file_musikata_wrote_itself_isnt_read_again(lib):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    known = _scan(music, index).folders
+    wav(music / "A" / "1.wav", 1, "Retitled")  # as a later slice's write would
+    st = os.stat(music / "A" / "1.wav")
+    expected = {"A/1.wav": (st.st_size, st.st_mtime_ns)}
+    res = _scan(music, index, _scope("A", known=known), expected=expected)
+    assert (res.changed, res.unchanged, res.read) == (0, 1, [])
+    res = _scan(music, index, _scope("A", known=known))  # unknown to it: read
+    assert res.changed == 1 and _rows(index)["A/1.wav"][1] == "Retitled"
+
+
+def test_a_partial_scan_of_a_root_that_isnt_there_takes_nothing_for_removed(lib, caplog):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    known = _scan(music, index).folders
+    shutil.rmtree(music)
+    res = _scan(music, index, _scope("", "A", known=known))
+    assert res.removed == 0 and set(_rows(index)) == {"A/1.wav"} and "isn't there" in caplog.text
+
+
+def test_a_partial_scan_keeps_albums_search_and_the_covers_of_folders_it_didnt_walk(lib):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1, "Undertow")
+    wav(music / "B" / "2.wav", 2, "Neap Tide")
+    _touch(str(music / "A" / "cover.jpg"))
+    known = _scan(music, index).folders
+    index.write(lambda c: c.execute("UPDATE song SET album = 'X', albumartist = 'Y'")).result()
+    index.write(lambda c: [albums.place(c, i, albums.Touched()) for i in (1, 2)]).result()
+    t = albums.Touched()
+    t.albums.update(r for (r,) in index.read().execute("SELECT id FROM album"))
+    index.write(lambda c: albums.refresh(c, t, {"A": [art.Image("cover.jpg", 1, 1)], "B": []}))
+    wav(music / "B" / "2.wav", 2, "Spring Tide")
+    _scan(music, index, _scope("B", known=known))
+    c = index.read()
+    assert c.execute("SELECT title, songs, folder_image FROM album").fetchall() == [
+        ("X", 1, "A/cover.jpg")
+    ]  # B/2.wav read again: its album tag gone; A's cover kept, A not walked
+    found = c.execute(
+        "SELECT path FROM song JOIN song_fts ON song_fts.rowid = song.id"
+        " WHERE song_fts MATCH 'spring'"
+    )
+    assert [p for (p,) in found] == ["B/2.wav"]
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink") or sys.platform.startswith("win"), reason="links")
+def test_a_link_new_in_a_named_folder_leading_back_to_a_known_one_is_skipped(lib, caplog):
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    (music / "B").mkdir()
+    known = _scan(music, index).folders
+    os.symlink(music / "A", music / "B" / "back")
+    os.symlink(music / "B", music / "B" / "self")
+    caplog.set_level(logging.INFO)
+    res = _scan(music, index, _scope("B", known=known))
+    assert res.added == 0 and set(res.folders) == {"B"} and "leads back" in caplog.text

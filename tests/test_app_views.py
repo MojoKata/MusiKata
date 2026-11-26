@@ -286,3 +286,30 @@ def test_a_click_on_a_songs_column_header_sorts_by_it_and_again_the_other_way(sh
     assert lib.property("songs").row(0)["title"] == "Tide Tables 2"
     click(shell, one(shell, "head-"))  # the # column: no order of its own
     assert lib.property("songs").order() == ("title", True)
+
+
+@pytest.mark.slow
+def test_a_list_keeps_its_place_and_its_search_when_a_scan_changes_its_rows(shell, qtbot):
+    """A watched change (R2.4) rescans while the user reads a list: the rows change under them,
+    but the list stays where it was scrolled to, with the search typed."""
+    lib = shell.library
+    batch = [scanner.Read(scanner.Seen(f"Many/{n:03d}.flac", 10, 1),
+                          Tags(title=f"Many {n:03d}", artist="Many"),
+                          AudioInfo("flac", 200.0, 900, 44100, 2), f"many{n}")
+             for n in range(120)]  # fmt: skip
+    shell.index.write(lambda c: scanner.write_batch(c, batch, {})).result()
+    lib.reload()
+    lib.go({"view": "songs", "search": "many"})
+    settle(shell, qtbot)
+    songs = one(shell, "songs")
+    qtbot.waitUntil(lambda: songs.property("count") == 120, timeout=WAIT)
+    songs.setProperty("contentY", 1500.0)
+    settle(shell, qtbot)
+    more = [scanner.Read(scanner.Seen("Many/zzz.flac", 10, 1), Tags(title="Many more"),
+                         AudioInfo("flac", 200.0, 900, 44100, 2), "more")]  # fmt: skip
+    shell.index.write(lambda c: scanner.write_batch(c, more, {})).result()
+    lib.reload()
+    qtbot.waitUntil(lambda: songs.property("count") == 121, timeout=WAIT)
+    settle(shell, qtbot)
+    assert songs.property("contentY") == 1500.0
+    assert lib.property("search") == "many" and lib.property("view") == "songs"

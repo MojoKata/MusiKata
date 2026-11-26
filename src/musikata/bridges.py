@@ -1,7 +1,8 @@
 """The objects QML sees (A1.2). `Library`: the root, its card's line, the views and going between
 them (R2.6, R6.3), the header (R6.4: the view's title and count, the search, the view mode and the
-sort), Albums with its genre chips and Artists, an album's and an artist's pages, and the scan,
-run on a thread of its own with the worker processes reading the files (A1.3, A2.2).
+sort), Albums with its genre chips and Artists, an album's and an artist's pages, and the scans,
+run one at a time on a thread of their own with the worker processes reading the files (A1.3,
+A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4).
 `Player`: the song playing, played on the playback thread (player.py, A4.1).
 
 What the root's card and the pages say is decided here, as text (`docs/process/coding.md`: QML only
@@ -19,7 +20,8 @@ from concurrent.futures import Executor
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, Signal, Slot
 
-from musikata_core import albums, db, scanner, workers
+from musikata_core import albums, db, scanner, watch, workers
+from musikata_core.clock import Clock, SystemClock
 
 from .models import (
     ALBUM_SORT_LABELS,
@@ -192,7 +194,7 @@ class AlbumPage(QObject):
             " WHERE album_id = ? GROUP BY kind, sample_rate",
             (album_id,),
         ).fetchall()
-        self._id = album_id
+        same, self._id = album_id == self._id, album_id
         self._values = {
             "title": title,
             "artist": artist_text(artist),
@@ -204,7 +206,10 @@ class AlbumPage(QObject):
             "cover": cover_url(thumb),
             "chips": state_chips(songs, embedded, image),
         }
-        self._songs.select("album_id = ?", (album_id,))
+        if same:  # read again where it is: after a scan, the list keeps its place
+            self._songs.refresh()
+        else:
+            self._songs.select("album_id = ?", (album_id,))
         self.changed.emit()
         return True
 
@@ -254,13 +259,17 @@ class ArtistPage(QObject):
             return False
         name, albums, songs = r
         thumbs = c.execute(f"SELECT {artist_thumbs('?')}", (artist_id, artist_id)).fetchone()[0]
-        self._id = artist_id
-        self._albums.for_artist(artist_id)
-        self._others.select(
-            "artist_id = ? AND (album_id IS NULL OR album_id NOT IN"
-            " (SELECT id FROM album WHERE artist_id = ?))",
-            (artist_id, artist_id),
-        )
+        if artist_id == self._id:  # read again where they are: after a scan
+            self._albums.refresh()
+            self._others.refresh()
+        else:
+            self._id = artist_id
+            self._albums.for_artist(artist_id)
+            self._others.select(
+                "artist_id = ? AND (album_id IS NULL OR album_id NOT IN"
+                " (SELECT id FROM album WHERE artist_id = ?))",
+                (artist_id, artist_id),
+            )
         self._values = {
             "name": name,
             "detail": artist_line(albums, songs),
@@ -304,14 +313,16 @@ def sort_text(label: str) -> str:
 
 class Library(QObject):
     """One root and its index, as the sidebar and the views see them: which view is open and the
-    way back from a page (R6.3), Albums and its genre chips, Artists, Songs, and the pages."""
+    way back from a page (R6.3), Albums and its genre chips, Artists, Songs, and the pages; and
+    its scans. With `watching`, a scan of the root starts watching it (A2.4): a change the watcher
+    reports is rescanned, its folders only, and the views read again where they are."""
 
     changed = Signal()  # the card's line, the counts, the genre chips, the empty texts
     scanningChanged = Signal()
     viewChanged = Signal()  # the view, and its header's title, modes and sorts
     searchChanged = Signal()
     _progress = Signal(int, int)
-    _finished = Signal()
+    _finished = Signal(object)
 
     def __init__(
         self,
@@ -320,9 +331,16 @@ class Library(QObject):
         home: str,
         pool: Callable[[], Executor] = workers.pool,
         parent: QObject | None = None,
+        clock: Clock | None = None,
+        watching: bool = False,
     ) -> None:
         super().__init__(parent)
         self._root, self._index, self._home, self._pool = root, index, home, pool
+        self._clock = clock if clock is not None else SystemClock()
+        self._watching = watching
+        self._watcher: watch.Watcher | None = None
+        self._own = watch.OwnWrites(self._clock)
+        self._copied: dict[str, str] = {}  # copies made while watching (scanner.scan)
         self._searcher = Searcher(self)
         self._songs = SongsModel(index.read, parent=self, searcher=self._searcher)
         self._albums = AlbumsModel(index.read, self, searcher=self._searcher)
@@ -342,7 +360,9 @@ class Library(QObject):
         self._albums_mode = "grid"
         self._chips: tuple[list[str], list[str]] = ([], [])
         self._playing = ""
-        self._scanning = False
+        self._scanning = False  # a scan of the root runs, or waits on a partial one to end
+        self._busy = False  # a scan runs, of the root or partial
+        self._closed = False
         self._done = self._of = 0
         self._thread: threading.Thread | None = None
         self.last: scanner.Result | BaseException | None = None  # the last scan's outcome
@@ -352,11 +372,12 @@ class Library(QObject):
         self.reload()
 
     def reload(self) -> None:
-        """Reads the lists, the counts and the chips afresh (after a scan), and the open page; a
-        page whose album or artist went shows the view it was opened from."""
-        self._songs.reload()
-        self._albums.reload()
-        self._artists.reload()
+        """Reads the lists, the counts and the chips afresh (after a scan), and the open page,
+        each list where it is, with its search, so the user keeps their place; a page whose album
+        or artist went shows the view it was opened from."""
+        self._songs.refresh()
+        self._albums.refresh()
+        self._artists.refresh()
         c = self._index.read()
         self._counts = counts(c)
         self._chips = genre_chips(c)
@@ -511,41 +532,120 @@ class Library(QObject):
         )
         return r[0] if r else ""
 
-    # ---------- the scan ----------
+    # ---------- the scans ----------
 
     @Slot()
     def rescan(self) -> None:
-        """Scans the root on a thread of its own; nothing if one is running (R2.3)."""
+        """Scans the root on the scan's thread (R2.3): at once, or when the partial scan running
+        ends; nothing if a scan of the root runs or waits already."""
         if self._scanning:
             return
         self._scanning = True
         self._done = self._of = 0
         self.scanningChanged.emit()
         self.changed.emit()
-        self._thread = threading.Thread(target=self._scan, name="scan", daemon=True)
+        if not self._busy:
+            self._start(None)
+
+    def _start(self, scope: scanner.Scope | None) -> None:
+        """One scan at a time (A2.4): the root's (scope None), or the folders a scope names."""
+        self._busy = True
+        if scope is None and self._watcher is not None:
+            self._watcher.forget()  # what it gathered, this scan covers
+        expected, copied = self._own.expected(), dict(self._copied)
+        self._thread = threading.Thread(
+            target=self._scan, args=(scope, expected, copied), name="scan", daemon=True
+        )
         self._thread.start()
 
-    def _scan(self) -> None:
+    def _scan(
+        self,
+        scope: scanner.Scope | None,
+        expected: dict[str, tuple[int, int]],
+        copied: dict[str, str],
+    ) -> None:
+        result: scanner.Result | BaseException
         try:
             with self._pool() as pool:
-                self.last = scanner.scan(
-                    self._root, self._index, pool, progress=self._progress.emit
+                result = scanner.scan(
+                    self._root,
+                    self._index,
+                    pool,
+                    progress=self._progress.emit if scope is None else None,
+                    scope=scope,
+                    expected=expected,
+                    copied=copied,
                 )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
-            self.last = e
-        self._finished.emit()
+            result = e
+        self.last = result
+        self._finished.emit((scope is None, result))
 
     @Slot(int, int)
     def _on_progress(self, done: int, of: int) -> None:
+        """A batch of a scan of the root written: the views fill as it goes (R2.3)."""
         self._done, self._of = done, of
-        self.changed.emit()
-
-    @Slot()
-    def _on_finished(self) -> None:
-        self._scanning = False
         self.reload()
-        self.scanningChanged.emit()
+
+    @Slot(object)
+    def _on_finished(self, finished: tuple[bool, scanner.Result | BaseException]) -> None:
+        whole, result = finished
+        self._busy = False
+        if isinstance(result, scanner.Result) and not self._closed:
+            self._copied = result.copied
+            self._watch(whole, result)
+        if whole:
+            self._scanning = False
+        self.reload()
+        if whole:
+            self.scanningChanged.emit()
+        self._next()
+
+    def _next(self) -> None:
+        """The next scan, once one has ended: the root's, if asked for meanwhile, else the
+        folders gathered and due."""
+        if self._busy or self._closed:
+            return
+        if self._scanning:
+            self._start(None)
+        elif self._watcher is not None and self._watcher.due():
+            folders = self._watcher.take()
+            if folders:
+                self._start(scanner.Scope(folders, self._watcher.known()))
+
+    # ---------- watching (A2.4, R2.4) ----------
+
+    def _watch(self, whole: bool, result: scanner.Result) -> None:
+        """After a scan: the folders it walked watched, those it found gone not."""
+        if not self._watching:
+            return
+        if self._watcher is None:
+            self._watcher = watch.Watcher(self._root, watch.Gatherer(self._clock), parent=self)
+            self._watcher.ready.connect(self._next)
+        if whole:
+            self._watcher.watch(result.folders)
+        else:
+            self._watcher.update(result.folders, result.gone_folders)
+        self._watcher.scanned(result.read)
+
+    @property
+    def watcher(self) -> watch.Watcher | None:
+        """The root's watcher, once a scan of the root has started it (None before, or without
+        watching)."""
+        return self._watcher
+
+    @Slot(bool)
+    def window_active(self, active: bool) -> None:
+        """The window gained (or lost) focus: where watching stopped, gaining it rescans the root
+        (R2.4)."""
+        if active and self._watcher is not None and self._watcher.why:
+            self.rescan()
+
+    def wrote(self, path: str, size: int, mtime_ns: int) -> None:
+        """MusiKata wrote the file at `path` (under the root), leaving it `size` bytes modified at
+        `mtime_ns`: a watched rescan doesn't read it again (A2.4, watch.OwnWrites)."""
+        self._own.wrote(path, size, mtime_ns)
 
     @Slot(str)
     def show_playing(self, path: str) -> None:
@@ -568,10 +668,17 @@ class Library(QObject):
 
     def wait(self) -> None:
         """Until the scan's thread and the search thread have ended (their results still to be
-        delivered): for closing."""
+        delivered)."""
         if self._thread is not None:
             self._thread.join()
         self._searcher.wait()
+
+    def close(self) -> None:
+        """Stops watching and waits for the threads: for closing. No scan starts after."""
+        self._closed = True
+        if self._watcher is not None:
+            self._watcher.close()
+        self.wait()
 
     # ---------- what QML reads ----------
 

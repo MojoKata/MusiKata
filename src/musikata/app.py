@@ -87,11 +87,11 @@ class Shell:
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
-        playback thread, the scan's thread and the index."""
+        playback thread, the watcher and the scan's thread, and the index."""
         self.window.close()
         Shiboken.delete(self.engine)
         self.player.close()
-        self.library.wait()
+        self.library.close()
         self.index.close()
 
 
@@ -102,10 +102,11 @@ def load(
     pool: Callable[[], Executor] = workers.pool,
     playback: Callable[[], Engine] = Engine,
 ) -> Shell:
-    """The window over the root's index, not yet shown. `playback` makes the playback thread's
-    engine (a test's plays generated audio on a device it chooses)."""
+    """The window over the root's index, not yet shown, the root watched once scanned (A2.4).
+    `playback` makes the playback thread's engine (a test's plays generated audio on a device it
+    chooses)."""
     index = open_index(root, env, clock)
-    library = Library(root, index, home_of(env), pool)
+    library = Library(root, index, home_of(env), pool, clock=clock, watching=True)
     player = Player(root, playback())
     player.nowPlaying.connect(library.show_playing)
     engine = QQmlApplicationEngine()
@@ -115,7 +116,10 @@ def load(
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
         raise RuntimeError(f"{QML} didn't load")
-    return Shell(engine, objects[0], library, player, index)
+    window = objects[0]
+    # where the root can't be watched, gaining focus rescans it (R2.4)
+    window.activeChanged.connect(lambda: library.window_active(window.isActive()))
+    return Shell(engine, window, library, player, index)
 
 
 NO_DEVICE_STATUS = 3  # --play's status when the file decoded to its end with no device to play on

@@ -35,3 +35,25 @@ def fill(index, songs):
         info = AudioInfo("flac", length, 900, 44100, 2)
         batch.append(scanner.Read(scanner.Seen(path, size, 1), Tags(**s), info, path))
     index.write(lambda c: scanner.write_batch(c, batch, {})).result()
+
+
+def wav(path, seed, title=None):
+    """A tenth of a second of WAV at `path` (folders made), its audio, and so its hash (A2.3), made
+    from `seed`, and its title tagged when given: a file the scan reads in a millisecond."""
+    import os
+    import wave
+
+    import mutagen.id3
+    import mutagen.wave
+
+    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(1)
+        w.setframerate(8000)
+        w.writeframes(bytes((seed * 7 + i) % 256 for i in range(800)))
+    if title:
+        f = mutagen.wave.WAVE(str(path))
+        f.add_tags()
+        f.tags.add(mutagen.id3.TIT2(encoding=3, text=title))
+        f.save()

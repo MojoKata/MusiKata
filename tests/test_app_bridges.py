@@ -1,14 +1,17 @@
 """The Library bridge (src/musikata/bridges.py; A1.2): the root's card, the Songs list's texts, and
 the scan on a thread of its own, its progress and end reaching QML's thread as signals."""
 
+import functools
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fakes import fill
+from fakes import FakeClock, fill, wav
 
 from musikata import bridges
-from musikata_core import db
+from musikata_core import db, scanner, watch
+from musikata_core.clock import SystemClock
 
 
 @pytest.fixture
@@ -411,3 +414,221 @@ def test_a_scan_while_searching_finds_the_search_again(lib, index, qtbot):
         lib.reload()
     assert lib.property("viewCount") == "3 of 3 albums"
     lib.wait()
+
+
+def test_a_page_read_again_after_a_scan_keeps_the_page_open_and_its_list_in_place(lib, index):
+    lib.openAlbum(album_id(lib, "Glass Harbor"))
+    songs = lib.property("album").property("songs")
+    resets = []
+    songs.modelReset.connect(lambda: resets.append(True))
+    fill(index, [{**SONGS[0], "path": "LD/GH/03.flac", "title": "Breakwater", "track": 3}])
+    lib.reload()
+    assert lib.property("view") == "album" and songs.rowCount() == 3 and resets == []
+    lib.openArtist(lib.property("album").property("artistId"))
+    albums = lib.property("artist").property("albums")
+    albums.modelReset.connect(lambda: resets.append(True))
+    lib.reload()
+    assert lib.property("view") == "artist" and albums.rowCount() == 1 and resets == []
+
+
+# ---------- watching (A2.4, R2.4) ----------
+
+
+class Held:
+    """Worker processes whose reads wait until the test lets them go: a scan that runs as long as
+    the test needs."""
+
+    def __init__(self, gate):
+        self._gate, self._pool = gate, ThreadPoolExecutor(1)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._pool.shutdown()
+
+    def map(self, fn, *args):
+        assert self._gate.wait(10)
+        return self._pool.map(fn, *args)
+
+
+def scopes_of(monkeypatch):
+    """The folders each scan named, in order (None: the whole root)."""
+    scopes, real = [], scanner.scan
+
+    def recording(*args, scope=None, **kw):
+        scopes.append(None if scope is None else set(scope.folders))
+        return real(*args, scope=scope, **kw)
+
+    monkeypatch.setattr(scanner, "scan", recording)
+    return scopes
+
+
+def scanned(lib, qtbot):
+    """Scans the root and waits for the scan's end."""
+    with qtbot.waitSignal(lib.scanningChanged):
+        lib.rescan()
+    qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=10_000)
+
+
+def report(lib, clock, *folders):
+    """Changes reported in `folders`, and a second passed: the watcher's folders are due."""
+    for f in folders:
+        lib.watcher.changed(f)
+    clock.advance(seconds=1)
+    lib.watcher.ready.emit()
+
+
+@pytest.fixture
+def music(tmp_path):
+    root = tmp_path / "Music"
+    wav(root / "A" / "1.wav", 1, "Signal Fires")
+    wav(root / "B" / "2.wav", 2, "Undertow")
+    return root
+
+
+def test_a_watched_change_rescans_its_folder_only_and_the_list_keeps_its_place(
+    index, music, tmp_path, qtbot, monkeypatch
+):
+    clock = FakeClock()
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=clock, watching=True)
+    assert lib.watcher is None  # until a scan of the root walks the folders
+    scopes = scopes_of(monkeypatch)
+    scanned(lib, qtbot)
+    assert set(lib.watcher.known()) == {"", "A", "B"}
+    songs, seen, turning = lib.property("songs"), [], []
+    songs.modelReset.connect(lambda: seen.append("reset"))
+    songs.rowsInserted.connect(lambda *_: seen.append("inserted"))
+    lib.scanningChanged.connect(lambda: turning.append(lib.property("scanning")))
+    wav(music / "A" / "3.wav", 3, "Neap Tide")
+    report(lib, clock, "A")
+    qtbot.waitUntil(lambda: songs.rowCount() == 3, timeout=10_000)
+    lib.wait()
+    assert scopes == [None, {"A"}] and lib.last.added == 1 and lib.last.unchanged == 1
+    assert seen == ["inserted"] and turning == []  # no reset; the card's dot didn't turn
+    assert lib.property("line").startswith("3 songs")
+    lib.window_active(True)  # watching: focus rescans nothing
+    assert not lib.property("scanning")
+    lib.close()
+    assert lib.watcher.known() == {}
+
+
+def test_one_scan_at_a_time_what_comes_meanwhile_waits_for_the_scan_to_end(
+    index, music, tmp_path, qtbot, monkeypatch
+):
+    clock, gate = FakeClock(), threading.Event()
+    lib = bridges.Library(str(music), index, str(tmp_path), lambda: Held(gate), clock=clock,
+                          watching=True)  # fmt: skip
+    scopes = scopes_of(monkeypatch)
+    gate.set()
+    scanned(lib, qtbot)
+    gate.clear()
+    wav(music / "A" / "3.wav", 3)
+    report(lib, clock, "A")  # a partial scan, held reading
+    qtbot.waitUntil(lambda: len(scopes) == 2)
+    report(lib, clock, "")  # gathered while it runs
+    with qtbot.waitSignal(lib.scanningChanged):
+        lib.rescan()  # asked for while it runs: next, and the dot turns at once
+    assert lib.property("scanning") and len(scopes) == 2
+    gate.set()
+    qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=10_000)
+    assert scopes == [None, {"A"}, None]  # the root's scan covers what was gathered
+    gate.clear()
+    wav(music / "B" / "4.wav", 4)
+    with qtbot.waitSignal(lib.scanningChanged):
+        lib.rescan()  # held reading B/4.wav
+    qtbot.waitUntil(lambda: len(scopes) == 4)
+    wav(music / "A" / "5.wav", 5)
+    report(lib, clock, "A")
+    gate.set()
+    qtbot.waitUntil(lambda: lib.property("songs").rowCount() == 5, timeout=10_000)
+    lib.wait()
+    # after the root's scan, what was reported while it ran (the system's watcher saw B change too)
+    assert scopes[:4] == [None, {"A"}, None, None] and "A" in scopes[4] and len(scopes) == 5
+    lib.close()
+
+
+def test_where_watching_stopped_gaining_focus_rescans_and_the_log_says_so(
+    index, music, tmp_path, qtbot, monkeypatch, caplog
+):
+    refuse = functools.partial(watch.Watcher, add=lambda paths: paths)
+    monkeypatch.setattr(watch, "Watcher", refuse)
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=FakeClock(),
+                          watching=True)  # fmt: skip
+    scanned(lib, qtbot)
+    assert lib.watcher.why and "rescanning when the window gains focus" in caplog.text
+    lib.window_active(False)
+    assert not lib.property("scanning")
+    with qtbot.waitSignal(lib.scanningChanged):
+        lib.window_active(True)
+    qtbot.waitUntil(lambda: not lib.property("scanning"), timeout=10_000)
+    lib.close()
+
+
+def test_a_write_musikata_made_itself_isnt_read_again_by_the_rescan_its_change_starts(
+    index, music, tmp_path, qtbot
+):
+    clock = FakeClock()
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=clock, watching=True)
+    scanned(lib, qtbot)
+    first = lib.last
+    wav(music / "A" / "1.wav", 1, "Retitled")
+    st = os.stat(music / "A" / "1.wav")
+    lib.wrote("A/1.wav", st.st_size, st.st_mtime_ns)
+    report(lib, clock, "A")
+    qtbot.waitUntil(lambda: lib.last is not first, timeout=10_000)
+    lib.wait()
+    assert lib.last.read == [] and lib.last.unchanged == 1
+    lib.close()
+
+
+def test_a_first_scan_fills_the_views_as_it_goes(index, tmp_path, qtbot, monkeypatch):
+    root = tmp_path / "Music"
+    for n in range(3):
+        wav(root / f"{n}.wav", n)
+    monkeypatch.setattr(scanner, "BATCH", 1)
+    lib = bridges.Library(str(root), index, str(tmp_path), threads)
+    shown = []
+    lib.changed.connect(
+        lambda: lib.property("scanning") and shown.append(lib.property("songs").rowCount())
+    )
+    scanned(lib, qtbot)
+    assert sorted(set(shown) - {0}) == [1, 2, 3]
+
+
+@pytest.mark.slow
+def test_files_added_changed_moved_and_removed_under_the_root_appear_while_it_runs(
+    index, music, tmp_path, qtbot
+):
+    """R2.4 with the system's own watcher, on this platform: each change shows in the library
+    without a scan asked for."""
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=SystemClock(),
+                          watching=True)  # fmt: skip
+    scanned(lib, qtbot)
+    rows = {}
+
+    def songs():
+        rows.clear()
+        rows.update(
+            {p: (i, t) for p, i, t in index.read().execute("SELECT path, id, title FROM song")}
+        )
+        return rows
+
+    wav(music / "A" / "3.wav", 3, "Neap Tide")  # added
+    qtbot.waitUntil(lambda: "A/3.wav" in songs(), timeout=10_000)
+    ids = dict(rows)
+    tmp = music / "B" / ".2.wav.part"  # changed, as a safe write does: written aside, put in place
+    wav(tmp, 2, "Undertow (Live)")
+    os.replace(tmp, music / "B" / "2.wav")
+    qtbot.waitUntil(lambda: songs().get("B/2.wav", (0, ""))[1] == "Undertow (Live)", timeout=10_000)
+    os.rename(music / "A" / "3.wav", music / "B" / "3.wav")  # moved between folders
+    qtbot.waitUntil(lambda: "B/3.wav" in songs() and "A/3.wav" not in rows, timeout=10_000)
+    assert rows["B/3.wav"][0] == ids["A/3.wav"][0]
+    (music / "C").mkdir()  # a folder made, then filled: watched once rescanned
+    qtbot.waitUntil(lambda: "C" in lib.watcher.known(), timeout=10_000)
+    wav(music / "C" / "4.wav", 4)
+    qtbot.waitUntil(lambda: "C/4.wav" in songs(), timeout=10_000)
+    os.remove(music / "A" / "1.wav")  # removed
+    qtbot.waitUntil(lambda: "A/1.wav" not in songs(), timeout=10_000)
+    assert lib.property("line").startswith("3 songs")
+    lib.close()

@@ -255,7 +255,7 @@ def forget(c: sqlite3.Connection, paths: Iterable[str], touched: Touched) -> Non
 def _folder_image(
     folder: str, images: Mapping[str, Sequence[art.Image]] | None, stored: tuple[object, ...]
 ) -> tuple[str, int, int] | None:
-    if images is None:  # not walked: what the row had
+    if images is None or folder not in images:  # not walked: what the row had
         path, size, mtime = stored
         return (str(path), int(size), int(mtime)) if path is not None else None  # type: ignore[call-overload]
     found = art.folder_cover(images.get(folder, ()))
@@ -270,8 +270,9 @@ def refresh_album(
     images: Mapping[str, Sequence[art.Image]] | None = None,
 ) -> set[int]:
     """Summarizes an album's row again from its songs, or removes it when it has none left; the
-    artists it was or is now under. `images`: each folder's images, as the walk found them (None:
-    keep the folder image the row has)."""
+    artists it was or is now under. `images`: each folder's images, as the walk found them; a
+    folder it has no key for (None: any folder) keeps the folder image the row has, as a partial
+    scan (A2.4) walks only some."""
     old = c.execute(
         "SELECT artist_id, folder_image, folder_image_size, folder_image_mtime FROM album"
         " WHERE id = ?",
@@ -370,14 +371,15 @@ def refresh(
 
 
 def refresh_folders(c: sqlite3.Connection, images: Mapping[str, Sequence[art.Image]]) -> int:
-    """Summarizes again each album whose folder's cover image isn't what its row has (an image
-    added, removed or changed with no song touched); how many."""
+    """Summarizes again each album whose folder, walked, has a cover image that isn't what its row
+    has (an image added, removed or changed with no song touched); how many."""
     stale = [
         album_id
         for album_id, folder, path, size, mtime in c.execute(
             "SELECT id, folder, folder_image, folder_image_size, folder_image_mtime FROM album"
         ).fetchall()
-        if _folder_image(folder, images, ()) != ((path, size, mtime) if path else None)
+        if folder in images
+        and _folder_image(folder, images, ()) != ((path, size, mtime) if path else None)
     ]
     touched = Touched()
     touched.albums.update(stale)

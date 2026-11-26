@@ -249,7 +249,9 @@ def test_a_folder_image_added_or_removed_beside_unchanged_songs_is_found_at_the_
     assert cover_of(index) == [("file", "A/folder.png", "A/folder.png")]
     same = index.write(lambda c: albums.refresh_folders(c, {"A": [art.Image("folder.png", 5, 3)]}))
     assert same.result() == 0  # unchanged: nothing summarized again
-    gone = index.write(lambda c: albums.refresh_folders(c, {}))
+    unwalked = index.write(lambda c: albums.refresh_folders(c, {}))  # a partial scan's (A2.4)
+    assert unwalked.result() == 0 and cover_of(index)[0][0] == "file"
+    gone = index.write(lambda c: albums.refresh_folders(c, {"A": []}))
     assert gone.result() == 1 and cover_of(index) == [(None, None, None)]
 
 

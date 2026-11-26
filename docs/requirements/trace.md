@@ -22,6 +22,25 @@ release is here by that release.
 **Sentence starts** is the sentence's opening words, with Markdown emphasis and backticks dropped.
 A table row is traced whole, its cells as written.
 
+## 2.3. Scanning
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R2.3 | On start, and when asked (⋮ › Rescan library), MusiKata walks the root | test_a_whole_run_scans_the_root_and_tours_it, test_the_sort_menu_orders_albums_and_the_more_menu_rescans |
+| R2.3 | It reads a file's tags only when its size or modification time changed since the last scan | test_the_plan_reads_only_what_changed_or_is_new_and_lists_what_went, test_a_scan_fills_the_index_and_a_second_reads_nothing |
+| R2.3 | A first scan shows its progress in the root's card and fills the views as it goes | test_a_scan_reports_progress_then_fills_the_list_and_the_card, test_a_first_scan_fills_the_views_as_it_goes |
+| R2.3.1 | Hidden files and folders | test_the_walk_skips_hidden_ignored_and_settings_folders_and_the_roots_own, test_the_hidden_attribute_is_windows_hidden_flag, test_what_puts_a_folder_outside_the_library_now, tier 3: a folder given the hidden attribute in Windows' Explorer leaves the library at the next scan |
+| R2.3.1 | The root's .musikata folder is never part of the library | test_the_walk_skips_hidden_ignored_and_settings_folders_and_the_roots_own |
+| R2.3.2 | Symbolic links (Linux, macOS) and junctions (Windows) inside the root are followed like folders | test_links_are_followed_and_one_leading_back_is_skipped_and_logged, tier 3: a folder on another drive joined by a Windows junction is in the library |
+| R2.3.2 | A link leading back to a folder already walked is skipped, and the log says so | test_links_are_followed_and_one_leading_back_is_skipped_and_logged, test_a_link_new_in_a_named_folder_leading_back_to_a_known_one_is_skipped |
+
+## 2.4. Watching
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R2.4 | While MusiKata runs, files added, changed, moved or removed under the root | test_files_added_changed_moved_and_removed_under_the_root_appear_while_it_runs, test_a_watched_change_rescans_its_folder_only_and_the_list_keeps_its_place, test_one_scan_at_a_time_what_comes_meanwhile_waits_for_the_scan_to_end, test_a_list_keeps_its_place_and_its_search_when_a_scan_changes_its_rows, test_changes_are_gathered_for_a_second_from_the_first_then_due_together, test_a_change_in_a_watched_folder_is_gathered_and_ready_when_due, test_a_file_read_while_it_may_still_be_written_has_its_folder_looked_at_again, test_a_partial_scan_reads_only_the_folders_named_passing_by_the_known_ones_under_them, test_a_folder_new_under_a_named_one_is_walked_whole_and_one_gone_takes_its_rows, test_a_named_folder_ignored_hidden_or_gone_takes_its_rows_and_its_folders_with_it, test_a_move_into_a_named_folder_from_one_not_named_keeps_its_row, test_a_copy_then_its_original_removed_is_a_move_whichever_folder_is_scanned_first, test_a_write_musikata_made_itself_isnt_read_again_by_the_rescan_its_change_starts, test_a_write_musikata_made_is_expected_by_its_path_size_and_time_for_a_while, tier 3: on each platform a file added in the file manager then retagged in another program then moved to another folder and removed shows each time in the library within seconds |
+| R2.4 | When the platform can't watch that many folders | test_where_watching_stopped_gaining_focus_rescans_and_the_log_says_so, test_a_folder_the_system_refuses_stops_watching_and_the_log_says_why, test_why_watching_stopped_names_linuxs_limit_where_it_has_one, tier 3: on Linux with fs.inotify.max_user_watches set below the root's folders MusiKata logs that it stopped watching and rescans when its window gains focus |
+
 ## 2.5. Songs, albums and artists
 
 | Item | Sentence starts | Shown by |
