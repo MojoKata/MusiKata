@@ -16,3 +16,9 @@ none deleted (docs/process/README.md, "The flow of a change").
   A2.10, with `format` raised if it isn't additive.
 - [ ] **Mockups:** a change a user sees is in the mockups and their README.
 - [ ] **`scripts/check.sh`** is clean.
+
+## Test coverage impact
+
+<!-- Once CI is green, the output of `scripts/coverage_impact.py --pr N`: each area that moved
+half a point or more, and the total, master's last green run against this one's (ci.md,
+"Coverage"). -->
