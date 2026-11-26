@@ -399,3 +399,71 @@ def merge_info(tags: Tags, info: Mapping[str, str]) -> Tags:
             "date": tags.date or (date if not tags.year else None),
         }
     )
+
+
+# ---------- the tags kept without showing (R4.1.1, R4.8) ----------
+
+# what R4.1's fields are read from, by each kind's own key (A3.2): everything else a file holds is
+# kept untouched when it is written, and listed read only for one song (R4.8)
+KNOWN = {
+    "id3": {*ID3.values(), "TRCK", "TPOS", "TDRC", "TYER", "TDAT", "TCON", "TCMP", "POPM", "RVA2",
+            "APIC:3"},
+    "vorbis": {*VORBIS.values(), "ALBUM ARTIST", "DESCRIPTION", "TRACKNUMBER", "TRACKTOTAL",
+               "TOTALTRACKS", "DISCNUMBER", "DISCTOTAL", "TOTALDISCS", "DATE", "YEAR", "GENRE",
+               "COMPILATION", "RATING", "FMPS_RATING", "METADATA_BLOCK_PICTURE", "COVERART",
+               "R128_TRACK_GAIN", "R128_ALBUM_GAIN"},
+    "mp4": {*MP4.values(), "trkn", "disk", "\xa9day", "\xa9gen", "cpil", "covr",
+            "----:com.apple.itunes:rating"},
+}  # fmt: skip
+# what the common keys of other programs are, in words
+KEPT_NAMES = {
+    "USLT": "Lyrics", "SYLT": "Synced lyrics", "LYRICS": "Lyrics", "UNSYNCEDLYRICS": "Lyrics",
+    "\xa9lyr": "Lyrics", "TSSE": "Encoder settings", "ENCODER": "Encoder", "\xa9too": "Encoder",
+    "TENC": "Encoded by", "ENCODEDBY": "Encoded by", "UFID": "File id", "PRIV": "Private data",
+    "PCNT": "Play count", "TBPM": "BPM", "BPM": "BPM", "tmpo": "BPM", "pgap": "Gapless",
+    "APIC": "Picture", "TCOP": "Copyright", "COPYRIGHT": "Copyright", "cprt": "Copyright",
+    "TPUB": "Publisher", "TSRC": "ISRC", "ISRC": "ISRC", "TLAN": "Language", "TMED": "Media",
+    "TORY": "Original year", "TDOR": "Original date",
+}  # fmt: skip
+KEPT_WIDTH = 80  # characters of a kept value shown, the rest elided
+
+
+def _replaygain_key(key: str) -> bool:
+    k = key.upper()
+    return k.startswith(("REPLAYGAIN_", "TXXX:REPLAYGAIN_")) or k.startswith(
+        "----:COM.APPLE.ITUNES:REPLAYGAIN_"
+    )
+
+
+def kept(family: str, items: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The tags of a file MusiKata keeps without showing (R4.1.1), in its order, each as a name
+    and its value in words, for R4.8's read-only list. `family` is "id3", "vorbis" or "mp4";
+    `items` the file's tags as read.kept gives them: (its key, its value as text), an ID3 frame
+    with a description keyed "<id>:<description>" (a picture "APIC:<type>"), Vorbis keys
+    upper-cased. What R4.1's fields are read from (`KNOWN`, the comment, ReplayGain) isn't
+    listed."""
+    known = KNOWN[family]
+    out: list[tuple[str, str]] = []
+    for key, value in items:
+        if key in known or key.lower() in known or _replaygain_key(key):
+            continue
+        fid, _, desc = key.partition(":")
+        if fid == "COMM" and is_comment(desc):
+            continue
+        if family == "mp4" and key.startswith("----:"):
+            name = key.rsplit(":", 1)[-1]
+        elif fid in ("TXXX", "WXXX") and desc:
+            name = desc
+        elif fid == "APIC":
+            name = KEPT_NAMES[fid]
+        elif desc and fid in KEPT_NAMES:
+            name = f"{KEPT_NAMES[fid]} ({desc})"
+        elif fid == "COMM":
+            name = f"Comment ({desc})"
+        else:
+            name = KEPT_NAMES.get(key, key)
+        value = " ".join(value.split())
+        if len(value) > KEPT_WIDTH:
+            value = value[: KEPT_WIDTH - 1].rstrip() + "…"
+        out.append((name, value))
+    return out

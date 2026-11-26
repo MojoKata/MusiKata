@@ -167,8 +167,12 @@ def question_of(plan: Plan) -> dict[str, object]:
 
 
 def saved_text(outcome: Outcome[Written]) -> str:
-    """The message after a save (R6.7): how many files were saved, and those that weren't."""
+    """The message after a save (R6.7): how many files were saved, and those that weren't, or
+    that a cancel left (R4.7)."""
     done, failed = len(outcome.saved), len(outcome.failed)
+    if outcome.cancelled:
+        whole = done + failed + len(outcome.left)
+        return f"Saved {done:,} of {files_text(whole)}: cancelled before the rest"
     if not failed:
         return f"Saved {files_text(done)}"
     first = outcome.failed[0]

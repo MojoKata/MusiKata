@@ -248,3 +248,41 @@ def test_the_comment_is_the_comm_without_a_description_or_id3v1s_never_another_p
     assert parse.from_id3(
         {}, comments=[("", " "), (parse.V1_COMMENT, "v1"), ("", "v2")]
     ).comment == ("v1")
+
+
+def test_the_tags_kept_without_showing_are_listed_by_name_and_r41s_never():
+    """R4.1.1, R4.8: lyrics, MusicBrainz ids, encoder settings, private frames, … read only;
+    what R4.1's fields are read from, the comment and ReplayGain aren't listed."""
+    id3 = [
+        ("TIT2", "Parallax"), ("TXXX:MusicBrainz Album Id", "0f4d"), ("USLT", "la la\n la"),
+        ("USLT:eng", "words"), ("COMM", "a comment"), ("COMM:ID3v1 Comment", "v1"),
+        ("COMM:iTunNORM", " 0000 0001"), ("TXXX:REPLAYGAIN_TRACK_GAIN", "-6 dB"),
+        ("TXXX:replaygain_album_peak", "0.9"), ("PRIV:WM/MediaClassPrimaryID", "16 bytes"),
+        ("UFID:http://musicbrainz.org", "4 bytes"), ("APIC:3", "front cover, 9 bytes"),
+        ("APIC:4", "back cover, 12 bytes"), ("TSSE", "LAME 3.100"), ("TDRC", "2019"),
+        ("POPM", "x"), ("XXXX", "?"), ("TXXX", "no description"),
+    ]  # fmt: skip
+    assert parse.kept("id3", id3) == [
+        ("MusicBrainz Album Id", "0f4d"), ("Lyrics", "la la la"), ("Lyrics (eng)", "words"),
+        ("Comment (iTunNORM)", "0000 0001"), ("Private data (WM/MediaClassPrimaryID)", "16 bytes"),
+        ("File id (http://musicbrainz.org)", "4 bytes"), ("Picture", "back cover, 12 bytes"),
+        ("Encoder settings", "LAME 3.100"), ("XXXX", "?"), ("TXXX", "no description"),
+    ]  # fmt: skip
+    vorbis = [
+        ("TITLE", "x"), ("ALBUM ARTIST", "x"), ("LYRICS", "words"), ("R128_TRACK_GAIN", "1"),
+        ("MUSICBRAINZ_TRACKID", "9a"), ("REPLAYGAIN_TRACK_GAIN", "1 dB"), ("ENCODER", "x"),
+    ]  # fmt: skip
+    assert parse.kept("vorbis", vorbis) == [
+        ("Lyrics", "words"), ("MUSICBRAINZ_TRACKID", "9a"), ("Encoder", "x"),
+    ]  # fmt: skip
+    mp4 = [("\xa9nam", "x"), ("----:com.apple.iTunes:MusicBrainz Track Id", "9a"),
+           ("----:com.apple.iTunes:RATING", "100"), ("----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN",
+           "1"), ("\xa9lyr", "words"), ("tmpo", "120"), ("covr", "...")]  # fmt: skip
+    assert parse.kept("mp4", mp4) == [
+        ("MusicBrainz Track Id", "9a"), ("Lyrics", "words"), ("BPM", "120"),
+    ]  # fmt: skip
+
+
+def test_a_kept_value_too_long_is_cut_short_with_an_ellipsis():
+    ((name, value),) = parse.kept("vorbis", [("LYRICS", "word " * 40)])
+    assert len(value) == parse.KEPT_WIDTH and value.endswith("…")

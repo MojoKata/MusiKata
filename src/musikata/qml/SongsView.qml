@@ -11,11 +11,12 @@ import "."
 // Esc clears it; all of it forwarded to the model, which decides. A double click plays a song, Enter
 // the selection from its first song, the rest of the list after it the queue (R7.1); a right click
 // opens the menu, Play next and Add to queue, for the selection when the row is in it (R7.2); the
-// selection bar counts it and offers Play next. The Edit tags panel comes with slice 5.
+// selection bar counts it and offers Play next and Edit tags, which the menu and Ctrl+E open too (R4.2).
 Item {
     id: view
     required property var library
     required property var player
+    property var edit: null
     readonly property var songs: library.songs
     focus: true
 
@@ -40,15 +41,22 @@ Item {
         height: view.height - y
 
         // [x, width] of each column after the checkbox: #, title, artist, album, genre, year,
-        // rating, plays, time; the four of text share what the fixed ones leave
+        // rating, plays, time; the four of text share what the fixed ones leave. Narrowed (the
+        // Edit tags panel open, L03-songs-bulk-edit), plays and time are left out (width 0)
         readonly property real gap: 16
         readonly property real lead: 12 + 20 + 8  // the checkbox's
-        readonly property var fixed: [28, 0, 0, 0, 0, 44, 70, 48, 44]
+        readonly property bool narrow: width < 860
+        readonly property var fixed: narrow ? [28, 0, 0, 0, 0, 44, 70, 0, 0] : [28, 0, 0, 0, 0, 44, 70, 48, 44]
         readonly property var share: [0, 0.31, 0.22, 0.27, 0.20, 0, 0, 0, 0]
-        readonly property real free: Math.max(0, width - lead - 12 - fixed.reduce((a, b) => a + b, 0) - gap * 8)
+        readonly property int shown: narrow ? 7 : 9
+        readonly property real free: Math.max(0, width - lead - 12 - fixed.reduce((a, b) => a + b, 0) - gap * (shown - 1))
         readonly property var columns: {
             let x = lead, out = []
             for (let i = 0; i < fixed.length; i++) {
+                if (i >= shown) {
+                    out.push([x, 0])
+                    continue
+                }
                 const w = fixed[i] + share[i] * free
                 out.push([x, w])
                 x += w + gap
@@ -64,6 +72,7 @@ Item {
                 required property var modelData
                 readonly property bool atRight: index === 0 || index >= 7
                 objectName: "head-" + modelData.sort
+                visible: table.columns[index][1] > 0
                 x: table.columns[index][0]
                 width: table.columns[index][1]
                 height: 32
@@ -127,13 +136,20 @@ Item {
             }
             ScrollBar.vertical: ScrollBar { }
         }
-        SongMenu { id: songMenu; player: view.player }
+        SongMenu { id: songMenu; player: view.player; edit: view.edit }
+        Connections {
+            target: view.songs
+            // once the list has taken its rows: a search's come with the selection it waited for
+            function onRevealRow(row) { if (row >= 0) Qt.callLater(() => list.positionViewAtIndex(row, ListView.Center)) }
+        }
         SelectionBar {
             objectName: "songsSelectionBar"
             text: view.songs.selectionText
             playLabel: qsTr("Play next")
             playObjectName: "playNextSelection"
             laterActions: view.songs.laterActions
+            editing: view.edit !== null && view.edit.opened
+            onAct: (action) => { if (action === "edit") view.edit.editSelection(view.songs) }
             visible: view.songs.selectionCount > 0
             anchors.horizontalCenter: list.horizontalCenter
             anchors.bottom: list.bottom

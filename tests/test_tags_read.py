@@ -12,6 +12,7 @@ import sys
 
 import mutagen
 import mutagen.apev2
+import mutagen.flac
 import mutagen.id3 as id3
 import mutagen.mp4
 import pytest
@@ -297,3 +298,49 @@ def test_any_bytes_of_any_kind_read_or_fail_as_a_tag_read_error(tmp_path, data, 
     path.write_bytes(data)
     with contextlib.suppress(tags.TagReadError):
         tags.read(str(path))
+
+
+def test_the_tags_a_song_keeps_without_showing_are_read_from_each_kind(audio, tmp_path):
+    """R4.1.1, R4.8: what the panel lists read only for one song, from the file."""
+    mp3 = _copy(audio, "mp3", tmp_path)
+    f = id3.ID3()
+    f.add(id3.TIT2(encoding=3, text=["Parallax"]))
+    f.add(id3.TXXX(encoding=3, desc="MusicBrainz Album Id", text="0f4d"))
+    f.add(id3.USLT(encoding=3, lang="eng", desc="", text="la la"))
+    f.add(id3.PRIV(owner="WM/Provider", data=b"\x00" * 16))
+    f.add(id3.PCNT(count=7))
+    f.add(id3.ETCO(format=2, events=[(3, 1000)]))  # a frame of neither text nor data
+    f.add(id3.APIC(encoding=3, mime="image/png", type=4, desc="", data=b"png" * 4))
+    f.add(id3.APIC(encoding=3, mime="image/png", type=3, desc="front", data=b"png"))
+    f.save(mp3)
+    assert sorted(tags.kept(mp3))[0][0] == "ETCO"  # a frame it has no name for, by its id
+    assert sorted(tags.kept(mp3))[1:] == [  # in the order Mutagen saved them
+        ("Lyrics", "la la"), ("MusicBrainz Album Id", "0f4d"),
+        ("Picture", "back cover, 12 bytes"), ("Play count", "7"),
+        ("Private data (WM/Provider)", "16 bytes"),
+    ]  # fmt: skip
+    flac = _copy(audio, "flac", tmp_path)
+    g = mutagen.File(flac)
+    g["title"] = "x"
+    g["lyrics"] = "words"
+    back = mutagen.flac.Picture()
+    back.type, back.data = 4, b"back"
+    g.add_picture(back)
+    g.save()
+    kept = tags.kept(flac)  # the encoder FFmpeg names, the lyrics, the back cover
+    assert [n for n, _ in kept] == ["Encoder", "Lyrics", "Picture"]
+    assert kept[1:] == [("Lyrics", "words"), ("Picture", "back cover, 4 bytes")]
+    m4a = _copy(audio, "aac", tmp_path)
+    h = mutagen.mp4.MP4(m4a)
+    h["\xa9nam"] = "x"
+    h["----:com.apple.iTunes:MusicBrainz Track Id"] = [mutagen.mp4.MP4FreeForm(b"9a")]
+    h["trkn"] = [(4, 10)]
+    h["tmpo"] = [120]
+    h.save()
+    found = dict(tags.kept(m4a))  # beside the encoder FFmpeg names
+    assert (found["MusicBrainz Track Id"], found["BPM"]) == ("9a", "120")
+    assert set(found) == {"MusicBrainz Track Id", "BPM", "Encoder"}
+    bare = _copy(audio, "wav", tmp_path)
+    assert tags.kept(bare) == []
+    with pytest.raises(tags.TagReadError):
+        tags.kept(str(tmp_path / "gone.flac"))

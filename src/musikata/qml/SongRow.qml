@@ -58,6 +58,7 @@ Rectangle {
         x: row.columns[column][0]
         width: row.columns[column][1]
         height: row.height
+        visible: width > 0
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
         color: Theme.cell

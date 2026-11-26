@@ -13,12 +13,14 @@ import "."
 // A click selects (Ctrl/⌘-click adds, Shift-click takes the range), as does a cover's checkbox and
 // List's, and a drag box in the image modes (R2.9.6); a double click or Enter opens a folder or
 // plays a file and the files after it (R7.1); a right click on a row of files or of List opens its
-// menu, Play next and Add to queue (R7.2); Alt+↑ (⌘↑ on macOS) or Backspace goes up, Alt+← or the
-// mouse's back button back.
+// menu, Play next, Add to queue (R7.2) and Edit tags; Alt+↑ (⌘↑ on macOS) or Backspace goes up,
+// Alt+← or the mouse's back button back. Edit tags, on the selection bar, in the menu and on a folder
+// of songs' strip, opens the panel on the songs selected or beneath the folders (R2.9.6, R4.2).
 Item {
     id: view
     required property var library
     required property var player
+    property var edit: null
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
     readonly property string mode: folders.mode
@@ -117,9 +119,11 @@ Item {
                     model: view.folders.stripButtons
                     Btn {
                         required property var modelData
+                        objectName: modelData.action === "edit" ? "editFolder" : ""
                         label: modelData.label
                         icon: modelData.icon
                         later: modelData.later
+                        onClicked: if (modelData.action === "edit") view.edit.editFolder(view.folders)
                     }
                 }
                 Repeater {
@@ -415,12 +419,14 @@ Item {
         return out
     }
 
-    SongMenu { id: songMenu; player: view.player }
+    SongMenu { id: songMenu; player: view.player; edit: view.edit }
 
     SelectionBar {
         objectName: "selectionBar"
         text: view.folders.selectionText
         laterActions: view.folders.laterActions
+        editing: view.edit !== null && view.edit.opened
+        onAct: (action) => { if (action === "edit") view.edit.editSelection(view.rowsModel) }
         playNote: view.library.playNote
         onPlay: view.folders.playSelection()
         onClear: view.rowsModel.clearSelection()

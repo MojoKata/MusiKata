@@ -504,6 +504,7 @@ class Library(QObject):
     rootChosen = Signal(str)  # Choose another folder… (R2.10): the folder chosen, a whole path
     reachChanged = Signal()  # the root, or a linked folder, went or came back (R2.10)
     songsMoved = Signal()  # a scan found songs moved: their plays name them anew (A2.8)
+    reloaded = Signal()  # the rows were read again, after a scan or a save (`reload`)
     _progress = Signal(int, int)
     _finished = Signal(object)
     _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
@@ -616,6 +617,7 @@ class Library(QObject):
             self.back()
         self._mark_playing()
         self.changed.emit()
+        self.reloaded.emit()
 
     # ---------- going between the views ----------
 

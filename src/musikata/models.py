@@ -123,10 +123,11 @@ SONG_COLUMNS = (
 )
 
 
-# the selection bar's actions (L03-songs-bulk-edit) that come with later slices, and what their
-# tooltips say; Play next is the one it has so far
+# the selection bar's actions after Play next (L03-songs-bulk-edit): Edit tags (R4.2, by its
+# `action`), and those that come with later slices, with what their tooltips say
 SONG_LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
+    {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"},
     {
         "label": "Infer from path",
         "icon": "wand",
@@ -572,6 +573,7 @@ class SongsModel(PagedModel):
     roles = (*COLUMNS, "playing", "selected", "current")
     key = "song.id"
     selectionChanged = Signal()
+    revealRow = Signal(int)  # a selection the tour made: its first row, for the view to show
 
     def __init__(
         self,
@@ -672,12 +674,14 @@ class SongsModel(PagedModel):
             return
         self._selection.select(self._ids or [], songs)
         self._selection_changed()
+        self.revealRow.emit(self._selection.first(self._ids or []))
 
     def _rows_found(self) -> None:
         if self._wanted is not None:
             self._selection.select(self._ids or [], self._wanted)
             self._wanted = None
             self.selectionChanged.emit()
+            self.revealRow.emit(self._selection.first(self._ids or []))
         elif self._selection.keep(self._ids or []):
             self.selectionChanged.emit()
 

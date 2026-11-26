@@ -11,6 +11,7 @@ Item {
     id: page
     required property var library
     required property var player
+    property var edit: null
     readonly property var artist: library.artist
     readonly property var others: artist.others
     focus: true
@@ -165,5 +166,5 @@ Item {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 14 }
     }
-    SongMenu { id: songMenu; player: page.player }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit }
 }

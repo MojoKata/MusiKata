@@ -4,16 +4,36 @@ import "."
 
 // The selection bar (R2.9.6, L06-folders-cards; L03-songs-bulk-edit): what is selected, "2 folders ·
 // 21 songs selected", "4 selected"; its first action, Play in Folders (the songs selected, from the
-// first, R7.1) or Play next in Songs (R7.2); the actions of later slices (Add to playlist, Edit tags,
-// Infer from path, Organize…) faded, saying so in their tooltips; and ✕, which clears it.
+// first, R7.1) or Play next in Songs (R7.2); Edit tags (R4.2), said by `act`, and left out while the
+// panel already edits the selection (`editing`); the actions of later slices (Add to playlist, Infer
+// from path, Organize…) faded, saying so in their tooltips, those that don't fit left out from the
+// last (L07-folders-list, the panel open beside it); and ✕, which clears it.
 Rectangle {
     id: bar
     signal play()
     signal clear()
+    signal act(string action)          // an action of `laterActions` that has one: "edit"
     required property string text
     property string playLabel: qsTr("Play")
     property string playObjectName: "playSelection"
     property var laterActions: []
+    property bool editing: false       // the Edit tags panel is open
+    readonly property real room: (parent ? parent.width - 32 : 100000) - 32
+    // how many of `laterActions` fit, in order: the rest are left out
+    readonly property int fits: {
+        let used = said.width + playAction.width + clearButton.width + 2 * content.spacing
+        let n = 0
+        for (let i = 0; i < actions.count; i++) {
+            const a = actions.itemAt(i)
+            if (!a || a.byEdit)
+                continue
+            used += a.width + content.spacing
+            if (used > bar.room)
+                break
+            n = i + 1
+        }
+        return n
+    }
     width: Math.min(content.width + 32, parent ? parent.width - 32 : content.width + 32)
     height: 46
     radius: 12
@@ -63,6 +83,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 6
         Text {
+            id: said
             objectName: "selectionText"
             anchors.verticalCenter: parent.verticalCenter
             rightPadding: 10
@@ -71,6 +92,7 @@ Rectangle {
             font { family: Theme.sans; pixelSize: 13; weight: Font.DemiBold }
         }
         Action {
+            id: playAction
             objectName: bar.playObjectName
             label: bar.playLabel
             icon: "play"
@@ -78,15 +100,22 @@ Rectangle {
             onClicked: bar.play()
         }
         Repeater {
+            id: actions
             model: bar.laterActions
             Action {
                 required property var modelData
+                required property int index
+                readonly property bool byEdit: modelData.action === "edit" && bar.editing
+                objectName: modelData.action ? modelData.action + "Selection" : ""
+                visible: !byEdit && index < bar.fits
                 label: modelData.label
                 icon: modelData.icon
                 later: modelData.later
+                onClicked: bar.act(modelData.action || "")
             }
         }
         Rectangle {
+            id: clearButton
             objectName: "clearSelection"
             anchors.verticalCenter: parent.verticalCenter
             width: 28

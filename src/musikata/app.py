@@ -36,6 +36,7 @@ from musikata_core.clock import Clock, SystemClock
 from . import garbage, media
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
+from .edittags import EditTags
 from .firstrun import FirstRun, music_folder
 from .history import ChangeHistory
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
@@ -142,6 +143,7 @@ class Shell:
     controls: media.MediaControls
     counts: PlayCounts | None = None
     changes: ChangeHistory | None = None
+    edit: EditTags | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -149,8 +151,9 @@ class Shell:
         self.window.close()
         Shiboken.delete(self.engine)
         close_bridges(
-            self.player, self.counts, self.library, self.index, self.controls, self.changes
-        )
+            self.player, self.counts, self.library, self.index, self.controls, self.changes,
+            self.edit,
+        )  # fmt: skip
 
 
 def close_bridges(
@@ -160,21 +163,24 @@ def close_bridges(
     index: db.Index,
     controls: media.MediaControls | None = None,
     changes: ChangeHistory | None = None,
+    edit: EditTags | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the play counts (their file written), the change history's thread, the
-    watcher, the scan's thread and the worker processes, and the index; then deletes them
-    (`release`)."""
+    playback thread, the Edit tags panel's save (stopped before its next file) and threads, the
+    play counts (their file written), the change history's thread, the watcher, the scan's thread
+    and the worker processes, and the index; then deletes them (`release`)."""
     if controls is not None:
         controls.close()
     player.close()
+    if edit is not None:
+        edit.close()
     if counts is not None:
         counts.close()
     if changes is not None:
         changes.close()
     library.close()
     index.close()
-    release(controls, counts, changes, player, library)
+    release(controls, counts, edit, changes, player, library)
 
 
 def release(*objects: QObject | None) -> None:
@@ -234,24 +240,33 @@ def load(
     if keep:
         keep_playing(player, root, index, shared, env, clock, make)
         counts = count_plays(player, library, root, index, shared, clock, make)
-    changes = keep_history(library, root, index, shared, clock, make, missing)
+    # the root's Tags settings (R13.3): the history's, and what a save writes with (R4.7.1, R4.7.2)
+    tags_settings = settings.root_tags(root) if not missing else settings.RootTags()
+    changes = keep_history(library, root, index, shared, clock, make, missing, tags_settings)
+    edit = EditTags(
+        root, index.read, tags_settings, changes, saved=library.saved, home=home_of(env),
+        available=lambda: bool(library.property("available")),
+    )  # fmt: skip
+    library.reloaded.connect(edit.refresh)  # a scan, a save or an undo changed the rows
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
-    engine.setInitialProperties({"library": library, "player": player, "history": changes})
+    engine.setInitialProperties(
+        {"library": library, "player": player, "history": changes, "edit": edit}
+    )
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
         Shiboken.delete(engine)
         # none left for a collection (A1.3)
-        close_bridges(player, counts, library, index, changes=changes)
+        close_bridges(player, counts, library, index, changes=changes, edit=edit)
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes,
+        changes, edit,
     )  # fmt: skip
 
 
@@ -343,11 +358,13 @@ def keep_history(
     clock: Clock,
     make: Callable[[], str | None],
     missing: bool = False,
+    tags_settings: settings.RootTags | None = None,
 ) -> ChangeHistory:
     """The root's change history (R4.9, A3.5): its entries past their age removed and the rest
     read into the index, off the GUI thread, and read again when another computer adds one; the
     files an undo writes have their rows updated (Library.saved). `make` makes this computer's id
-    when it has none (`Once`). A root that isn't there (R2.10) lists what the index has."""
+    when it has none (`Once`). A root that isn't there (R2.10) lists what the index has.
+    `tags_settings`: the root's (settings.root_tags), read here when not given."""
     changes = ChangeHistory(
         root,
         index,
@@ -355,7 +372,7 @@ def keep_history(
         make,
         shared.computer_id,
         shared.computer_name or computer_name(),
-        settings.root_tags(root) if not missing else settings.RootTags(),
+        tags_settings or (settings.root_tags(root) if not missing else settings.RootTags()),
         saved=library.saved,
         watching=not missing,
     )
@@ -581,9 +598,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         player = session.shell.player if session.shell is not None else None
         changes = session.shell.changes if session.shell is not None else None
+        edit = session.shell.edit if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
-            history=changes,
+            history=changes, edit=edit,
         ).start()  # fmt: skip
     else:
         session.window.show()

@@ -25,6 +25,7 @@ from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
 from .bridges import Library, Player
+from .edittags import EditTags
 from .history import ChangeHistory
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
@@ -34,16 +35,16 @@ DESIGN = (1920, 1040)
 SIZES = (SHOT, DESIGN)
 
 # (screen, what the window shows, as Library.go takes it): a screen is named for its mockup
-# (docs/mockups/README.md); one that shows only part of its mockup yet says so (L03 without the
-# Edit tags panel, which comes with slice 5: its search, and four songs selected where the first
-# screen shows them, with the selection bar); one with no mockup takes the next number of its area
-# (Artists, R2.6, is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08); an album's
-# page and an artist's show a search typed into the header over them, as their mockups do (L02,
-# L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of
-# L07, the state dots and chips of R3.9, the tint by a cover's colour). The first queues Glass
-# Harbor, paused at its first song, so every screen after it shows the now-playing bar (R6.5) and
-# the playing album and song marked, with no sound to wait on (Player.go). X03 has no mockup: the
-# Change history panel (R4.9) over Songs, listing the demo library's saves (demo_library.HISTORY).
+# (docs/mockups/README.md), L03 by its first word only (L03-songs, the name the README's screenshot
+# of the latest release has); one with no mockup takes the next number of its area (Artists, R2.6,
+# is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08). L03 and L07 show the Edit tags
+# panel (R4.2) as their mockups do, open on the songs selected with fields typed into it ("edit");
+# an album's page and an artist's show a search typed into the header over them, as their mockups
+# do (L02, L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the state dots and
+# chips of R3.9, the tint by a cover's colour). The first queues Glass Harbor, paused at its first
+# song, so every screen after it shows the now-playing bar (R6.5) and the playing album and song
+# marked, with no sound to wait on (Player.go). X03 has no mockup: the Change history panel (R4.9)
+# over Songs, listing the demo library's saves (demo_library.HISTORY).
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -54,7 +55,8 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         {
             "view": "songs",
             "search": "electronic",
-            "select": ["Undertow", "Parallax", "Lowlight", "Salt in the Wires"],
+            "select": ["Neap Tide", "Spring Tide", "Slack Water", "Moonpull"],
+            "edit": {"artist": "Lumen Drift", "genres": "Electronic", "year": "2022"},
         },
     ),
     ("L04-folders", {"view": "folders", "folder": "", "mode": "small"}),
@@ -75,6 +77,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "folder": "Mara Okafor",
             "mode": "list",
             "select": ["Mara Okafor/Kindling", "Mara Okafor/Kindling (acoustic).m4a"],
+            "edit": {"album": "Kindling", "genres": "Soul"},
         },
     ),
     ("L08-folder-songs", {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small"}),
@@ -134,6 +137,7 @@ class Tour(QObject):
         done: Callable[[int], None] = _quit,
         player: Player | None = None,
         history: ChangeHistory | None = None,
+        edit: EditTags | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -143,7 +147,7 @@ class Tour(QObject):
         mine = screens(state_of(library))
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
-        self.player, self.history = player, history
+        self.player, self.history, self.edit = player, history, edit
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -177,6 +181,8 @@ class Tour(QObject):
             self.player.go(step)
         if self.history is not None and "view" in step:
             self.history.go(step)
+        if self.edit is not None and self.library is not None and "view" in step:
+            self.edit.go(step, self.library)
         self._size = 0
         self._at_size()
 

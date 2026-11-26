@@ -12,12 +12,15 @@ import "."
 // (R6.9, R7.4), unless what has the focus uses them: a text box, the Folders view's grid, the
 // volume. ⋮ › Change history docks its panel on the right (R4.9), Ctrl+Z (⌘Z) undoes the most
 // recent save unless a text box takes it, and the message that follows a save or an undo, with its
-// Undo, shows at the foot of the view (R6.7).
+// Undo, shows at the foot of the view (R6.7). Edit tags (R4.2) docks its panel in the same place,
+// under Change history while that is open; Ctrl+E (⌘E) opens it on the open view's selection, and
+// the views open it from their buttons, selection bars and right-click menus.
 Window {
     id: win
     required property var library
     required property var player
     required property var history
+    required property var edit
     width: 1280
     height: 800
     minimumWidth: 960
@@ -38,13 +41,23 @@ Window {
         library: win.library
         history: win.history
     }
-    ChangeHistoryPanel {
+    Item {  // the panel docked on the right: Change history over Edit tags
         id: dock
-        objectName: "historyPanel"
         anchors { right: parent.right; top: parent.top; bottom: bar.top }
-        width: win.history.opened ? Math.min(380, Math.max(320, win.width * 0.3)) : 0
-        visible: win.history.opened
-        history: win.history
+        width: win.history.opened || win.edit.opened ? Math.min(380, Math.max(320, win.width * 0.3)) : 0
+        EditTagsPanel {
+            objectName: "editPanel"
+            anchors.fill: parent
+            visible: win.edit.opened && !win.history.opened
+            focus: visible
+            edit: win.edit
+        }
+        ChangeHistoryPanel {
+            objectName: "historyPanel"
+            anchors.fill: parent
+            visible: win.history.opened
+            history: win.history
+        }
     }
     Column {
         id: banners
@@ -122,11 +135,11 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit } }
     Component { id: artists; ArtistsView { library: win.library } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player } }
-    Component { id: songs; SongsView { library: win.library; player: win.player } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit } }
 
     UpNext {
         objectName: "upNext"
@@ -147,6 +160,10 @@ Window {
         objectName: "nowPlayingBar"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         player: win.player
+    }
+    Shortcut {
+        sequence: "Ctrl+E"
+        onActivated: win.edit.editCurrent(win.library)
     }
     Shortcut {
         sequences: [StandardKey.Undo]

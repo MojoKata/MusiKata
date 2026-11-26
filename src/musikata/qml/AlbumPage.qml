@@ -4,8 +4,8 @@ import "."
 
 // An album's page (R2.6, L02-album), under the header (R6.4) with its way back and the search box,
 // which filters its songs (R2.7): the cover, the line over the title, the title,
-// the artist (a click opens their page), songs, length and format; Play and Shuffle, and Edit tags
-// and Album art, which come with later slices (the Edit tags panel, album art); the album's state
+// the artist (a click opens their page), songs, length and format; Play and Shuffle, Edit tags (the
+// panel for its songs, R4.2), and Album art, which comes with a later slice; the album's state
 // chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
 // rest shuffled (R7.1, R7.3); a song's double click plays it and the rest after it, its right click
 // opens its menu (R7.2). Its songs are selected as the Songs list's are (R2.6), clicks and keys
@@ -15,6 +15,7 @@ Item {
     id: page
     required property var library
     required property var player
+    property var edit: null
     readonly property var album: library.album
     readonly property var tracks: album.songs
     readonly property bool loading: art.loading
@@ -114,7 +115,12 @@ Item {
                 later: page.library.playNote
                 onClicked: page.player.shuffleAlbum(page.album.id)
             }
-            Btn { label: qsTr("Edit tags"); icon: "genre"; later: qsTr("Editing tags comes in a later version") }
+            Btn {
+                objectName: "editAlbum"
+                label: qsTr("Edit tags")
+                icon: "genre"
+                onClicked: page.edit.editAlbum(page.album.id, page.tracks)
+            }
             Btn { label: qsTr("Album art"); icon: "image"; later: qsTr("Album art comes in a later version") }
         }
         Row {
@@ -200,5 +206,5 @@ Item {
             font { family: Theme.sans; pixelSize: 14 }
         }
     }
-    SongMenu { id: songMenu; player: page.player }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit }
 }

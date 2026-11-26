@@ -123,6 +123,74 @@ def pictures(path: str, name: str | None = None) -> list[Picture]:
     return out
 
 
+# ID3's and FLAC's picture types, as R4.8's list names them; 3, the front cover, is R4.1's Cover
+PICTURE_TYPES = {0: "other", 1: "file icon", 2: "other file icon", 4: "back cover", 5: "leaflet",
+                 6: "disc", 7: "lead artist", 8: "artist", 9: "conductor", 10: "band",
+                 11: "composer", 12: "lyricist", 13: "recording location", 18: "illustration",
+                 19: "band logo", 20: "publisher logo"}  # fmt: skip
+
+
+def kept(path: str, name: str | None = None) -> list[tuple[str, str]]:
+    """The tags of the song at `path` that MusiKata keeps without showing (R4.1.1): lyrics,
+    MusicBrainz ids, encoder settings, private frames, pictures but the front cover, …, each as a
+    name and its value in words, in the file's order (parse.kept), for R4.8's read-only list.
+    Raises TagReadError for a file it can't open. `name`: as for `open_song`."""
+    kind, f = open_song(path, name)
+    tags = f.tags
+    if kind in ("mp3", "wav", "aiff"):
+        return parse.kept("id3", _id3_items(tags) if tags is not None else [])
+    if kind in ("aac", "alac"):
+        return parse.kept("mp4", _mp4_items(tags) if tags is not None else [])
+    pairs: list[tuple[object, object]] = list(tags or ())
+    items = [(str(k).upper(), str(v)) for k, v in pairs]
+    for p in getattr(f, "pictures", []):
+        if int(p.type) != 3:
+            items.append((f"APIC:{int(p.type)}", _picture_text(int(p.type), len(p.data))))
+    return parse.kept("vorbis", items)
+
+
+def _picture_text(kind: int, size: int) -> str:
+    return f"{PICTURE_TYPES.get(kind, 'picture')}, {size:,} bytes"
+
+
+def _id3_items(tags: mutagen.id3.ID3) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for frame in tags.values():
+        fid = str(frame.FrameID)
+        desc = str(getattr(frame, "desc", "") or getattr(frame, "owner", "") or "")
+        if fid == "APIC":
+            out.append((f"APIC:{int(frame.type)}", _picture_text(int(frame.type), len(frame.data))))
+            continue
+        text = getattr(frame, "text", None)
+        if isinstance(text, str):
+            value = text
+        elif isinstance(text, list):
+            value = "; ".join(str(t) for t in text)
+        elif isinstance(getattr(frame, "data", None), bytes):
+            value = f"{len(frame.data):,} bytes"
+        elif hasattr(frame, "count"):
+            value = str(frame.count)
+        else:
+            value = str(frame)
+        out.append((f"{fid}:{desc}" if desc else fid, value))
+    return out
+
+
+def _mp4_items(tags: mutagen.mp4.MP4Tags) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for key, values in tags.items():
+        shown = []
+        for v in values if isinstance(values, list) else [values]:
+            if isinstance(v, bytes):
+                shown.append(v.decode("utf-8", "replace"))
+            elif isinstance(v, tuple):
+                shown.append(" / ".join(str(x) for x in v))
+            else:
+                shown.append(str(v))
+        out.append((str(key), "; ".join(shown)))
+    return out
+
+
 def _id3(tags: mutagen.id3.ID3 | None) -> Tags:
     if tags is None:
         return Tags()

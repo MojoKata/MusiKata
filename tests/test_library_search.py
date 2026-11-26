@@ -269,3 +269,37 @@ def test_an_index_of_slice_3_1_gains_song_fts_filled_from_its_rows(tmp_path):
     where, params = search.condition(search.parse("beyonce soul"))
     assert c.execute(f"SELECT id FROM song WHERE {where}", params).fetchall() == [(7,)]
     c.close()
+
+
+# ---------- the values in use, suggested as the user types (R4.6) ----------
+
+
+def test_suggestions_start_with_what_is_typed_then_have_a_word_that_does_most_songs_first():
+    """R4.6: one spelling reused: case and accents aside, the most used first."""
+    values = [("Lumen Drift", 12), ("lumen drift", 1), ("Lumière", 3), ("The Lumineers", 5),
+              ("Kestrel Union", 9), ("Beyoncé", 2), ("Drift Lumen", 4)]  # fmt: skip
+    assert search.rank(values, "lum") == [
+        "Lumen Drift", "Lumière", "lumen drift", "The Lumineers", "Drift Lumen",
+    ]  # fmt: skip
+    assert search.rank(values, "beyonce") == ["Beyoncé"]
+    assert search.rank(values, "drift") == ["Drift Lumen", "Lumen Drift", "lumen drift"]
+    assert search.rank(values, "Lumen Drift") == ["lumen drift"]  # what is typed isn't suggested
+    assert search.rank(values, "  ") == [] and search.rank(values, "zzz") == []
+    assert search.rank(values, "l", limit=2) == ["Lumen Drift", "Lumière"]
+
+
+def test_the_library_suggests_artists_and_album_artists_albums_and_genres(index):
+    """R4.6: Artist, Album artist, Album and Genre suggest the values already in the library."""
+    fill(index, [
+        {"path": "a.flac", "artist": "Lumen Drift", "album": "Tide Tables",
+         "genres": ("Electronic",)},
+        {"path": "b.flac", "artist": "Guest", "albumartist": "Lumen Drift", "album": "Tidewater",
+         "genres": ("Electronica", "Ambient")},
+        {"path": "c.flac", "artist": "Mara Okafor", "album": "Kindling", "genres": ("Soul",)},
+    ])  # fmt: skip
+    c = index.read()
+    assert search.suggestions(c, "artist", "lu") == ["Lumen Drift"]
+    assert search.suggestions(c, "albumartist", "g") == ["Guest"]
+    assert search.suggestions(c, "album", "tid") == ["Tide Tables", "Tidewater"]
+    assert search.suggestions(c, "genres", "elec") == ["Electronic", "Electronica"]
+    assert search.suggestions(c, "title", "ti") == [] and search.suggestions(c, "album", "") == []
