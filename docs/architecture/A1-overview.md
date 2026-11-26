@@ -108,6 +108,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.albums` | library | Albums, compilations and artists, kept by the scan (R2.5, A2.1) |
 | `musikata_core.sortnames` | library | Sort names: sort tags, articles, case, punctuation and numbers (R2.13) |
 | `musikata_core.watch` | library | Watching the root, and rescanning on focus where it can't (A2.4) |
+| `musikata_core.inotify` | library | Watching folders with Linux's inotify, a file rewritten in place included (A2.4) |
 | `musikata_core.search` | library | FTS5 queries and `field:` terms (A2.5, R2.7) |
 | `musikata_core.folders` | library | The folder table and the mosaics' sources (A2.7, R2.9, R5.8) |
 | `musikata_core.attention` | library | Needs attention's views (A2.6, R2.8) |

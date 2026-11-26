@@ -3,6 +3,7 @@ the scan on a thread of its own, its progress and end reaching QML's thread as s
 
 import functools
 import os
+import sys
 import threading
 from concurrent.futures import BrokenExecutor, ThreadPoolExecutor
 
@@ -482,6 +483,31 @@ def music(tmp_path):
     wav(root / "A" / "1.wav", 1, "Signal Fires")
     wav(root / "B" / "2.wav", 2, "Undertow")
     return root
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inotify is Linux's (A2.4)")
+def test_a_file_rewritten_in_place_is_rescanned_while_it_runs(index, music, tmp_path, qtbot):
+    """R2.4, A2.4 on Linux: a tag editor (Picard, kid3, puddletag) writes a song's new tags into
+    the file itself, opened for writing, written over and closed, its folder's list of files
+    unchanged; it is read again with no scan asked for."""
+    for song in (music / "A" / "1.wav", music / "B" / "2.wav"):  # settled: not looked at again
+        os.utime(song, (song.stat().st_atime - 3600, song.stat().st_mtime - 3600))
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=SystemClock(),
+                          watching=True)  # fmt: skip
+    scanned(lib, qtbot)
+
+    def title():
+        return index.read().execute("SELECT title FROM song WHERE path = 'A/1.wav'").fetchone()[0]
+
+    assert title() == "Signal Fires"
+    retagged = tmp_path / "retagged.wav"
+    wav(retagged, 1, "Signal Fires (Remastered)")
+    with open(music / "A" / "1.wav", "r+b") as f:
+        f.write(retagged.read_bytes())
+        f.truncate()
+    qtbot.waitUntil(lambda: title() == "Signal Fires (Remastered)", timeout=10_000)
+    lib.close()
 
 
 def test_a_watched_change_rescans_its_folder_only_and_the_list_keeps_its_place(

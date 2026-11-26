@@ -3,3 +3,5 @@
 # "<file>::<test>  # why"; <test> without its [parameters] covers every case, and "<file>::*" a
 # whole file. A skip not listed fails the run, and so does a listed test that ran.
 tests/test_app_mpris.py::*  # MPRIS is Linux's (A4.5): there is no D-Bus daemon here, and the controls here are tested in tests/test_app_media.py
+tests/test_library_inotify.py::*  # inotify is Linux's (A2.4): QFileSystemWatcher watches here, and its tests are tests/test_library_watch.py's
+tests/test_app_bridges.py::test_a_file_rewritten_in_place_is_rescanned_while_it_runs  # inotify is Linux's (A2.4); a retag here is tier 3's (R2.4)

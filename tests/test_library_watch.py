@@ -1,7 +1,7 @@
 """Watching the root (src/musikata_core/watch.py; A2.4, R2.4): changes gathered for a second
 before their rescan, files still being written looked at again, MusiKata's own writes recognised by
-path and time, and the watcher over QFileSystemWatcher, which stops and says why when the system
-refuses a folder.
+path and time, and the watcher over the system's watch (inotify's own on Linux, QFileSystemWatcher
+elsewhere), which stops and says why when the system refuses a folder.
 
 Why: a rescan for every change reported would scan an album copied in once per file; one that
 never looked again at a file still being written would keep it half read; one that read
@@ -173,6 +173,36 @@ def test_a_folder_gone_before_its_watch_is_no_refusal(tree):
     w = watch.Watcher(str(root), watch.Gatherer(FakeClock()), add=lambda paths: [refused])
     w.watch({**folders, "Gone": refused})
     assert w.why == "" and set(w.known()) == set(folders)
+    w.close()
+
+
+def test_linux_watches_with_inotify_others_and_a_system_without_one_with_qt(
+    qapp, monkeypatch, caplog
+):
+    """A2.4: inotify's own watch on Linux, which reports a file rewritten in place; Qt's
+    elsewhere, and on Linux when the system gives no inotify instance (a user's are limited)."""
+    from PySide6.QtCore import QFileSystemWatcher, QObject
+
+    parent = QObject()
+    assert isinstance(watch.folders_watch(parent, "win32"), QFileSystemWatcher)
+    assert isinstance(watch.folders_watch(parent, "darwin"), QFileSystemWatcher)
+
+    def used_up(parent):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(watch.inotify, "Inotify", used_up)
+    assert isinstance(watch.folders_watch(parent, "linux"), QFileSystemWatcher)
+    assert "couldn't watch with inotify" in caplog.text and "rewritten in place" in caplog.text
+
+
+def test_changes_the_system_lost_rescan_every_folder_watched(tree, caplog):
+    root, folders = tree
+    clock = FakeClock()
+    w = watch.Watcher(str(root), watch.Gatherer(clock))
+    w.watch(folders)
+    w._on_overflowed()
+    clock.advance(seconds=1)
+    assert w.take() == set(folders) and "were lost" in caplog.text
     w.close()
 
 

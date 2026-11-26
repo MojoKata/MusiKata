@@ -50,6 +50,7 @@ CODE = {
             "albums",
             "sortnames",
             "watch",
+            "inotify",
             "search",
             "folders",
             "attention",

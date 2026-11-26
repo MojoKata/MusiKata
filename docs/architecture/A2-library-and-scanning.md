@@ -39,8 +39,12 @@ A2.2. **The scan.**
 A2.3. **The audio hash** is a hash of the first and last 64 KB of the audio frames, skipping the
 tag blocks, so retagging a file doesn't change it and two copies of a song match.
 
-A2.4. **Watching.** `QFileSystemWatcher` on every folder under the root, with changes gathered for
-a second before a partial rescan of the folders named. On Linux the inotify watch limit
+A2.4. **Watching.** A watch on every folder under the root, with changes gathered for a second
+before a partial rescan of the folders named. On Linux it is inotify's own, one watch per folder,
+through `ctypes` on the C library and read with a `QSocketNotifier`: it asks for what Qt's
+`QFileSystemWatcher` asks of a folder and `IN_CLOSE_WRITE` too, since Qt's leaves out the events
+of a file rewritten in place, as a tag editor (Picard, kid3, puddletag) rewrites one. Elsewhere it
+is `QFileSystemWatcher`, whose watch on a folder reports a rewrite. On Linux the inotify watch limit
 (`fs.inotify.max_user_watches`) can be smaller than the number of folders; when adding a watch
 fails, MusiKata stops watching, logs it, and rescans on focus instead (R2.4). Writes MusiKata
 makes itself are recognised by path and time and not rescanned twice.
