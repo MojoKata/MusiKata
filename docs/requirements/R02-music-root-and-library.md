@@ -177,10 +177,10 @@ keeps the library as it was and never takes its songs for removed (`X02-root-una
 A folder joined by a link (R2.3.2) that can't be reached makes only its own songs unavailable, and
 the banner names it.
 
-R2.10.1. A scan that finds the root but more than a quarter of its songs gone asks before
-taking them out of the library ("12,040 songs are missing from ~/Music. Remove them from the
-library?", **Keep them** / **Remove**), since a folder renamed or a share half mounted looks the
-same as songs deleted.
+R2.10.1. A scan that finds the root but more than a quarter of its songs, and more than 20, gone
+asks before taking them out of the library ("12,040 songs are missing from ~/Music. Remove them
+from the library?", **Keep them** / **Remove**), since a folder renamed or a share half mounted
+looks the same as songs deleted; fewer are taken out without asking.
 
 R2.11. **Removing songs.** **Move to trash** in the ⋯ and right-click menus of songs, albums and
 folders, and Delete in the library views, moves the files to the system's trash after asking,

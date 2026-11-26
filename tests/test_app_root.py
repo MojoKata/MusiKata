@@ -50,6 +50,18 @@ def songs(index):
     return {p for (p,) in index.read().execute("SELECT path FROM song")}
 
 
+def many(music, n=24):
+    """`n` songs more, in B: enough for more than 20 to go (R2.10.1)."""
+    for i in range(n):
+        wav(music / "B" / f"{i}.wav", 100 + i)
+
+
+def gone(music, n):
+    """B's first `n` songs removed."""
+    for i in range(n):
+        os.remove(music / "B" / f"{i}.wav")
+
+
 MUSIC = os.path.join("~", "Music")
 
 
@@ -266,48 +278,58 @@ def test_a_song_whose_root_isnt_there_doesnt_play_and_says_why(tmp_path):
 # ---------- many songs gone (R2.10.1) ----------
 
 
-def test_more_than_a_quarter_gone_asks_and_keep_them_keeps_them_unasked_after(
+def test_more_than_a_quarter_and_20_gone_asks_and_keep_them_keeps_them_unasked_after(
     index, music, tmp_path, qtbot
 ):
+    many(music)
     lib = library(index, music, tmp_path)
     scanned(lib, qtbot)
-    for n in (0, 1):  # 2 of 4
-        os.remove(music / "A" / f"{n}.wav")
+    gone(music, 22)  # 22 of 28
     scanned(lib, qtbot)
     assert lib.property("question")["text"] == (
-        f"2 songs are missing from {MUSIC}. Remove them from the library?"
+        f"22 songs are missing from {MUSIC}. Remove them from the library?"
     )
-    assert len(songs(index)) == 4
+    assert len(songs(index)) == 28
     lib.keepMissing()
     assert lib.property("question") == {}
     scanned(lib, qtbot)
-    assert lib.property("question") == {} and len(songs(index)) == 4
+    assert lib.property("question") == {} and len(songs(index)) == 28
+    lib.close()
+
+
+def test_a_few_songs_gone_are_taken_out_without_asking(index, music, tmp_path, qtbot):
+    lib = library(index, music, tmp_path)
+    scanned(lib, qtbot)
+    for n in (0, 1, 2):  # 3 of 4: more than a quarter, but not more than 20
+        os.remove(music / "A" / f"{n}.wav")
+    scanned(lib, qtbot)
+    assert lib.property("question") == {} and songs(index) == {"A/3.wav"}
     lib.close()
 
 
 def test_remove_takes_the_songs_gone_out(index, music, tmp_path, qtbot):
+    many(music, 21)
     lib = library(index, music, tmp_path)
     scanned(lib, qtbot)
-    for n in (0, 1, 2):
-        os.remove(music / "A" / f"{n}.wav")
+    gone(music, 21)
     scanned(lib, qtbot)
-    assert lib.property("question")["text"].startswith("3 songs are missing")
+    assert lib.property("question")["text"].startswith("21 songs are missing")
     lib.removeMissing()
     assert lib.property("question") == {}
-    qtbot.waitUntil(lambda: songs(index) == {"A/3.wav"}, timeout=10_000)
-    qtbot.waitUntil(lambda: lib.property("line").startswith("1 song"), timeout=10_000)
+    qtbot.waitUntil(lambda: len(songs(index)) == 4, timeout=10_000)
+    qtbot.waitUntil(lambda: lib.property("line").startswith("4 songs"), timeout=10_000)
     lib.close()
 
 
 def test_a_remove_asked_for_while_a_scan_runs_waits_its_turn(index, music, tmp_path, qtbot):
+    many(music, 21)
     lib = library(index, music, tmp_path)
     scanned(lib, qtbot)
-    for n in (0, 1, 2):
-        os.remove(music / "A" / f"{n}.wav")
+    gone(music, 21)
     scanned(lib, qtbot)
     lib.rescan()
     lib.removeMissing()  # while the scan runs: after it
-    qtbot.waitUntil(lambda: songs(index) == {"A/3.wav"}, timeout=10_000)
+    qtbot.waitUntil(lambda: len(songs(index)) == 4, timeout=10_000)
     lib.close()
 
 
@@ -373,16 +395,16 @@ def test_the_question_of_songs_gone_is_answered_in_the_window(tmp_path, qtbot):
     music = tmp_path / "Music"
     for n in range(4):
         wav(music / "A" / f"{n}.wav", n)
+    many(music, 21)
     s = app.load(str(music), env, FakeClock(), threads)
     s.window.show()
     scanned(s.library, qtbot)
-    for n in (0, 1):
-        os.remove(music / "A" / f"{n}.wav")
+    gone(music, 21)
     scanned(s.library, qtbot)
     question = find(s.window, "question")
     assert question.isVisible() and not find(s.window, "rootBanner").isVisible()
     s.window.grabWindow()
     click(s.window, find(s.window, "removeMissing"))
-    qtbot.waitUntil(lambda: len(songs(s.index)) == 2, timeout=10_000)
+    qtbot.waitUntil(lambda: len(songs(s.index)) == 4, timeout=10_000)
     assert not question.isVisible()
     s.close()

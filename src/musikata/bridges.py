@@ -412,10 +412,11 @@ class Library(QObject):
     playing waits (`unplayable`), and the root is looked for every few seconds (watch.Presence,
     `looking` a test's stand-in for the look) and rescanned when it comes back. Linked folders
     that can't be reached are the same for their own songs. Songs a scan found gone, more than a
-    quarter of the library, wait on the question of R2.10.1. `given`: the root is for this run
-    only (R2.1.2), and the window's title names it. Choose another folder… says which with
-    `rootChosen`, for app.Session to open it. `pool` makes the worker processes (A1.3), once,
-    when a scan first needs them; they end with `close`, or are made anew when one has died."""
+    quarter of the library and more than 20, wait on the question of R2.10.1. `given`: the root
+    is for this run only (R2.1.2), and the window's title names it. Choose another folder… says
+    which with `rootChosen`, for app.Session to open it. `pool` makes the worker processes
+    (A1.3), once, when a scan first needs them; they end with `close`, or are made anew when one
+    has died."""
 
     changed = Signal()  # the card's line, the counts, the genre chips, the empty texts
     scanningChanged = Signal()
