@@ -140,7 +140,29 @@ def _v5(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX play_computer ON play (computer)")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5]
+def _v6(c: sqlite3.Connection) -> None:
+    """The change history (A2.1's change and change_file, R4.9, A3.5): a row per entry of the
+    root's `.musikata/history/`, by its file's name, with when and on which computer it was saved,
+    what the save was and the entry it undoes, if any; and a row per file it touched, in its
+    order, with the file's path and audio hash, the fields it changed (by name, comma-separated)
+    and the old cover it keeps (history/images/<hash>). Filled from the entries' files, so nothing
+    needs reading again."""
+    c.execute(
+        "CREATE TABLE change (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+        " time TEXT NOT NULL, computer TEXT NOT NULL, action TEXT NOT NULL,"
+        " description TEXT NOT NULL, undoes TEXT)"
+    )
+    c.execute("CREATE INDEX change_time ON change (time, name)")
+    c.execute("CREATE INDEX change_undoes ON change (undoes)")
+    c.execute(
+        "CREATE TABLE change_file (change_id INTEGER NOT NULL REFERENCES change (id)"
+        " ON DELETE CASCADE, position INTEGER NOT NULL, path TEXT NOT NULL, hash TEXT,"
+        " fields TEXT NOT NULL, cover TEXT, PRIMARY KEY (change_id, position))"
+    )
+    c.execute("CREATE INDEX change_file_cover ON change_file (cover)")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6]
 
 
 def connect(path: str) -> sqlite3.Connection:

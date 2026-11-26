@@ -10,11 +10,14 @@ import "."
 // bottom, and Up next (R7.2) opens over the view's right side above it. Space plays and pauses,
 // Ctrl+→ and Ctrl+← (⌘ on macOS) go to the next song and the one before, and ← and → seek 5 seconds
 // (R6.9, R7.4), unless what has the focus uses them: a text box, the Folders view's grid, the
-// volume.
+// volume. ⋮ › Change history docks its panel on the right (R4.9), Ctrl+Z (⌘Z) undoes the most
+// recent save unless a text box takes it, and the message that follows a save or an undo, with its
+// Undo, shows at the foot of the view (R6.7).
 Window {
     id: win
     required property var library
     required property var player
+    required property var history
     width: 1280
     height: 800
     minimumWidth: 960
@@ -30,14 +33,23 @@ Window {
     ViewHeader {
         id: header
         objectName: "header"
-        anchors { left: sidebar.right; right: parent.right; top: parent.top }
+        anchors { left: sidebar.right; right: dock.left; top: parent.top }
         visible: win.library.searchable
         library: win.library
+        history: win.history
+    }
+    ChangeHistoryPanel {
+        id: dock
+        objectName: "historyPanel"
+        anchors { right: parent.right; top: parent.top; bottom: bar.top }
+        width: win.history.opened ? Math.min(380, Math.max(320, win.width * 0.3)) : 0
+        visible: win.history.opened
+        history: win.history
     }
     Column {
         id: banners
         anchors {
-            left: sidebar.right; right: parent.right; leftMargin: 28; rightMargin: 28
+            left: sidebar.right; right: dock.left; leftMargin: 28; rightMargin: 28
             top: win.library.searchable ? header.bottom : parent.top
             topMargin: banners.height > 0 ? 8 : 0
         }
@@ -100,7 +112,7 @@ Window {
         id: view
         objectName: "view"
         anchors {
-            left: sidebar.right; right: parent.right; bottom: bar.top
+            left: sidebar.right; right: dock.left; bottom: bar.top
             top: banners.bottom
             topMargin: banners.height > 0 ? 12 : 0
         }
@@ -124,11 +136,21 @@ Window {
         visible: win.player.upNextOpen
         player: win.player
     }
+    MessageBar {
+        objectName: "message"
+        anchors { horizontalCenter: view.horizontalCenter; bottom: bar.top; bottomMargin: 16 }
+        maxWidth: view.width - 48
+        history: win.history
+    }
     NowPlayingBar {
         id: bar
         objectName: "nowPlayingBar"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         player: win.player
+    }
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        onActivated: win.history.undoLast()
     }
     Shortcut {
         sequence: "Space"

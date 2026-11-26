@@ -152,6 +152,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
+| `musikata.history` | app | The change history in the running app: the entries read and watched, the Change history panel, Ctrl+Z, R4.9.1's question and the message that follows a save, with Undo (R4.9, R6.7) |
 | `musikata.plays` | app | Play counts in the running app: the player's plays kept, the other computers' play files watched and read again (R7.9, A2.8) |
 | `musikata.media` | app | The system's media controls (A4.5): `MediaControls` over the Player bridge, `controls` (what the system is told and what its commands do, without Qt), and the backends `mpris`, `smtc` and `nowplaying_mac` |
 | `musikata.tour` | app | The tour (A1.6) |

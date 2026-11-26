@@ -730,7 +730,7 @@ class Library(QObject):
         "artist": "Lumen Drift"}; or Folders at a
         folder, in a mode, with rows selected: {"view": "folders", "folder": "Lumen Drift",
         "mode": "large", "select": ["Lumen Drift/Remixes"]}; or Songs with songs selected, by
-        their titles: {"view": "songs", "select": ["Neap Tide", "Moonpull"]}."""
+        their titles: {"view": "songs", "select": ["Neap Tide", "Moonpull"]}, or none ([])."""
         view = step["view"]
         c = self._index.read()
         if view == "folders":
@@ -753,7 +753,7 @@ class Library(QObject):
             self.show(view)
             self.setSearch(step.get("search", ""))
             titles = list(step.get("select", []))
-            if view == "songs" and titles:
+            if view == "songs" and "select" in step:  # [] clears what an earlier step selected
                 marks = ", ".join("?" * len(titles))
                 found = c.execute(f"SELECT id FROM song WHERE title IN ({marks})", titles)
                 self._songs.select_songs([r[0] for r in found])

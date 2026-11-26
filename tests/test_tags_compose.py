@@ -246,3 +246,21 @@ def test_a_wavs_info_chunk_kept_in_step_never_added_to():
     assert compose.riff_info_edit(cut, {"ICMT": None}).endswith(b"short")  # left as it was
     assert compose.info(change(track=None)) == {"ITRK": None, "IPRT": None}
     assert compose.info(change(comment="Hi", genres=[])) == {"ICMT": "Hi", "IGNR": None}
+
+
+def test_the_cover_a_change_replaces_is_the_front_one_or_mp4s_first():
+    front, back = Picture(3, "image/jpeg", b"f"), Picture(4, "image/jpeg", b"b")
+    assert compose.cover_of([back, front], typed=True) == front
+    assert compose.cover_of([back], typed=True) is None
+    assert compose.cover_of([back, front], typed=False) == back
+    assert compose.cover_of([], typed=False) is None
+
+
+@pytest.mark.parametrize(
+    ("data", "mime"),
+    [(b"\x89PNG\r\n\x1a\n...", "image/png"), (b"GIF89a...", "image/gif"),
+     (b"RIFF\0\0\0\0WEBPVP8 ", "image/webp"), (b"\xff\xd8\xff\xe0", "image/jpeg"),
+     (b"", "image/jpeg")],
+)  # fmt: skip
+def test_a_kept_covers_type_is_known_from_its_bytes(data, mime):
+    assert compose.image_mime(data) == mime

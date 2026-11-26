@@ -48,7 +48,10 @@ class WriteError(Exception):
 class Written:
     """A file written and read back (A3.4, step 3): its path, the tags and audio it reads as now,
     its audio hash, and the size and modification time it was left with, which its row in the
-    index takes without reading it again (A2.4)."""
+    index takes without reading it again (A2.4). What the change history keeps of it (A3.5):
+    the tags it read as `before`, the fields `changed` (compose.FIELDS' names; none when the
+    change left every field as it was and nothing was written), and, when the cover changed, the
+    cover it had (`cover_before`, None: none) and the one it has now (`cover_after`)."""
 
     path: str
     tags: Tags
@@ -56,6 +59,10 @@ class Written:
     audio_hash: str
     size: int
     mtime_ns: int
+    before: Tags | None = None
+    changed: tuple[str, ...] = ()
+    cover_before: Picture | None = None
+    cover_after: Picture | None = None
 
 
 def tmp_path(path: str) -> str:
@@ -105,13 +112,13 @@ def save(
         change = compose.effective(normalized, before)
         original_hash = audio_hash(path, info.kind)
         if not change:
-            return Written(path, before, info, original_hash, st.st_size, st.st_mtime_ns)
+            return Written(path, before, info, original_hash, st.st_size, st.st_mtime_ns, before)
         typed = info.kind not in ("aac", "alac")
-        wanted = (
-            compose.pictures_after(pictures(path), normalized["cover"], typed)  # type: ignore[arg-type]
-            if "cover" in change
-            else None
-        )
+        wanted = old_cover = None
+        if "cover" in change:
+            had = pictures(path)
+            old_cover = compose.cover_of(had, typed)
+            wanted = compose.pictures_after(had, normalized["cover"], typed)  # type: ignore[arg-type]
         step = "copying"
         write.copy(path, tmp, change)
         step = "writing"
@@ -146,7 +153,13 @@ def save(
         if not replaced:
             remove(tmp)
     log.info("wrote the tags of %s: %s", path, ", ".join(sorted(change)))
-    return Written(path, tags, tmp_info, new_hash, done.st_size, done.st_mtime_ns)
+    new_cover: Picture | None = normalized.get("cover")  # type: ignore[assignment]
+    return Written(
+        path, tags, tmp_info, new_hash, done.st_size, done.st_mtime_ns, before,
+        tuple(f for f in compose.FIELDS if f in change),
+        old_cover if "cover" in change else None,
+        new_cover if "cover" in change else None,
+    )  # fmt: skip
 
 
 LEFT_AS_IT_WAS = "{}, so it was left as it was"

@@ -50,7 +50,9 @@ for ten minutes: a rescan a watched change starts mid-save, or another computer 
 mustn't take the copy of a write still going on.
 
 A3.5. **The change history** keeps, for each file written, its path and the old value of each
-field that changed. Each entry is one JSON file in `<root>/.musikata/history/`, named by its time
+field that changed, and with them the file's audio hash, which finds it once moved (A2.8), and the
+value written, which Undo checks the file against so a file changed since is never overwritten
+unasked (R4.9.1). Each entry is one JSON file in `<root>/.musikata/history/`, named by its time
 and the computer that saved it, so entries from several computers never collide; old covers are
 kept beside them in `history/images/`, by hash, until the last entry naming them expires. The
 index (A2.1) lists the entries for the Change history view. Undo is another write of those values,

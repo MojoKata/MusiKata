@@ -208,6 +208,20 @@ def test_the_songs_permissions_are_kept_and_its_modification_time_updated_or_kep
 
 
 @pytest.mark.slow
+def test_what_a_write_changed_is_said_for_the_change_history(song):
+    """A3.5: the change history keeps each field's old value and the old cover, from the write."""
+    old_cover = tags.pictures(song)
+    written = save(song, title="Undertow", genres=["Folk"])  # the genre already as asked
+    assert written.before.title == "Tidewater" and written.changed == ("title",)
+    assert (written.cover_before, written.cover_after) == (None, None)
+    new = Picture(3, "image/png", b"\x89PNG\r\n\x1a\nnew")
+    written = save(song, cover=new)
+    assert written.changed == ("cover",) and written.cover_after == new
+    assert written.cover_before == (old_cover[0] if old_cover else None)
+    unchanged = save(song, title="Undertow")
+    assert unchanged.changed == () and unchanged.before == unchanged.tags
+
+
 def test_a_change_that_leaves_every_field_as_it_was_writes_nothing(song):
     old = 1_000_000_000_000_000_000
     os.utime(song, ns=(old, old))

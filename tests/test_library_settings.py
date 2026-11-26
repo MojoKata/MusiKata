@@ -362,6 +362,40 @@ def test_the_roots_tags_values_broken_or_in_another_form(tags, want, problem):
     assert [p for p in found.problems if problem in p] if problem else not found.problems
 
 
+def test_the_roots_own_settings_give_the_change_historys_switch_and_days():
+    """R4.9, R13.3: Keep a history of tag changes (on), and for how many days (90)."""
+    found = settings.parse_root_tags(json.dumps(ROOT_EXAMPLE))
+    assert (found.history, found.history_days) == (True, 90)
+    off = settings.parse_root_tags('{"format": 1, "tags": {"history": false, "history_days": 7}}')
+    assert (off.history, off.history_days, off.problems) == (False, 7, ())
+    assert (settings.RootTags().history, settings.RootTags().history_days) == (True, 90)
+
+
+@pytest.mark.parametrize(
+    "tags, want, problem",
+    [
+        ({"history_days": "30"}, (True, 30), None),  # as text, as a person writes it
+        ({"history_days": 30.0}, (True, 30), None),
+        ({"history_days": " 30 "}, (True, 30), None),
+        ({"history_days": 0}, (True, 90), "isn't a number of days"),
+        ({"history_days": -5}, (True, 90), "isn't a number of days"),
+        ({"history_days": 2.5}, (True, 90), "isn't a number of days"),
+        ({"history_days": True}, (True, 90), "isn't a number of days"),
+        ({"history_days": None}, (True, 90), "isn't a number of days"),
+        ({"history_days": "a month"}, (True, 90), "isn't a number of days"),
+        ({"history_days": float("nan")}, (True, 90), "isn't a number of days"),
+        ({"history": "off"}, (True, 90), "tags.history isn't true or false"),
+        ({"history": 0}, (True, 90), "tags.history isn't true or false"),
+        ({"history": None}, (True, 90), "tags.history isn't true or false"),
+    ],
+)
+def test_the_change_historys_settings_broken_or_in_another_form(tags, want, problem):
+    """R13.9: a broken value is reported in the log and its default used."""
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": tags}))
+    assert (found.history, found.history_days) == want
+    assert [p for p in found.problems if problem in p] if problem else not found.problems
+
+
 @pytest.mark.parametrize("text", ["", '{"format": 1, "tags": {', "[1, 2]", '﻿{"tags": 5}'])
 def test_a_roots_file_empty_cut_short_or_not_an_object_writes_with_the_defaults(text):
     found = settings.parse_root_tags(text)

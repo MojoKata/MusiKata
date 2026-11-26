@@ -116,3 +116,49 @@ def test_each_kind_is_written_and_reads_back_with_its_tags(tmp_path):
         assert f is not None and 0.15 < f.info.length < 0.3, kind
         text = str(f.tags)
         assert "Signal Fires" in text and "Lumen Drift" in text, kind
+
+
+def test_the_history_brings_each_album_from_its_before_value_to_the_plans():
+    """The library is written as each save found it, so it ends as planned once they are made."""
+    lib = demo.plan()
+    glass = next(s for s in lib.songs if s.tags and s.tags.get("album") == "Glass Harbor")
+    first = demo.before_history(glass)
+    assert first.tags["genre"] == ["Electronica"] and glass.tags["genre"] == ["Electronic"]
+    after = next(s for s in lib.songs if s.tags and s.tags.get("album") == "Afterlight")
+    assert demo.before_history(after).tags == after.tags  # saved to another value, then undone
+    untagged = next(s for s in lib.songs if s.tags is None)
+    assert demo.before_history(untagged) is untagged
+    assert {c for c, *_ in demo.HISTORY} == set(demo.COMPUTERS)
+    assert set(demo.UNDONE) <= {what for _c, _w, what, *_ in demo.HISTORY}
+
+
+def test_the_history_is_made_by_musikatas_own_batch_and_undo(tmp_path):
+    """R4.9: the demo's Change history holds real entries, one undone, from two computers."""
+    from musikata_core import history, tags
+
+    music = str(tmp_path / "Music")
+    songs = [
+        demo.Song(f"A/0{n}.flac", "flac", {"title": f"S{n}", "album": album, "genre": ["Folk"]},
+                  tone=300 + n * 50)
+        for n, album in ((1, "Glass Harbor"), (2, "Afterlight"))
+    ]  # fmt: skip
+    lib = demo.Library(songs, {}, {})
+    saves = [
+        ("Studio-PC", "2026-11-24T19:12:40", "Genre", "Glass Harbor", "genre", ["Electronica"],
+         None),
+        ("Studio-PC", "2026-11-25T21:30:00", "Album", "Afterlight", "album", None, "Other"),
+    ]  # fmt: skip
+    for song in songs:
+        path = os.path.join(music, song.path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        demo.encode(path, "flac", 0.2, song.tone)
+        demo.tag(path, demo.before_history(song, saves))
+    made = demo.history(music, lib, saves, {"Album": ("Laptop", "2026-11-25T21:31:20")})
+    assert len(made) == 3 and made[0].endswith(demo.COMPUTERS["Studio-PC"] + ".json")
+    assert tags.read(os.path.join(music, "A/01.flac"))[0].genres == ("Folk",)
+    assert tags.read(os.path.join(music, "A/02.flac"))[0].album == "Afterlight"
+    folder = history.folder_of(music)
+    undo = history.read(folder, made[2])
+    assert undo.undoes == made[1] and undo.computer == demo.COMPUTERS["Laptop"]
+    plays = os.path.join(music, ".musikata", demo.COMPUTERS["Laptop"], "plays.json")
+    assert os.path.exists(plays)

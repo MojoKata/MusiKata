@@ -284,9 +284,13 @@ file's modification time when it was dismissed, so a change to the file brings t
 }
 ```
 
-A history entry, `history/<time>-<computer id>.json` (`history-entry.v1.schema.json`): each file
-saved, with the old value of each field that changed, its old path when it moved (`from`), and its
-old cover by hash when the cover changed:
+A history entry, `history/<time>-<computer id>.json` (`history-entry.v1.schema.json`), the time
+UTC to the millisecond (`20261125T204512000Z-b2c4….json`): what the save was (`action`, and
+`description` in words for the list), the entry it undoes when it is an Undo (`undoes`, by file
+name), and each file saved, by its path and audio hash, with the old value of each field that
+changed (`fields`) and the value written (`new`, which Undo checks the file against, R4.9.1), its
+old path when it moved (`from`), and, when the cover changed, its old cover by hash (`cover`,
+`null` when it had none) and the new one's (`new_cover`):
 
 ```json
 {
@@ -294,10 +298,14 @@ old cover by hash when the cover changed:
   "time": "2026-11-25T20:45:12Z",
   "computer": "b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c4d",
   "action": "edit-tags",
+  "description": "Year and Genre on 1 song",
   "files": [
     {"path": "Lumen Drift/Glass Harbor/04 Signal Fires.flac",
+     "hash": "3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a",
      "fields": {"year": null, "genre": ["Electronica"]},
-     "cover": "5b7d9f0a2c4e6b8d1f3a3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e"}
+     "new": {"year": 2019, "genre": ["Electronic"]},
+     "cover": "5b7d9f0a2c4e6b8d1f3a3f6a9c1e5b7d2f8a0c4e6b1d3f5a7c9e2b4d6f8a1c3e",
+     "new_cover": "9d2b4f6a8c1e3a5b7d9f2c4e6a8b1d3f5a7c9e2b4d6f8a1c3e5b7d9f0a2c4e6b"}
   ]
 }
 ```

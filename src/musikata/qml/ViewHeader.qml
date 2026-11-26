@@ -13,6 +13,7 @@ import "."
 Item {
     id: header
     required property var library
+    property var history: null
     property bool open: false           // the search box opened from its icon on a narrow header
     readonly property real fieldMax: 250
     readonly property real fieldMin: 180
@@ -328,7 +329,7 @@ Item {
             }
         }
 
-        Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, so far)
+        Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, and Change history, R4.9, so far)
             id: moreButton
             objectName: "more"
             width: 34
@@ -364,6 +365,12 @@ Item {
             text: qsTr("Rescan library")
             enabled: !header.library.scanning
             onTriggered: header.library.rescan()
+        }
+        MenuItem {
+            objectName: "changeHistory"
+            text: qsTr("Change history")
+            enabled: header.history !== null
+            onTriggered: header.history.show()
         }
     }
 }

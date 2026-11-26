@@ -37,6 +37,7 @@ from . import garbage, media
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .firstrun import FirstRun, music_folder
+from .history import ChangeHistory
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .plays import PlayCounts
 
@@ -140,13 +141,16 @@ class Shell:
     index: db.Index
     controls: media.MediaControls
     counts: PlayCounts | None = None
+    changes: ChangeHistory | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
         system's media controls and the bridges (`close_bridges`)."""
         self.window.close()
         Shiboken.delete(self.engine)
-        close_bridges(self.player, self.counts, self.library, self.index, self.controls)
+        close_bridges(
+            self.player, self.counts, self.library, self.index, self.controls, self.changes
+        )
 
 
 def close_bridges(
@@ -155,18 +159,22 @@ def close_bridges(
     library: Library,
     index: db.Index,
     controls: media.MediaControls | None = None,
+    changes: ChangeHistory | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the play counts (their file written), the watcher, the scan's thread and the
-    worker processes, and the index; then deletes them (`release`)."""
+    playback thread, the play counts (their file written), the change history's thread, the
+    watcher, the scan's thread and the worker processes, and the index; then deletes them
+    (`release`)."""
     if controls is not None:
         controls.close()
     player.close()
     if counts is not None:
         counts.close()
+    if changes is not None:
+        changes.close()
     library.close()
     index.close()
-    release(controls, counts, player, library)
+    release(controls, counts, changes, player, library)
 
 
 def release(*objects: QObject | None) -> None:
@@ -218,30 +226,33 @@ def load(
     )  # the song playing ends, nothing after (R2.10)
     library.property("folders").play.connect(player.play_songs)
     counts = None
-    if keep:
-        make = Once(
-            functools.partial(
-                settings.computer_id, settings.shared_path(env), home_of(env), computer_name()
-            )
+    make = Once(
+        functools.partial(
+            settings.computer_id, settings.shared_path(env), home_of(env), computer_name()
         )
+    )
+    if keep:
         keep_playing(player, root, index, shared, env, clock, make)
         counts = count_plays(player, library, root, index, shared, clock, make)
+    changes = keep_history(library, root, index, shared, clock, make, missing)
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
-    engine.setInitialProperties({"library": library, "player": player})
+    engine.setInitialProperties({"library": library, "player": player, "history": changes})
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
         Shiboken.delete(engine)
-        close_bridges(player, counts, library, index)  # none left for a collection (A1.3)
+        # none left for a collection (A1.3)
+        close_bridges(player, counts, library, index, changes=changes)
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
-        engine, window, library, player, index, controls(player, window, covers.file), counts
-    )
+        engine, window, library, player, index, controls(player, window, covers.file), counts,
+        changes,
+    )  # fmt: skip
 
 
 def keep_playing(
@@ -322,6 +333,37 @@ def count_plays(
     player.count(counts)
     counts.start()
     return counts
+
+
+def keep_history(
+    library: Library,
+    root: str,
+    index: db.Index,
+    shared: settings.Shared,
+    clock: Clock,
+    make: Callable[[], str | None],
+    missing: bool = False,
+) -> ChangeHistory:
+    """The root's change history (R4.9, A3.5): its entries past their age removed and the rest
+    read into the index, off the GUI thread, and read again when another computer adds one; the
+    files an undo writes have their rows updated (Library.saved). `make` makes this computer's id
+    when it has none (`Once`). A root that isn't there (R2.10) lists what the index has."""
+    changes = ChangeHistory(
+        root,
+        index,
+        clock,
+        make,
+        shared.computer_id,
+        shared.computer_name or computer_name(),
+        settings.root_tags(root) if not missing else settings.RootTags(),
+        saved=library.saved,
+        watching=not missing,
+    )
+    if not missing:
+        changes.start()
+    else:
+        changes.reload()
+    return changes
 
 
 @dataclass
@@ -538,7 +580,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .tour import Tour
 
         player = session.shell.player if session.shell is not None else None
-        Tour(session.window, session.library, opts.tour, opts.tour_only, player=player).start()
+        changes = session.shell.changes if session.shell is not None else None
+        Tour(
+            session.window, session.library, opts.tour, opts.tour_only, player=player,
+            history=changes,
+        ).start()  # fmt: skip
     else:
         session.window.show()
         if opts.play and session.shell is not None:

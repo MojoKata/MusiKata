@@ -90,3 +90,35 @@ def test_a_newer_format_is_not_this_versions():
     doc = dict(EXAMPLES["root.v1.schema.json"], format=2)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(doc, _schema("root.v1.schema.json"))
+
+
+def test_a_history_entry_as_musikata_writes_it_is_held_to_its_schema_and_a2_10s_is_read(tmp_path):
+    """A3.5: what every save's batch records (history.Recording) is A2.10's format, and A2.10's
+    example reads back as the entry it shows."""
+    from datetime import UTC, datetime
+
+    from musikata_core import history
+    from musikata_core.tags import AudioInfo, Picture, Tags, Written
+
+    class Clock:
+        def now(self):
+            return datetime(2026, 11, 25, 20, 45, 12, tzinfo=UTC)
+
+    schema = _schema("history-entry.v1.schema.json")
+    rec = history.Recording(str(tmp_path), lambda: "b2c4", Clock())
+    before = Tags(year=None, genres=("Electronica",), has_cover=True)
+    after = Tags(year=2019, genres=("Electronic",), has_cover=True)
+    info = AudioInfo("flac", 1.0, 900, 44100, 2)
+    old, new = Picture(3, "image/jpeg", b"\xff\xd8old"), Picture(3, "image/jpeg", b"\xff\xd8new")
+    path = str(tmp_path / "Lumen Drift" / "04 Signal Fires.flac")
+    rec.saved(Written(path, after, info, "3f" * 32, 1, 1, before, ("year", "genres", "cover"),
+                      old, new))  # fmt: skip
+    name = rec.done("edit-tags", "Year and Genre on 1 song")
+    with open(os.path.join(history.folder_of(str(tmp_path)), name), encoding="utf-8") as f:
+        written = json.load(f)
+    jsonschema.validate(written, schema)
+    assert written["files"][0]["fields"] == {"year": None, "genre": ["Electronica"]}
+    example = EXAMPLES["history-entry.v1.schema.json"]
+    entry = history.parse(history.name_for(Clock().now(), "b2c4"), json.dumps(example))
+    assert isinstance(entry, history.Entry) and not entry.problems
+    assert history.document(entry) == example

@@ -25,6 +25,7 @@ from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
 from .bridges import Library, Player
+from .history import ChangeHistory
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
 # MusiKata maximized on a 1920 x 1080 screen (R6.2.1), less what a panel or taskbar takes
@@ -41,7 +42,8 @@ SIZES = (SHOT, DESIGN)
 # L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the Edit tags panel of
 # L07, the state dots and chips of R3.9, the tint by a cover's colour). The first queues Glass
 # Harbor, paused at its first song, so every screen after it shows the now-playing bar (R6.5) and
-# the playing album and song marked, with no sound to wait on (Player.go).
+# the playing album and song marked, with no sound to wait on (Player.go). X03 has no mockup: the
+# Change history panel (R4.9) over Songs, listing the demo library's saves (demo_library.HISTORY).
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -88,6 +90,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "upNext": True,
         },
     ),
+    ("X03-change-history", {"view": "songs", "select": [], "history": True}),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
 ]
@@ -130,6 +133,7 @@ class Tour(QObject):
         only: str = "",
         done: Callable[[int], None] = _quit,
         player: Player | None = None,
+        history: ChangeHistory | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -139,7 +143,7 @@ class Tour(QObject):
         mine = screens(state_of(library))
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
-        self.player = player
+        self.player, self.history = player, history
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -171,6 +175,8 @@ class Tour(QObject):
             self.library.go(step)
         if self.player is not None and "view" in step:
             self.player.go(step)
+        if self.history is not None and "view" in step:
+            self.history.go(step)
         self._size = 0
         self._at_size()
 

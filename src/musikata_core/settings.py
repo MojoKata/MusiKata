@@ -6,8 +6,8 @@ shape a person, a sync tool or another version of MusiKata left it, and writing 
 every field it doesn't know kept (A2.10); this computer's id (A2.8), made when it has none;
 Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them; and
 shuffle and repeat (R7.3), written when the user changes them. Of the root's own `settings.json`,
-the two Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2) are read (`root_tags`). The
-rest of both files comes with Settings.
+the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
+are read (`root_tags`). The rest of both files comes with Settings.
 
 A value it can't use is reported in the App log and its default used (R13.9); a file of a newer
 format is read for what it can and never written (A2.10)."""
@@ -333,15 +333,34 @@ ID3_VERSIONS = ("2.4", "2.3")  # R13.3: 2.4 the default (R4.7.2)
 ROOT_DIR = ".musikata"  # the root's own folder (R1.5)
 
 
+HISTORY_DAYS = 90  # R4.9, R13.3: how long the change history keeps an entry, by default
+
+
 @dataclass(frozen=True)
 class RootTags:
     """The root's Tags settings (R13.3) that writing tags needs: the ID3 version MP3s are written
-    as (R4.7.2), and whether a written file keeps its modification time (R4.7.1's "Leave file
-    modification times alone", off); what couldn't be used, for the log."""
+    as (R4.7.2), whether a written file keeps its modification time (R4.7.1's "Leave file
+    modification times alone", off), and the change history's "Keep a history of tag changes"
+    (`history`, on) and for how many days (`history_days`, 90) (R4.9); what couldn't be used, for
+    the log."""
 
     id3_version: str = "2.4"
     keep_modified_times: bool = False
+    history: bool = True
+    history_days: int = HISTORY_DAYS
     problems: tuple[str, ...] = ()
+
+
+def _days(value: object) -> int | None:
+    """A number of days from `value`: a whole number of 1 or more, also as 90.0 or "90", as a
+    person may write it; None when it isn't one."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        value = int(value)
+    return value if isinstance(value, int) and value >= 1 else None
 
 
 def root_path(root: str) -> str:
@@ -350,10 +369,11 @@ def root_path(root: str) -> str:
 
 
 def parse_root_tags(text: str) -> RootTags:
-    """The `tags` group's id3_version and keep_modified_times in the root's settings.json,
-    `text`, whatever was written there (A2.10): what can't be used is named in `problems` and
-    takes its default (R13.9). A version written as a number (2.3) or with a "v" ("v2.3") is
-    read as meant; a newer format is read for what it can."""
+    """The `tags` group's id3_version, keep_modified_times, history and history_days in the root's
+    settings.json, `text`, whatever was written there (A2.10): what can't be used is named in
+    `problems` and takes its default (R13.9). A version written as a number (2.3) or with a "v"
+    ("v2.3"), and days written as text ("90") or 90.0, are read as meant; a newer format is read
+    for what it can."""
     try:
         data = json.loads(text.removeprefix("\ufeff"))
     except ValueError as e:
@@ -378,7 +398,18 @@ def parse_root_tags(text: str) -> RootTags:
     if not isinstance(keep, bool):
         problems.append(f"tags.keep_modified_times isn't true or false: {keep!r}; off")
         keep = default.keep_modified_times
-    return RootTags(str(version), keep, tuple(problems))
+    history = group.get("history", default.history)
+    if not isinstance(history, bool):
+        problems.append(f"tags.history isn't true or false: {history!r}; on")
+        history = default.history
+    days = _days(group.get("history_days", default.history_days))
+    if days is None:
+        problems.append(
+            f"tags.history_days isn't a number of days: {group.get('history_days')!r};"
+            f" {default.history_days}"
+        )
+        days = default.history_days
+    return RootTags(str(version), keep, history, days, tuple(problems))
 
 
 def root_tags(root: str) -> RootTags:

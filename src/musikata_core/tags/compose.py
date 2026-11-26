@@ -312,6 +312,26 @@ def pictures_after(before: Sequence[Picture], cover: Picture | None, typed: bool
     return ([cover] if cover is not None else []) + rest
 
 
+def cover_of(pictures: Sequence[Picture], typed: bool) -> Picture | None:
+    """The picture a cover set or removed replaces (`pictures_after`): where the kind numbers its
+    pictures (`typed`), its first front cover; in MP4's covr, its first picture. None: none."""
+    if typed:
+        return next((p for p in pictures if p.type == FRONT), None)
+    return pictures[0] if pictures else None
+
+
+def image_mime(data: bytes) -> str:
+    """A cover's MIME type from its bytes, for a cover kept without one (the change history keeps
+    only the bytes, A3.5): PNG, GIF and WebP by their marks, else JPEG."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
 def image_size(data: bytes) -> tuple[int, int, int]:
     """A PNG's or a JPEG's width, height and bits per pixel, as FLAC's picture block records
     them; zeros for another kind of image, or one that can't be read."""
