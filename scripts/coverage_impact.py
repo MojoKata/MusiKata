@@ -6,9 +6,10 @@ branch coverage before and after, from the per-area table CI's `coverage` job pr
     coverage_impact.py BASE_RUN HEAD_RUN   two runs of ci.yml, by id
 
 Before is master's last CI run whose coverage job passed, After the pull request's on its head
-commit (a run counts by its coverage job, so a deploy that failed after it doesn't hide it). A row is an area that moved by MOVE points or more, in lines or in branches; the total,
-`all`, is always there. Each After figure carries its band's mark (BANDS), and a Legend line
-under the table says what they mean. The figures are worked out from the counts, unrounded."""
+commit (a run counts by its coverage job, so a deploy that failed after it doesn't hide it). A row
+is an area that moved by MOVE points or more, in lines or in branches; the total, `all`, is always
+there. Each After figure carries its band's mark (BANDS), and a Legend line under the table says
+what they mean. The figures are worked out from the counts, unrounded."""
 
 from __future__ import annotations
 
