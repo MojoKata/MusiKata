@@ -12,7 +12,7 @@ from fakes import FakeClock
 from PySide6.QtCore import QUrl
 
 from musikata import app, media, tour
-from musikata_core import settings
+from musikata_core import roots, settings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -163,6 +163,38 @@ def recording(events):
         return controls
 
     return start
+
+
+@pytest.mark.slow
+def test_at_start_roots_not_opened_for_180_days_go_off_the_gui_thread_but_the_one_opened(
+    tmp_path, qtbot, caplog
+):
+    """A2.9: the index and caches of every root not opened for 180 days are removed at start, on
+    a thread of their own, and the App log names each; the root being opened keeps its own, though
+    it isn't there and so isn't opened anew (R2.10)."""
+    env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
+    base, caches, clock = roots.roots_dir(env), roots.caches_dir(env), FakeClock()
+    music, old, recent = tmp_path / "Music", tmp_path / "Old", tmp_path / "Recent"
+    for folder in (music, old, recent):
+        folder.mkdir()
+    long_ago = {f: roots.find_index(str(f), base, clock) for f in (music, old)}
+    clock.advance(days=181)
+    kept = roots.find_index(str(recent), base, clock)
+    for found in (*long_ago.values(), kept):
+        os.makedirs(os.path.join(caches, found.key, "covers"))
+    shutil.rmtree(music)  # its drive unplugged: opened from the index that last opened it
+    caplog.set_level("INFO")
+    s = app.Session(env, clock, False, lambda: ThreadPoolExecutor(1), controls=media.start)
+    s.start(str(music))
+    gone = long_ago[old]
+    qtbot.waitUntil(lambda: not os.path.exists(gone.folder), timeout=10_000)
+    s.close()
+    assert not os.path.exists(os.path.join(caches, gone.key))
+    for found in (long_ago[music], kept):
+        assert os.path.exists(found.folder) and os.path.exists(os.path.join(caches, found.key))
+    said = [r for r in caplog.records if "not opened for 180 days" in r.getMessage()]
+    assert len(said) == 1 and str(old) in said[0].getMessage() and gone.key in said[0].getMessage()
+    assert said[0].threadName == "cleanup"
 
 
 def test_the_first_start_asks_and_the_folder_chosen_becomes_the_configured_root(tmp_path, qtbot):

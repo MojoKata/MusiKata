@@ -5,7 +5,8 @@ how each build is started once to test it (build-and-release.md, "The builds"). 
 time and opening files (R1.6, R1.7) come with the slices that need them (DEVELOP.md).
 
 A run is a `Session`: the first start's window (firstrun.py) until a root is chosen, then the
-window over the root; a root chosen again (Choose another folder…, R2.10) opens in its place."""
+window over the root; a root chosen again (Choose another folder…, R2.10) opens in its place. The
+first root opened starts the cleanup of A2.9 on a thread of its own."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import logging
 import os
 import platform
 import sys
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor
 from dataclasses import dataclass
@@ -85,10 +87,20 @@ def root_for(opts: Options, configured: str | None) -> tuple[str | None, bool]:
     return None, False
 
 
+def key_of(index: db.Index) -> str:
+    """The key the root's index and caches are kept under (A2.9): its index's folder's name."""
+    return os.path.basename(os.path.dirname(index.path))
+
+
 def cache_of(index: db.Index, env: Mapping[str, str]) -> str:
     """Where the root's cover thumbnails are kept: its caches (R1.5), under its index's key."""
-    key = os.path.basename(os.path.dirname(index.path))
-    return os.path.join(roots.caches_dir(env), key, "covers")
+    return os.path.join(roots.caches_dir(env), key_of(index), "covers")
+
+
+def remove_stale(env: Mapping[str, str], clock: Clock, keep: str) -> list[str]:
+    """Removes the index and caches of every root not opened for 180 days but the one under
+    `keep`, the root being opened (A2.9; roots.remove_stale, which logs each)."""
+    return roots.remove_stale(roots.roots_dir(env), clock, keep, roots.caches_dir(env))
 
 
 def open_index(root: str, env: Mapping[str, str], clock: Clock) -> db.Index:
@@ -206,7 +218,9 @@ class Session(QObject):
     """A run (R2.1): the first start's window while no root is configured, then the window over
     the root. A root chosen there, or chosen again with Choose another folder… (R2.10), becomes the
     configured root, unless the run's root was given for it only (R2.1.2), and opens in the
-    window's place, its library scanned; the one before closes. `opened` says a root opened."""
+    window's place, its library scanned; the one before closes. `opened` says a root opened.
+    Once the first root is open, the roots not opened for 180 days are removed, but that one, on
+    the cleanup's thread (A2.9), which closing waits for."""
 
     opened = Signal()
 
@@ -224,6 +238,7 @@ class Session(QObject):
         self._pool, self._playback, self._controls = pool, playback, controls
         self.shell: Shell | None = None
         self.first: FirstStart | None = None
+        self._cleanup: threading.Thread | None = None  # A2.9's, once the first root opened
 
     @property
     def window(self) -> QQuickWindow:
@@ -253,6 +268,14 @@ class Session(QObject):
         shell.library.rootChosen.connect(self.choose, Qt.ConnectionType.QueuedConnection)
         self.shell = shell
         shell.library.rescan()
+        if self._cleanup is None:  # its index opened now, or kept as `keep` when it isn't there
+            self._cleanup = threading.Thread(
+                target=remove_stale,
+                args=(self._env, self._clock, key_of(shell.index)),
+                name="cleanup",
+                daemon=True,
+            )
+            self._cleanup.start()
         return shell
 
     def choose(self, root: str) -> None:
@@ -277,6 +300,8 @@ class Session(QObject):
             self.shell.close()
         if self.first is not None:
             self.first.close()
+        if self._cleanup is not None:
+            self._cleanup.join()
 
 
 NO_DEVICE_STATUS = 3  # --play's status when the file decoded to its end with no device to play on
