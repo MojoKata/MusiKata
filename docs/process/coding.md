@@ -110,6 +110,13 @@ and mutation testing finds them only slowly.
   nothing they hold or that holds them is left in a reference cycle: a bound method or callback
   stored on what outlives the close is let go at it, and an exception kept is kept without its
   traceback, whose frames would hold everything they referred to.
+- An image is decoded from its bytes with `QImage.fromData`, never through a Python-made
+  `QIODevice` (a `QBuffer` made in Python) handed to a `QImageReader`. Qt's reader holds a mutex
+  of its own while it finds the image's handler, and each call it makes on a Python-made device
+  takes the GIL; `QImage.fromData` holds the GIL while it decodes and waits on that same mutex. So
+  a decode through a `QBuffer` on one thread and `fromData` on another (QML's pixmap reader in
+  `covers.Covers`) deadlock, and the app freezes. Writing an image to a `QBuffer` (`QImage.save`)
+  takes no such mutex and is safe.
 - The sound device's callback only copies samples out of the ring buffer, at the volume (A4.4).
 
 ## QML

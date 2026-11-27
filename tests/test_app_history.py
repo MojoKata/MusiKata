@@ -116,6 +116,10 @@ def test_what_undoing_would_lose_is_said_field_by_field_file_by_file():
     assert lost_text(Lost("cover", "a" * 64, None)) == "Cover: a cover → no cover"
     assert value_text("rating", 1) == "1 star" and value_text("rating", 4) == "4 stars"
     assert value_text("compilation", True) == "Yes" and value_text("year", None) == "—"
+    assert lost_text(Lost("others", ("a" * 64, "b" * 64), ("c" * 64,))) == (
+        "Other pictures: 2 other pictures → 1 other picture"
+    )
+    assert value_text("others", ()) == "no other pictures"
     e = Entry("n", NOW, ME, "edit-tags", "", (
         FileChange("LD/a.flac", None, {"title": "A"}),
         FileChange("LD/b.flac", None, {"title": "B"}),

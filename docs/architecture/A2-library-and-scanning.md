@@ -310,3 +310,10 @@ old path when it moved (`from`), and, when the cover changed, its old cover by h
   ]
 }
 ```
+
+A save of album art (R5.3) adds to a song whose other pictures it removed each picture it had but
+its front cover, with its type, MIME type and description and its bytes by hash (`pictures`), and
+the hashes of those written (`new_pictures`, none when removed); and the `cover.jpg` it wrote
+beside the songs is a file of the entry with its old bytes' hash (`image`, `null` when there was
+none) and its new one's (`new_image`). Old pictures and images are kept in `history/images/` as old
+covers are.

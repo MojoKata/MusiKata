@@ -5,8 +5,12 @@ is written once, to a temporary file moved into place (A2.8), and never rewritte
 written it holds the file's path under the root and its audio hash (A2.3, as A2.8 names songs),
 the old value of each field that changed (`fields`) and the value written (`new`), and, when the
 cover changed, the old cover by hash (`cover`, null: there was none) and the new one's
-(`new_cover`). An old cover is kept once in `history/images/<sha256>`, however many entries name
-it (`history-entry.v1.schema.json`, A2.10).
+(`new_cover`), and, when its other pictures changed (R5.3), each of those it had, with its type and
+description (`pictures`), and the hashes of those written (`new_pictures`). An image file a save
+wrote beside the songs (cover.jpg, R5.3) is a file of the entry too, with its old bytes' hash
+(`image`, null: there was none) and its new one's (`new_image`). An old cover, picture or image is
+kept once in `history/images/<sha256>`, however many entries name it
+(`history-entry.v1.schema.json`, A2.10).
 
 Recording is `Recording`, the tags.Recorder every save's batch is given (tags.batch): it is told
 each file as it is written, keeping its old cover then, and writes the entry at the end.
@@ -45,7 +49,8 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from . import db, rootfiles, scanner
+from . import art, db, rootfiles, scanner
+from .art import ImageWritten
 from .clock import Clock
 from .tags import Batch, Failed, Job, Outcome, Picture, Tags, WriteError, Written, compose
 from .tags import pictures as read_pictures
@@ -65,11 +70,24 @@ HASH = re.compile(r"[0-9a-f]{64}")
 NAME = re.compile(r"(\d{8}T\d{9}Z)-([^/\\]+)\.json")
 TMP = ".tmp"
 # compose.FIELDS by the names an entry gives them, R4.1's ("genre"), and back
-ENTRY_NAMES = {f: "genre" if f == "genres" else f for f in compose.FIELDS if f != "cover"}
+ENTRY_NAMES = {
+    f: "genre" if f == "genres" else f for f in compose.FIELDS if f not in compose.PICTURES
+}
 FIELD_OF = {v: k for k, v in ENTRY_NAMES.items()}
 
 
 # ---------- an entry, as plain data ----------
+
+
+@dataclass(frozen=True)
+class KeptPicture:
+    """A picture a save took out of a song (R5.3's other embedded images): its type (None: the
+    kind has none), MIME type and description, and its bytes' hash in history/images."""
+
+    type: int | None
+    mime: str
+    desc: str
+    hash: str
 
 
 @dataclass(frozen=True)
@@ -78,7 +96,9 @@ class FileChange:
     the old value of each field that changed and the value written (`old`, `new`, by
     compose.FIELDS' names, as `value_of` gives them; a field `new` lacks is one an older entry
     didn't say), and whether the cover changed (`cover`), with the old cover's hash and the new
-    one's (None: none)."""
+    one's (None: none); when its other pictures changed, those it had (`others`) and the hashes of
+    those written (`new_others`). An image file the save wrote (`image`: cover.jpg, R5.3) has
+    only its old and new bytes' hashes, as `old_cover` and `new_cover`."""
 
     path: str
     hash: str | None
@@ -87,10 +107,28 @@ class FileChange:
     cover: bool = False
     old_cover: str | None = None
     new_cover: str | None = None
+    others: tuple[KeptPicture, ...] | None = None
+    new_others: tuple[str, ...] = ()
+    image: bool = False
 
     def fields(self) -> list[str]:
-        """The fields it changed, in compose.FIELDS' order, the cover among them."""
-        return [f for f in compose.FIELDS if f in self.old or (f == "cover" and self.cover)]
+        """The fields it changed, in compose.FIELDS' order, the cover and the other pictures
+        among them; an image file's is its cover."""
+        if self.image:
+            return ["cover"]
+        return [
+            f
+            for f in compose.FIELDS
+            if f in self.old
+            or (f == "cover" and self.cover)
+            or (f == "others" and self.others is not None)
+        ]
+
+    def kept(self) -> list[str]:
+        """The hashes of what it keeps in history/images: the old cover or image, and the old
+        other pictures."""
+        out = [self.old_cover] if self.old_cover is not None else []
+        return out + [p.hash for p in self.others or ()]
 
 
 @dataclass(frozen=True)
@@ -198,12 +236,21 @@ def document(entry: Entry) -> dict[str, object]:
     files: list[dict[str, object]] = []
     for f in entry.files:
         out: dict[str, object] = {"path": f.path}
+        if f.image:
+            out["image"], out["new_image"] = f.old_cover, f.new_cover
+            files.append(out)
+            continue
         if f.hash is not None:
             out["hash"] = f.hash
         out["fields"] = {ENTRY_NAMES[k]: v for k, v in f.old.items()}
         out["new"] = {ENTRY_NAMES[k]: v for k, v in f.new.items()}
         if f.cover:
             out["cover"], out["new_cover"] = f.old_cover, f.new_cover
+        if f.others is not None:
+            out["pictures"] = [
+                {"type": p.type, "mime": p.mime, "desc": p.desc, "image": p.hash} for p in f.others
+            ]
+            out["new_pictures"] = list(f.new_others)
         files.append(out)
     doc: dict[str, object] = {
         "format": FORMAT,
@@ -251,6 +298,47 @@ def _cover(value: object, where: str, problems: list[str]) -> tuple[bool, str | 
     return False, None
 
 
+def _pictures(
+    value: object, new: object, where: str, problems: list[str]
+) -> tuple[tuple[KeptPicture, ...], tuple[str, ...]] | None:
+    """An entry's `pictures` and `new_pictures` (the other pictures it took out, and those it
+    wrote); None, with the problem, when they can't be used: none of them is put back then."""
+    if not isinstance(value, list) or not isinstance(new, list | type(None)):
+        problems.append(f"{where}: pictures isn't a list: {value!r}; left out")
+        return None
+    out = []
+    for p in value:
+        kind = p.get("type") if isinstance(p, dict) else None
+        digest = p.get("image") if isinstance(p, dict) else None
+        if (
+            not isinstance(p, dict)
+            or not (kind is None or (isinstance(kind, int) and not isinstance(kind, bool)))
+            or not isinstance(digest, str)
+            or not HASH.fullmatch(digest.lower())
+        ):
+            problems.append(f"{where}: a picture isn't one it can put back: {p!r}; left out")
+            return None
+        mime, desc = p.get("mime"), p.get("desc")
+        out.append(KeptPicture(kind, mime if isinstance(mime, str) else "",
+                               desc if isinstance(desc, str) else "", digest.lower()))  # fmt: skip
+    written = tuple(
+        h.lower() for h in new or () if isinstance(h, str) and HASH.fullmatch(h.lower())
+    )
+    return tuple(out), written
+
+
+def _image(path: str, value: dict[str, object], problems: list[str]) -> FileChange | None:
+    """An image file of `files` (cover.jpg, R5.3): its old and new bytes' hashes."""
+    usable, old = _cover(value["image"], f"{path}: image", problems)
+    if not usable:
+        return None
+    new = None
+    if "new_image" in value:
+        fine, new = _cover(value["new_image"], f"{path}: new_image", problems)
+        new = new if fine else None
+    return FileChange(path, None, {}, {}, False, old, new, image=True)
+
+
 def _file(value: object, problems: list[str]) -> FileChange | None:
     """A file of `files`; None, with the problem, when it can't be used."""
     if not isinstance(value, dict):
@@ -260,6 +348,8 @@ def _file(value: object, problems: list[str]) -> FileChange | None:
     if path is None:
         problems.append(f"a file's path isn't a path under the root: {value.get('path')!r}")
         return None
+    if "image" in value:
+        return _image(path, value, problems)
     hash_ = value.get("hash")
     if isinstance(hash_, str) and HASH.fullmatch(hash_.lower()):
         hash_ = hash_.lower()
@@ -278,10 +368,16 @@ def _file(value: object, problems: list[str]) -> FileChange | None:
             usable, new_cover = _cover(value["new_cover"], f"{path}: new_cover", problems)
             if not usable:
                 new_cover = None
-    if not old and not cover:
+    others = new_others = None
+    if "pictures" in value:
+        found = _pictures(value["pictures"], value.get("new_pictures"), path, problems)
+        if found is not None:
+            others, new_others = found
+    if not old and not cover and others is None:
         problems.append(f"{path}: no field it can put back; left out")
         return None
-    return FileChange(path, hash_, old, new, cover, old_cover, new_cover)
+    return FileChange(path, hash_, old, new, cover, old_cover, new_cover, others,
+                      new_others or ())  # fmt: skip
 
 
 def parse(name: str, text: str) -> Entry | Broken:
@@ -522,8 +618,12 @@ class Recording:
         self._history = folder_of(root)
         self.files: list[FileChange] = []
 
-    def saved(self, written: Written) -> None:
-        """A file written (safe.Written): what it changed kept, its old cover in images/."""
+    def saved(self, written: Written | ImageWritten) -> None:
+        """A file written (safe.Written, or art.ImageWritten for cover.jpg): what it changed kept,
+        its old cover, other pictures or image in images/."""
+        if isinstance(written, ImageWritten):
+            self._image(written)
+            return
         if not written.changed or written.before is None:
             return
         path = scanner.path_under(self._root, written.path)
@@ -532,7 +632,7 @@ class Recording:
                 "%s isn't under %s: the change history passes it by", written.path, self._root
             )
             return
-        fields = [f for f in written.changed if f != "cover"]
+        fields = [f for f in written.changed if f not in compose.PICTURES]
         old = {f: value_of(written.before, f) for f in fields}
         new = {f: value_of(written.tags, f) for f in fields}
         cover = "cover" in written.changed
@@ -546,9 +646,38 @@ class Recording:
                     log.warning("couldn't keep the old cover of %s: %s", path, e)
             if written.cover_after is not None:
                 new_cover = image_hash(written.cover_after.data)
+        others = None
+        if written.others_before is not None:
+            others = tuple(
+                KeptPicture(p.type, p.mime, p.desc, self._keep(p.data, path))
+                for p in written.others_before
+            )
+        new_others = tuple(image_hash(p.data) for p in written.others_after or ())
         self.files.append(
-            FileChange(path, written.audio_hash, old, new, cover, old_cover, new_cover)
+            FileChange(
+                path, written.audio_hash, old, new, cover, old_cover, new_cover, others, new_others
+            )  # fmt: skip
         )
+
+    def _keep(self, data: bytes, path: str) -> str:
+        try:
+            return keep_image(self._history, data)
+        except OSError as e:
+            log.warning("couldn't keep an old picture of %s: %s", path, e)
+            return image_hash(data)
+
+    def _image(self, written: ImageWritten) -> None:
+        if written.before == written.after:
+            return
+        path = scanner.path_under(self._root, written.path)
+        if path is None:
+            log.warning(
+                "%s isn't under %s: the change history passes it by", written.path, self._root
+            )
+            return
+        old = self._keep(written.before, path) if written.before is not None else None
+        new = image_hash(written.after) if written.after is not None else None
+        self.files.append(FileChange(path, None, {}, {}, False, old, new, image=True))
 
     def done(self, action: str, description: str) -> str | None:
         """The entry written for the files saved; its name, None when none was."""
@@ -614,20 +743,35 @@ class Plan:
 
 @dataclass(frozen=True)
 class Current:
-    """A file as it is now: its tags, and its cover's hash when asked for (None: none)."""
+    """A file as it is now: its tags, and, when asked for, its cover's hash (None: none) and its
+    other pictures' hashes, sorted."""
 
     tags: Tags
     cover: str | None = None
+    others: tuple[str, ...] = ()
 
 
 def current(path: str, cover: bool) -> Current:
-    """The file at `path` as it is now (tags.read, and its cover's hash when `cover`). Raises
+    """The file at `path` as it is now (tags.read, and its pictures' hashes when `cover`). Raises
     TagReadError or OSError when it can't be read."""
     tags, info = read_tags(path)
     if not cover:
         return Current(tags)
-    picture = compose.cover_of(read_pictures(path), info.kind not in ("aac", "alac"))
-    return Current(tags, image_hash(picture.data) if picture is not None else None)
+    typed = info.kind not in ("aac", "alac")
+    had = read_pictures(path)
+    picture = compose.cover_of(had, typed)
+    others = tuple(sorted(image_hash(p.data) for p in compose.others_of(had, typed)))
+    return Current(tags, image_hash(picture.data) if picture is not None else None, others)
+
+
+def image_now(path: str) -> str | None:
+    """The hash of the image file at `path` (cover.jpg) as it is now; None when it isn't there.
+    Raises OSError when it can't be read."""
+    try:
+        with open(path, "rb") as f:
+            return image_hash(f.read())
+    except FileNotFoundError:
+        return None
 
 
 def looking(
@@ -642,7 +786,7 @@ def looking(
         rating = kept(path)
         if rating is None:
             return found
-        return Current(dataclasses.replace(found.tags, rating=rating), found.cover)
+        return dataclasses.replace(found, tags=dataclasses.replace(found.tags, rating=rating))
 
     return now
 
@@ -661,7 +805,19 @@ def lost(change: FileChange, now: Current) -> tuple[Lost, ...]:
         out.append(Lost(name, value, back))
     if change.cover and now.cover not in (change.old_cover, change.new_cover):
         out.append(Lost("cover", now.cover, change.old_cover))
+    if change.others is not None:
+        back = tuple(sorted(p.hash for p in change.others))
+        if now.others not in (back, tuple(sorted(change.new_others))):
+            out.append(Lost("others", now.others, back))
     return tuple(out)
+
+
+def lost_image(change: FileChange, now: str | None) -> tuple[Lost, ...]:
+    """What undoing an image file's change would lose (R4.9.1): the image there now, when it is
+    neither what the entry wrote nor what undoing puts back."""
+    if now in (change.old_cover, change.new_cover):
+        return ()
+    return (Lost("cover", now, change.old_cover),)
 
 
 def plan(
@@ -679,6 +835,15 @@ def plan(
     for n, change in enumerate(entry.files):
         if which is not None and n not in which:
             continue
+        if change.image:
+            try:
+                now_image = image_now(scanner.full_path(root, change.path))
+            except OSError as e:
+                log.warning("couldn't read %s to undo it: %s", change.path, e)
+                out.append(FileUndo(change, change.path, why=f"it can't be read: {e}"))
+                continue
+            out.append(FileUndo(change, change.path, lost_image(change, now_image)))
+            continue
         path: str | None = change.path
         if not os.path.exists(scanner.full_path(root, change.path)):
             found = find(change.hash) if change.hash is not None else ()
@@ -687,7 +852,8 @@ def plan(
             out.append(FileUndo(change, None, why="it isn't there any more"))
             continue
         try:
-            now = look(scanner.full_path(root, path), change.cover)
+            pictures = change.cover or change.others is not None
+            now = look(scanner.full_path(root, path), pictures)
         except Exception as e:  # noqa: BLE001  (a file that can't be read is listed, not undone)
             log.warning("couldn't read %s to undo it: %s", path, e)
             out.append(FileUndo(change, path, why=f"it can't be read: {e}"))
@@ -710,27 +876,53 @@ def jobs(plan_: Plan, root: str, overwrite: bool) -> list[Job]:
     for f in plan_.files:
         if f.why or f.path is None or (f.lost and not overwrite):
             continue
+        old = f.change.old_cover
+        if f.change.image:
+            image = KeptCover(old) if old is not None else None
+            out.append(Job(scanner.full_path(root, f.path), {"image": image}))
+            continue
         changes: dict[str, object] = dict(f.change.old)
         if f.change.cover:
-            old = f.change.old_cover
             changes["cover"] = KeptCover(old) if old is not None else None
+        if f.change.others is not None:
+            changes["others"] = f.change.others
         out.append(Job(scanner.full_path(root, f.path), changes))
     return out
 
 
-def with_covers(write: Callable[[Job], Written], history: str) -> Callable[[Job], Written]:
-    """`write` (safe.save, as a batch's writer), with a cover kept in history/images loaded as
-    its file is written; a cover no longer kept fails that file, with why."""
+Writer = Callable[[Job], Written | ImageWritten]  # a save's writer: art.writer's
 
-    def writer(job: Job) -> Written:
-        cover = job.changes.get("cover")
+
+def with_covers(write: Writer, history: str) -> Writer:
+    """`write` (art.writer, as a batch's writer), with the covers, pictures and images kept in
+    history/images loaded as their file is written; one no longer kept fails that file, with
+    why."""
+
+    def load(job: Job, digest: str) -> bytes:
+        data = load_image(history, digest)
+        if data is None:
+            raise WriteError(job.path, "its old cover isn't in the change history any more")
+        return data
+
+    def writer(job: Job) -> Written | ImageWritten:
+        changes = dict(job.changes)
+        cover = changes.get("cover")
         if isinstance(cover, KeptCover):
-            data = load_image(history, cover.hash)
-            if data is None:
-                raise WriteError(job.path, "its old cover isn't in the change history any more")
-            picture = Picture(compose.FRONT, compose.image_mime(data), data)
-            job = Job(job.path, {**job.changes, "cover": picture})
-        return write(job)
+            data = load(job, cover.hash)
+            changes["cover"] = Picture(compose.FRONT, compose.image_mime(data), data)
+        image = changes.get("image")
+        if isinstance(image, KeptCover):
+            changes["image"] = load(job, image.hash)
+        others = changes.get("others")
+        if isinstance(others, tuple) and any(isinstance(p, KeptPicture) for p in others):
+            pictures = []
+            for p in others:
+                if isinstance(p, KeptPicture):
+                    data = load(job, p.hash)
+                    mime = p.mime or compose.image_mime(data)
+                    pictures.append(Picture(p.type, mime, data, p.desc))
+            changes["others"] = tuple(pictures)
+        return write(Job(job.path, changes))
 
     return writer
 
@@ -749,16 +941,18 @@ def undo(
     write: Callable[[Job], Written],
     record: Recording | None,
     progress: Progress | None = None,
-) -> Outcome[Written]:
+    trash: art.Trash = art.to_trash,
+) -> Outcome[Written | ImageWritten]:
     """Undoes `plan_` (R4.9): the old values written with `write` (safe.save, A3.4) in a batch of
     its own, recorded by `record` (a Recording that `undoes` the entry; None: the history is off)
     as an entry, so it can be undone in turn. Files changed since are written only when
     `overwrite` (R4.9.1), else passed by; those that can't be undone are listed as failed, with
-    why, as a save's are (R4.7)."""
+    why, as a save's are (R4.7). An image file (cover.jpg) is put back, or moved to the trash
+    when there was none, by art.save_image, the one there now going to the trash (`trash`)."""
     todo = jobs(plan_, root, overwrite)
-    batch = Batch(
+    batch: Batch[Written | ImageWritten] = Batch(
         todo,
-        with_covers(write, folder_of(root)),
+        with_covers(art.writer(write, trash), folder_of(root)),
         progress,
         record=record,
         action=UNDO,
@@ -798,7 +992,7 @@ def sync(c: sqlite3.Connection, present: Iterable[str], entries: Sequence[Entry]
             "INSERT INTO change_file (change_id, position, path, hash, fields, cover)"
             " VALUES (?, ?, ?, ?, ?, ?)",
             [
-                (cur.lastrowid, n, f.path, f.hash, ",".join(f.fields()), f.old_cover)
+                (cur.lastrowid, n, f.path, f.hash, ",".join(f.fields()), " ".join(f.kept()) or None)
                 for n, f in enumerate(e.files)
             ],
         )
@@ -806,8 +1000,10 @@ def sync(c: sqlite3.Connection, present: Iterable[str], entries: Sequence[Entry]
 
 
 def covers(c: sqlite3.Connection) -> set[str]:
-    """The old covers the index's entries name, by hash."""
-    return {h for (h,) in c.execute("SELECT DISTINCT cover FROM change_file") if h}
+    """The old covers, pictures and images the index's entries name, by hash (each file's,
+    space-separated in its row)."""
+    return {h for (kept,) in c.execute("SELECT DISTINCT cover FROM change_file") if kept
+            for h in str(kept).split()}  # fmt: skip
 
 
 def finder(c: sqlite3.Connection) -> Callable[[str], list[str]]:

@@ -22,7 +22,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from musikata_core import scanner, tags
-from musikata_core.tags import Picture, parse
+from musikata_core.tags import Picture, compose, parse
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -457,6 +457,107 @@ def test_the_cover_set_and_removed_keeps_the_other_pictures(audio, tmp_path, kin
     save(path, cover=None)
     assert new.data not in [p.data for p in tags.pictures(path)]
     assert back.data in [p.data for p in tags.pictures(path)]
+
+
+def _with_pictures(path, kind, pictures, coverart=b""):
+    """`pictures` embedded in the song at `path` as its kind holds them; for an Ogg file, the
+    older COVERART too (`coverart`)."""
+    if kind == "aac":
+        f = mutagen.mp4.MP4(path)
+        f["covr"] = [mutagen.mp4.MP4Cover(p.data) for p in pictures]
+    elif kind in ("mp3", "wav", "aiff"):
+        f = mutagen.File(path)
+        if f.tags is None:
+            f.add_tags()
+        for n, p in enumerate(pictures):
+            f.tags.add(
+                id3.APIC(encoding=3, mime=p.mime, type=p.type, desc=p.desc or str(n), data=p.data)
+            )
+    else:
+        f = mutagen.File(path)
+        made = []
+        for p in pictures:
+            fp = mutagen.flac.Picture()
+            fp.type, fp.mime, fp.data, fp.desc = p.type, p.mime, p.data, p.desc
+            made.append(fp)
+        if kind == "flac":
+            for fp in made:
+                f.add_picture(fp)
+        else:
+            f["METADATA_BLOCK_PICTURE"] = [base64.b64encode(fp.write()).decode() for fp in made]
+        if coverart:
+            f["COVERART"] = base64.b64encode(coverart).decode()
+    f.save()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("kind", ["mp3", "aiff", "flac", "vorbis", "opus", "aac"])
+def test_the_other_pictures_removed_leave_the_cover_and_put_back_read_as_they_were(
+    audio, tmp_path, kind
+):
+    """R5.3's Remove other embedded images, and its Undo: the back cover, the artist's photo (and
+    an Ogg file's older COVERART) go, the front cover stays first; put back, each reads back with
+    its type, and in ID3 and FLAC its description."""
+    path = _copy(audio, kind, tmp_path)
+    typed = kind != "aac"
+    front = Picture(3 if typed else None, "image/jpeg", b"\xff\xd8front")
+    back = Picture(4 if typed else None, "image/png", b"\x89PNG back", "Back")
+    artist = Picture(8 if typed else None, "image/png", b"\x89PNG artist", "Band")
+    older = b"\xff\xd8older" if kind in ("vorbis", "opus") else b""
+    _with_pictures(path, kind, [back, front, artist] if typed else [front, back, artist], older)
+    had = tags.pictures(path)
+    others = tuple(compose.others_of(had, typed))
+    written = save(path, others=())
+    assert [p.data for p in tags.pictures(path)] == [front.data]
+    assert written.changed == ("others",)
+    assert {p.data for p in written.others_before} == {back.data, artist.data} | (
+        {older} if older else set()
+    )
+    assert written.others_after == () and written.cover_before is None
+    save(path, others=others)
+    got = tags.pictures(path)
+    assert got[0].data == front.data
+    assert sorted((p.type or 0, p.data) for p in got[1:]) == sorted(
+        (p.type or 0, p.data) for p in others
+    )
+    assert [p.type for p in got if p.data == older] == ([None] if older else [])
+    if kind in ("mp3", "aiff", "flac"):
+        assert {p.desc for p in got[1:]} >= {"Back", "Band"}
+
+
+@pytest.mark.slow
+def test_a_cover_and_the_others_written_at_once_leave_only_the_new_cover(audio, tmp_path):
+    path = _copy(audio, "flac", tmp_path)
+    _with_pictures(path, "flac", [Picture(3, "image/jpeg", b"\xff\xd8old"),
+                                  Picture(4, "image/png", b"\x89PNG back")])  # fmt: skip
+    written = save(path, cover=cover(), others=())
+    assert [(p.type, p.data) for p in tags.pictures(path)] == [(3, cover().data)]
+    assert written.cover_before.data == b"\xff\xd8old" and written.changed == ("cover", "others")
+
+
+@pytest.mark.slow
+def test_ogg_front_covers_in_comments_and_mp3_descriptions_never_collide(audio, tmp_path):
+    """A FLAC whose cover is a comment gets it as a picture block; an MP3 whose back cover has no
+    description keeps it, the new cover named apart."""
+    path = _copy(audio, "flac", tmp_path)
+    f = mutagen.flac.FLAC(path)
+    fp = mutagen.flac.Picture()
+    fp.type, fp.mime, fp.data = 3, "image/jpeg", b"\xff\xd8old"
+    f["METADATA_BLOCK_PICTURE"] = [base64.b64encode(fp.write()).decode(), "not base64 at all!"]
+    f.save()
+    save(path, cover=cover())
+    assert [(p.type, p.data) for p in tags.pictures(path)] == [(3, cover().data)]
+    assert mutagen.flac.FLAC(path)["METADATA_BLOCK_PICTURE"] == ["not base64 at all!"]
+    mp3 = _copy(audio, "mp3", tmp_path)
+    t = id3.ID3()
+    t.add(id3.APIC(encoding=3, mime="image/png", type=4, desc="", data=b"back"))
+    t.save(mp3)
+    save(
+        mp3, others=(Picture(4, "image/png", b"back"), Picture(5, "", b"\x89PNG\r\n\x1a\nleaflet"))
+    )
+    descs = sorted(f.desc for f in id3.ID3(mp3).getall("APIC"))
+    assert descs == ["", "Picture 2"]
+    assert id3.ID3(mp3).getall("APIC")[1].mime == "image/png"  # a mime the picture lacked
 
 
 @pytest.mark.slow

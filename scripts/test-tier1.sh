@@ -8,6 +8,11 @@
 # writes its data to build/tier1/coverage/, for scripts/coverage_report.py (docs/process/ci.md,
 # "Coverage").
 #
+# A run that takes over 15 minutes (a whole run takes a few) is ended with SIGABRT, on which
+# faulthandler (pytest's) prints every thread's stack, and fails (124): a deadlock never stalls it.
+# The limit is inside the container because a `timeout` around this script can't end it: the docker
+# client waits for the container, whose first process ignores SIGTERM.
+#
 # When and where it runs (scripts/test-clock.sh): MUSIKATA_CLOCK=HH:MM (the next time it's that,
 # UTC) or 'YYYY-MM-DD HH:MM' (in the future) moves every process's clock there (libfaketime, by an
 # offset: the clock still runs, and the processes the tests start share it); MUSIKATA_TZ=a POSIX TZ
@@ -50,4 +55,4 @@ exec docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e QT_QPA_PLAT
     if [ -n "$MUSIKATA_TZ" ]; then export TZ="$MUSIKATA_TZ"; fi
     run="-m pytest"
     if [ -n "$MUSIKATA_COVERAGE" ]; then run="-m coverage run -m pytest" && export COVERAGE_FILE=/out/coverage/.coverage; fi
-    mkdir -p "$HOME" && cd /src && echo "Python $('"$CPY"' -c "import sys; print(sys.version.split()[0])"), PySide6 $(PYTHONPATH=/site '"$CPY"' -c "import PySide6; print(PySide6.__version__)")${MUSIKATA_COVERAGE:+, measured}" && PYTHONPATH=/src/src:/site exec '"$CPY"' $run -q -p no:cacheprovider --durations=15 tests/ "$@"' sh "$@"
+    mkdir -p "$HOME" && cd /src && echo "Python $('"$CPY"' -c "import sys; print(sys.version.split()[0])"), PySide6 $(PYTHONPATH=/site '"$CPY"' -c "import PySide6; print(PySide6.__version__)")${MUSIKATA_COVERAGE:+, measured}" && PYTHONPATH=/src/src:/site exec timeout -s ABRT -k 30 15m '"$CPY"' $run -q -p no:cacheprovider --durations=15 tests/ "$@"' sh "$@"

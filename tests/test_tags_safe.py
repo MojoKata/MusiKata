@@ -160,7 +160,7 @@ def test_tags_that_dont_read_back_as_written_leave_the_song_as_it_was(song, monk
 @pytest.mark.slow
 def test_a_cover_or_audio_that_doesnt_read_back_leaves_the_song_as_it_was(song, monkeypatch):
     before = contents(song)
-    monkeypatch.setattr(write, "_flac_pictures", lambda f, cover: None)
+    monkeypatch.setattr(write, "_vorbis_pictures", lambda f, change, flac: {})
     with pytest.raises(tags.WriteError, match="its cover didn't read back"):
         save(song, cover=Picture(3, "image/jpeg", b"\xff\xd8new"))
     monkeypatch.undo()

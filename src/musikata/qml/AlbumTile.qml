@@ -3,11 +3,13 @@ import "."
 
 // An album in the Albums grid (L01-albums) and on an artist's page: its cover, title, and artist
 // and year. The album playing is outlined; under the pointer a play button sits on the cover. A
-// click opens its page; the play button plays it from its first song.
+// click opens its page; the play button plays it from its first song. An image dropped on its cover
+// sets the album's art (R5.4).
 Item {
     id: tile
     signal open()
     signal play()
+    signal imageDropped(var urls)
     required property string title
     required property string line
     required property string cover
@@ -36,6 +38,8 @@ Item {
         width: tile.width
         height: tile.width
         source: tile.cover
+        takesImages: true
+        onImageDropped: (urls) => tile.imageDropped(urls)
     }
     Rectangle {
         id: playButton

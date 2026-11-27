@@ -94,7 +94,7 @@ def pictures(path: str, name: str | None = None) -> list[Picture]:
     tags = f.tags
     if kind in ("mp3", "wav", "aiff"):
         apic: list[Any] = tags.getall("APIC") if tags is not None else []
-        return [Picture(int(p.type), str(p.mime), bytes(p.data)) for p in apic]
+        return [Picture(int(p.type), str(p.mime), bytes(p.data), str(p.desc)) for p in apic]
     if kind in ("aac", "alac"):
         formats: dict[object, str] = {
             mutagen.mp4.MP4Cover.FORMAT_JPEG: "image/jpeg",
@@ -104,7 +104,10 @@ def pictures(path: str, name: str | None = None) -> list[Picture]:
         return [
             Picture(None, formats.get(getattr(c, "imageformat", None), ""), bytes(c)) for c in covr
         ]
-    out = [Picture(int(p.type), str(p.mime), bytes(p.data)) for p in getattr(f, "pictures", [])]
+    out = [
+        Picture(int(p.type), str(p.mime), bytes(p.data), str(p.desc))
+        for p in getattr(f, "pictures", [])
+    ]
     key: str
     value: str
     for key, value in tags or ():
@@ -117,7 +120,7 @@ def pictures(path: str, name: str | None = None) -> list[Picture]:
                 out.append(Picture(None, "", data))
             else:
                 p = mutagen.flac.Picture(data)
-                out.append(Picture(int(p.type), str(p.mime), bytes(p.data)))
+                out.append(Picture(int(p.type), str(p.mime), bytes(p.data), str(p.desc)))
         except (binascii.Error, ValueError, struct.error, mutagen.MutagenError) as e:
             log.warning("skipped a picture in %s that couldn't be read: %s", path, e)
     return out

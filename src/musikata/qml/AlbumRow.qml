@@ -2,10 +2,11 @@ import QtQuick
 import "."
 
 // An album in Albums' list mode: its cover small, title, artist, year, genre, songs and length. A
-// click opens its page.
+// click opens its page; an image dropped on its cover sets the album's art (R5.4).
 Rectangle {
     id: row
     signal open()
+    signal imageDropped(var urls)
     required property var columns       // [x, width] of each column, from AlbumsView
     required property int albumId
     required property string title
@@ -47,6 +48,8 @@ Rectangle {
         matte: row.color.a > 0 ? row.color : Theme.bg
         source: row.cover
         emptyText: ""
+        takesImages: true
+        onImageDropped: (urls) => row.imageDropped(urls)
     }
     Cell { column: 1; text: row.title; color: row.playing ? Theme.accentHi : Theme.text; font.weight: Font.DemiBold }
     Cell { column: 2; text: row.artist }

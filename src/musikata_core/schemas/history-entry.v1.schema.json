@@ -72,6 +72,60 @@
             ],
             "pattern": "^[0-9a-f]{64}$",
             "description": "The cover written, by its sha256; null when it was removed"
+          },
+          "pictures": {
+            "type": "array",
+            "description": "Present when the song's other pictures changed (R5.3): each it had but its front cover, its bytes kept as history/images/<sha256>",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Its picture type, as ID3 and FLAC number them; null where the kind has none (MP4)"
+                },
+                "mime": {
+                  "type": "string"
+                },
+                "desc": {
+                  "type": "string"
+                },
+                "image": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "Its bytes' sha256, kept as history/images/<sha256>"
+                }
+              },
+              "required": [
+                "image"
+              ]
+            }
+          },
+          "new_pictures": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "description": "The other pictures written, by their sha256 (none: removed)"
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "For an image file the save wrote beside the songs (cover.jpg, R5.3): its old bytes, kept as history/images/<sha256>; null when there was none"
+          },
+          "new_image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The image file's bytes written, by their sha256; null when it was moved to the trash"
           }
         },
         "required": [

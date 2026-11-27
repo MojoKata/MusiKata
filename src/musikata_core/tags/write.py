@@ -99,8 +99,8 @@ def _id3(
             _musikata_popm(tags, stars)
         else:
             _popm(tags, stars)
-    if "cover" in change:
-        _apic(tags, change["cover"])  # type: ignore[arg-type]
+    if any(name in change for name in compose.PICTURES):
+        _apic(tags, change)
     _versions(tags, version)
 
 
@@ -132,20 +132,35 @@ def _musikata_popm(tags: mutagen.id3.ID3, stars: int) -> None:
         )
 
 
-def _apic(tags: mutagen.id3.ID3, cover: Picture | None) -> None:
-    """The front cover (APIC type 3) replaced by `cover`, or taken out (None), the other pictures
-    kept, after it (compose.pictures_after)."""
-    kept = [f for f in tags.getall("APIC") if f.type != compose.FRONT]
+def _apic(tags: mutagen.id3.ID3, change: compose.Change) -> None:
+    """The front cover (APIC type 3) replaced by the change's `cover`, or taken out (None), and
+    the other pictures replaced by its `others`; what it doesn't name kept, the front cover first
+    (compose.pictures_after). ID3 keeps APICs by their descriptions, so each is made unique."""
+    frames = tags.getall("APIC")
+    fronts: list[Any] = [f for f in frames if f.type == compose.FRONT]
+    rest: list[Any] = [f for f in frames if f.type != compose.FRONT]
+    if "cover" in change:
+        cover = cast(Picture | None, change["cover"])
+        fronts = [_apic_frame(cover, compose.FRONT, "")] if cover is not None else []
+    if "others" in change:
+        rest = [_apic_frame(p, p.type or 0, p.desc) for p in cast(list[Picture], change["others"])]
     tags.delall("APIC")
-    if cover is not None:
-        desc = "" if all(f.desc for f in kept) else "Front cover"  # APICs are kept by description
-        tags.add(
-            mutagen.id3.APIC(
-                encoding=3, mime=cover.mime, type=compose.FRONT, desc=desc, data=cover.data
-            )
-        )
-    for f in kept:
+    used: set[str] = set()
+    for f in rest + fronts:  # the others keep their own; a front cover named "" gives way
+        desc, n = f.desc, 1
+        while desc in used:
+            n += 1
+            base = "Front cover" if f.type == compose.FRONT else (f.desc or "Picture")
+            desc = base if n == 2 and f.type == compose.FRONT else f"{base} {n}"
+        used.add(desc)
+        f.desc = desc
+    for f in fronts + rest:
         tags.add(f)
+
+
+def _apic_frame(picture: Picture, kind: int, desc: str) -> mutagen.id3.APIC:
+    mime = picture.mime or compose.image_mime(picture.data)
+    return mutagen.id3.APIC(encoding=3, mime=mime, type=kind, desc=desc, data=picture.data)
 
 
 def _versions(tags: mutagen.id3.ID3, version: int) -> None:
@@ -229,18 +244,25 @@ def _mp4(tags: mutagen.mp4.MP4Tags, change: compose.Change, before: Tags) -> Non
                 tags[key] = [mutagen.mp4.MP4FreeForm(f"{stars / 5:.1f}".encode())]
             else:
                 del tags[key]
-    if "cover" in change:
-        cover: Picture | None = change["cover"]  # type: ignore[assignment]
+    if any(name in change for name in compose.PICTURES):
         before_covers: list[Any] = list(tags.get("covr") or [])
-        covers = before_covers[1:]
-        if cover is not None:
-            png = cover.mime.lower() == "image/png" or cover.data[:4] == b"\x89PNG"
-            form = mutagen.mp4.MP4Cover.FORMAT_PNG if png else mutagen.mp4.MP4Cover.FORMAT_JPEG
-            covers.insert(0, mutagen.mp4.MP4Cover(cover.data, imageformat=form))
+        fronts, covers = before_covers[:1], before_covers[1:]
+        if "cover" in change:
+            cover = cast(Picture | None, change["cover"])
+            fronts = [_mp4_cover(cover)] if cover is not None else []
+        if "others" in change:
+            covers = [_mp4_cover(p) for p in cast(list[Picture], change["others"])]
+        covers = fronts + covers
         if covers:
             tags["covr"] = covers
         else:
             tags.pop("covr", None)
+
+
+def _mp4_cover(picture: Picture) -> mutagen.mp4.MP4Cover:
+    png = picture.mime.lower() == "image/png" or picture.data[:4] == b"\x89PNG"
+    form = mutagen.mp4.MP4Cover.FORMAT_PNG if png else mutagen.mp4.MP4Cover.FORMAT_JPEG
+    return mutagen.mp4.MP4Cover(picture.data, imageformat=form)
 
 
 # ---------- Vorbis comments ----------
@@ -250,13 +272,8 @@ def _vorbis(f: Any, change: compose.Change, before: Tags, kind: str) -> None:
     """Each key the change rewrites replaced where it first was, in whatever case the file has it;
     every other comment kept as it was, in its order (R4.1.1)."""
     edit = compose.vorbis(change, before)
-    if "cover" in change:
-        cover: Picture | None = change["cover"]  # type: ignore[assignment]
-        if kind == "flac":
-            _flac_pictures(f, cover)
-            edit["METADATA_BLOCK_PICTURE"] = _comment_pictures(f.tags, None)
-        else:
-            edit["METADATA_BLOCK_PICTURE"] = _comment_pictures(f.tags, cover)
+    if any(name in change for name in compose.PICTURES):
+        edit.update(_vorbis_pictures(f, change, kind == "flac"))
     out: list[tuple[str, str]] = []
     placed: set[str] = set()
     key: str
@@ -274,35 +291,61 @@ def _vorbis(f: Any, change: compose.Change, before: Tags, kind: str) -> None:
     f.tags[:] = out
 
 
-def _flac_pictures(f: Any, cover: Picture | None) -> None:
-    kept = [p for p in f.pictures if p.type != compose.FRONT]
-    f.clear_pictures()
-    for p in ([_flac_picture(cover)] if cover is not None else []) + kept:
-        f.add_picture(p)
-
-
-def _flac_picture(cover: Picture) -> mutagen.flac.Picture:
-    p = mutagen.flac.Picture()
-    p.type, p.mime, p.data = compose.FRONT, cover.mime, cover.data
-    p.width, p.height, p.depth = compose.image_size(cover.data)
-    return p
-
-
-def _comment_pictures(tags: Any, cover: Picture | None) -> list[str]:
-    """The METADATA_BLOCK_PICTURE comments once the cover is `cover`: the new one first, then
-    each that isn't a front cover, or can't be read, as it was."""
-    out = [base64.b64encode(_flac_picture(cover).write()).decode()] if cover is not None else []
+def _vorbis_pictures(f: Any, change: compose.Change, flac: bool) -> dict[str, list[str]]:
+    """The pictures of a FLAC or Ogg file once the change's `cover` and `others` are written, the
+    FLAC's picture blocks set here, and the comments that hold pictures returned, as `_vorbis`
+    takes them: METADATA_BLOCK_PICTURE, front covers first, and, when the others change, the
+    older COVERART, which holds a picture with no type. A new cover is a picture block in a FLAC
+    (its front covers in comments go), a comment in an Ogg file; a comment that can't be read
+    counts as another picture."""
+    comments: list[tuple[str, bool]] = []
     value: str
-    for key, value in tags:
-        if key.upper() != "METADATA_BLOCK_PICTURE":
-            continue
-        try:
-            front = mutagen.flac.Picture(base64.b64decode(value)).type == compose.FRONT
-        except binascii.Error, ValueError, struct.error, mutagen.MutagenError:
-            front = False
-        if not front:
-            out.append(value)
+    for key, value in f.tags:
+        if key.upper() == "METADATA_BLOCK_PICTURE":
+            comments.append((value, _comment_type(value) == compose.FRONT))
+    front_comments = [v for v, front in comments if front]
+    rest_comments = [v for v, front in comments if not front]
+    out: dict[str, list[str]] = {}
+    blocks = list(getattr(f, "pictures", []) if flac else [])
+    front_blocks = [b for b in blocks if b.type == compose.FRONT]
+    rest_blocks = [b for b in blocks if b.type != compose.FRONT]
+    if "cover" in change:
+        cover = cast(Picture | None, change["cover"])
+        made = [_flac_picture(cover, compose.FRONT)] if cover is not None else []
+        if flac:
+            front_blocks, front_comments = made, []
+        else:
+            front_comments = [base64.b64encode(p.write()).decode() for p in made]
+    if "others" in change:
+        others = cast(list[Picture], change["others"])
+        typed = [_flac_picture(p, p.type or 0) for p in others if p.type is not None]
+        if flac:
+            rest_blocks, rest_comments = typed, []
+        else:
+            rest_comments = [base64.b64encode(p.write()).decode() for p in typed]
+        out["COVERART"] = [base64.b64encode(p.data).decode() for p in others if p.type is None]
+    if flac:
+        f.clear_pictures()
+        for b in front_blocks + rest_blocks:
+            f.add_picture(b)
+    out["METADATA_BLOCK_PICTURE"] = front_comments + rest_comments
     return out
+
+
+def _comment_type(value: str) -> int | None:
+    """A METADATA_BLOCK_PICTURE comment's picture type; None when it can't be read."""
+    try:
+        return int(mutagen.flac.Picture(base64.b64decode(value)).type)
+    except binascii.Error, ValueError, struct.error, mutagen.MutagenError:
+        return None
+
+
+def _flac_picture(picture: Picture, kind: int) -> mutagen.flac.Picture:
+    p = mutagen.flac.Picture()
+    p.type, p.mime, p.data, p.desc = kind, picture.mime, picture.data, picture.desc
+    p.mime = p.mime or compose.image_mime(picture.data)
+    p.width, p.height, p.depth = compose.image_size(picture.data)
+    return p
 
 
 # ---------- the copy, with a WAV's INFO chunk kept in step ----------
