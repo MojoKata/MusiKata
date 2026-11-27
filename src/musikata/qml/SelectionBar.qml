@@ -4,15 +4,15 @@ import "."
 
 // The selection bar (R2.9.6, L06-folders-cards; L03-songs-bulk-edit): what is selected, "2 folders ·
 // 21 songs selected", "4 selected"; its first action, Play in Folders (the songs selected, from the
-// first, R7.1) or Play next in Songs (R7.2); Edit tags (R4.2), said by `act`, and left out while the
-// panel already edits the selection (`editing`); the actions of later slices (Add to playlist, Infer
-// from path, Organize…) faded, saying so in their tooltips, those that don't fit left out from the
-// last (L07-folders-list, the panel open beside it); and ✕, which clears it.
+// first, R7.1) or Play next in Songs (R7.2); Edit tags (R4.2) and Infer from path (R3.1), said by
+// `act`, Edit tags left out while the panel already edits the selection (`editing`); the actions of
+// later slices (Add to playlist, Organize…) faded, saying so in their tooltips, those that don't fit
+// left out from the last (L07-folders-list, the panel open beside it); and ✕, which clears it.
 Rectangle {
     id: bar
     signal play()
     signal clear()
-    signal act(string action)          // an action of `laterActions` that has one: "edit"
+    signal act(string action)          // an action of `laterActions` that has one: "edit", "infer"
     required property string text
     property string playLabel: qsTr("Play")
     property string playObjectName: "playSelection"

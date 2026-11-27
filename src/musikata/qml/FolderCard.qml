@@ -2,9 +2,9 @@ import QtQuick
 import "."
 
 // A folder in Folders' Cards mode (R2.9.4, L06-folders-cards): a wide card with its cover at the
-// left, its name and counts; a selected one outlined, its check at the top right. The tint by the
-// cover's colour comes with R6.2.2's colour pick, built with Now Playing (slice 8), and the state
-// chip with R3.9 (slice 7).
+// left, its name and counts, and its state chip (R2.9.5: "3 to fix", "No tags"); a selected one
+// outlined, its check at the top right. The tint by the cover's colour comes with R6.2.2's colour
+// pick, built with Now Playing (slice 8).
 Rectangle {
     id: card
     signal tapped(int modifiers)
@@ -15,6 +15,7 @@ Rectangle {
     required property string cover
     required property bool playing
     required property bool selected
+    property var pathChip: ({})        // R2.9.5: its chip's text and tone, {} for none
     property alias loading: art.loading
     height: 96
     radius: 12
@@ -62,6 +63,14 @@ Rectangle {
         text: card.line
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 13 }
+    }
+    Chip {
+        objectName: "stateChip"
+        x: art.x + art.width + 16
+        y: 64
+        visible: card.pathChip.text !== undefined
+        label: card.pathChip.text || ""
+        tone: card.pathChip.tone || "info"
     }
     Check {
         anchors.right: parent.right

@@ -4,7 +4,8 @@ import "."
 // A row of Folders' List mode (R2.9.4, L07-folders-list): its checkbox; a folder two rows tall,
 // its cover the row's full height, its name over its counts, then the artist, album and year its
 // songs share and their total time; a file one row tall with its icon, its name, artist, album,
-// year, rating and time. Selected, it is highlighted. The state chip (R3.9) comes with slice 7.
+// year, rating and time. Selected, it is highlighted. A folder's state chip (R2.9.5: "3 to fix",
+// "No tags") follows its counts.
 Rectangle {
     id: row
     signal tapped(int modifiers)
@@ -24,6 +25,7 @@ Rectangle {
     required property string time
     required property bool playing
     required property bool selected
+    property var pathChip: ({})        // R2.9.5: a folder's chip's text and tone, {} for none
     property alias loading: art.loading
     height: isFolder ? 64 : 36
     radius: 8
@@ -91,9 +93,10 @@ Rectangle {
         font { family: Theme.sans; pixelSize: row.isFolder ? 15 : 13; weight: row.isFolder ? Font.DemiBold : Font.Normal }
     }
     Text {
+        id: counts
         x: row.columns[1][0] + 72
         y: 34
-        width: row.columns[1][1] - 72
+        width: Math.min(implicitWidth, row.columns[1][1] - 72 - (stateChip.visible ? stateChip.width + 8 : 0))
         height: 20
         verticalAlignment: Text.AlignVCenter
         visible: row.isFolder
@@ -101,6 +104,16 @@ Rectangle {
         text: row.line
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 12 }
+    }
+    Chip {
+        id: stateChip
+        objectName: "stateChip"
+        x: counts.x + counts.width + 8
+        y: 31
+        height: 22
+        visible: row.isFolder && row.pathChip.text !== undefined
+        label: row.pathChip.text || ""
+        tone: row.pathChip.tone || "info"
     }
     Cell { column: 2; text: row.artist || "—"; color: row.artist ? Theme.cell : Theme.faint }
     Cell { column: 3; text: row.album || "—"; color: row.album ? Theme.cell : Theme.faint }

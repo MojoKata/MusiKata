@@ -248,19 +248,26 @@ def test_a_groups_choice_is_kept_changed_by_its_rows_and_cleared(qapp):
 # ---------- moving the others to the trash, and Undo ----------
 
 
-def tag(path, artist, title):
+def tag(path, artist, title, album=None):
+    """The artist and title tagged; with `album`, the album artist, the album and track 4 too, so
+    the tags match the path `Lumen Drift/<album>/04 - <title>` (R3.9)."""
     f = mutagen.wave.WAVE(str(path))
     if f.tags is None:
         f.add_tags()
     f.tags.add(mutagen.id3.TPE1(encoding=3, text=artist))
     f.tags.add(mutagen.id3.TIT2(encoding=3, text=title))
+    if album:
+        f.tags.add(mutagen.id3.TPE2(encoding=3, text=artist))
+        f.tags.add(mutagen.id3.TALB(encoding=3, text=album))
+        f.tags.add(mutagen.id3.TRCK(encoding=3, text="4"))
     f.save()
 
 
 @pytest.fixture
 def root(tmp_path):
     """Signal Fires filed and an exact copy of it, Moonpull filed and a likely copy of it, as
-    WAVs scanned, rated (in ratings.json) and played on this computer: (root, index, paths)."""
+    WAVs scanned, rated (in ratings.json) and played on this computer: (root, index, paths). The
+    filed ones' tags match their paths (R3.9)."""
     music = tmp_path / "Music"
     (music / ".musikata").mkdir(parents=True)
     paths = {
@@ -272,7 +279,8 @@ def root(tmp_path):
     for name, seed, title in (("signal", 4, "Signal Fires"), ("rip", 4, "Signal Fires"),
                               ("moon", 5, "Moonpull"), ("radio", 6, "Moonpull")):  # fmt: skip
         wav(paths[name], seed)
-        tag(paths[name], "Lumen Drift", title)
+        album = {"signal": "Glass Harbor", "moon": "Tide Tables"}.get(name)
+        tag(paths[name], "Lumen Drift", title, album)
     index = db.Index(str(tmp_path / "musikata.db"))
     with ThreadPoolExecutor(1) as pool:
         scanner.scan(str(music), index, pool, hold=False)

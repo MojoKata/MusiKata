@@ -3,8 +3,8 @@ tool opens, its options above R3.7's preview of what it would do (preview.Previe
 the panel (R4.7, R4.9). Number tracks (R4.5.1) has no options; Replace in field (R4.5.2) takes the
 field, what to find, what to put in its place, and whether it is a regular expression or matches
 case, an invalid expression saying why; Tidy case (R4.5.3) the fields to tidy; Copy from… (R4.5.4)
-the song to copy from and the fields to copy. Infer from path (R4.5.5) is R3's, in a later
-version: its item shows, disabled, saying so.
+the song to copy from and the fields to copy. Infer from path (R4.5.5) is R3's dialog
+(musikata.infer), which the panel opens over its songs.
 
 What each tool does is tags.tools', a plain function from the songs' tags and the options to what
 they would become, planned again as an option changes; what the menu and the dialog say is
@@ -28,7 +28,6 @@ from .preview import Preview, file_of, footer_text, labels_text, save_text
 
 log = logging.getLogger(__name__)
 
-INFER_LATER = "Tags from paths come in a later version"  # R4.5.5: R3's, slice 7
 UNSAVED = "Save or revert your changes first"
 SAVING = "A save is going on"
 TWO = "Select two or more songs to copy between"
@@ -44,6 +43,7 @@ TOOLS = (
                            "track ripped apart from its album."),
     ("infer", "Infer from path", ""),
 )  # fmt: skip
+INFER_TOOL = "infer"  # R4.5.5: R3's own dialog, which the panel opens (musikata.infer)
 ENCODING_TOOL = "encoding"  # R4.10's Fix encoding…, beside the tools when the songs need it
 ENCODING_LABEL = "Fix encoding…"
 LABEL = {name: label for name, label, _ in TOOLS}
@@ -56,14 +56,12 @@ def menu_of(
 ) -> list[dict[str, str]]:
     """The ⋯ menu's items (R4.5): each tool's name and label, and why it can't be used now ("" when
     it can): a save going on, changes typed and not saved (a tool plans from the files' tags),
-    fewer than two songs to copy between; Infer from path comes in a later version (R3). When the
+    fewer than two songs to copy between; Infer from path is R3's dialog (R4.5.5). When the
     songs hold text in the wrong encoding (`encoding`), Fix encoding… after them (R4.10)."""
     out = []
     for name, label, _ in TOOLS:
         later = (
-            INFER_LATER
-            if name == "infer"
-            else SAVING
+            SAVING
             if saving
             else UNSAVED
             if unsaved
@@ -134,7 +132,7 @@ class BulkTool(QObject):
         """Opens tool `tool` over `songs` (in the list's order), with `options` set as the user
         would set them (the tour's); its preview shows what it would do. `undoable` says whether
         the change history keeps its save (R4.9)."""
-        if tool not in LABEL or tool == "infer":
+        if tool not in LABEL or tool == INFER_TOOL:
             raise ValueError(f"no such bulk tool: {tool}")
         self._tool, self._songs, self._undoable = tool, list(songs), undoable
         self._source = 0

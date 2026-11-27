@@ -12,10 +12,8 @@ trash gives it.
   all share one hash is exact, any other likely.
 - **The copy to keep** (`keep`): lossless over lossy, then the higher bit rate (copies of one
   audio hash count as one: their bit rates differ only by their tags), then the one whose path
-  matches its tags (R3.9). R3.9's own state is slice 7's; until it is there, `path_match` stands
-  in for it: how many of the title (in the file's name), the artist and the album (in its
-  folders) the path holds, their keys compared as `song_key` compares them. It is a parameter of
-  `keep`, the seam R3.9 replaces. Then the most played, the higher rated, the first by path.
+  matches its tags (R3.9: `path_matches`, from the state the index keeps for it, a parameter of
+  `keep`). Then the most played, the higher rated, the first by path.
 - **The choice** (`initial`, `rechoose`): the copy kept, and those checked for the trash, exact
   copies of the kept one checked at first, likely ones not (R2.12).
 - **The plan** (`plan`): the copies checked go, the kept one takes their plays and their highest
@@ -33,6 +31,7 @@ from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 
 from . import rootfiles
+from .patterns import MATCH
 
 WITHIN = 2.0  # R2.12: likely copies' lengths are within 2 seconds
 LOSSLESS = frozenset({"flac", "alac", "wav", "aiff"})  # R2.2's kinds that lose nothing
@@ -76,7 +75,8 @@ class Copy:
     """A song as a group of copies shows it (R2.12): its id and path under the root, its kind
     (R2.2), bit rate (bits a second), sample rate and length, its audio hash and `song_key`, its
     title, artist and album, its plays on every computer and its rating, its file's modification
-    time in seconds, and its album's id and cover thumbnail."""
+    time in seconds, its album's id and cover thumbnail, and whether its tags match its path
+    (R3.9's state, patterns.MATCH, FIX or BARE; None when no pattern fits it)."""
 
     song: int
     path: str
@@ -94,6 +94,7 @@ class Copy:
     modified: float | None = None
     album_id: int | None = None
     thumb: str | None = None
+    path_state: int | None = None
 
 
 @dataclass(frozen=True)
@@ -115,23 +116,10 @@ def lossless(kind: str | None) -> bool:
     return kind in LOSSLESS
 
 
-def _folders_and_name(path: str) -> tuple[str, str]:
-    folders, _, name = path.rpartition("/")
-    return plain(folders), plain(name.rpartition(".")[0] or name)
-
-
-def path_match(copy: Copy) -> int:
-    """R3.9's stand-in until slice 7 builds it: how many of the copy's title (in its file's name),
-    artist and album (in its folders) its path under the root holds, each as `plain` text. A copy
-    filed as `Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.flac` holds all three; one in
-    `_Incoming/new rips/Signal Fires.flac` the title alone."""
-    folders, name = _folders_and_name(copy.path)
-    title, artist, album = plain(copy.title), plain(copy.artist), plain(copy.album)
-    return (
-        bool(title and title in name)
-        + bool(artist and artist in folders)
-        + bool(album and album in folders)
-    )
+def path_matches(copy: Copy) -> int:
+    """R3.9 as the keep rule weighs it: 1 when the copy's tags match its path under the pattern
+    detected for its folder, else 0."""
+    return int(copy.path_state == MATCH)
 
 
 def _rates(copies: Sequence[Copy]) -> dict[int, int]:
@@ -144,9 +132,9 @@ def _rates(copies: Sequence[Copy]) -> dict[int, int]:
     return {c.song: best[c.hash] if c.hash is not None else c.bitrate or 0 for c in copies}
 
 
-def keep(copies: Sequence[Copy], matches: Callable[[Copy], int] = path_match) -> tuple[Copy, str]:
+def keep(copies: Sequence[Copy], matches: Callable[[Copy], int] = path_matches) -> tuple[Copy, str]:
     """The copy to keep (R2.12) and why: lossless over lossy, then the higher bit rate, then the
-    one whose path matches its tags the most (`matches`, R3.9's; `path_match` until then), then
+    one whose path matches its tags (`matches`, R3.9's), then
     the most played, the higher rated, and the first by path. Why: the first of those rules it
     wins on against the next best (LOSSLESS_WINS, …, FIRST)."""
     if not copies:
@@ -206,7 +194,7 @@ def _components(copies: Sequence[Copy], within: float) -> list[list[Copy]]:
 
 def group(
     copies: Iterable[Copy],
-    matches: Callable[[Copy], int] = path_match,
+    matches: Callable[[Copy], int] = path_matches,
     within: float = WITHIN,
 ) -> list[Group]:
     """The groups of copies among `copies` (R2.12): songs that share an audio hash, or a
@@ -283,7 +271,7 @@ def plan(g: Group, kept: int, checked: Collection[int]) -> Plan:
 COLUMNS = (
     "song.id, song.path, song.kind, song.bitrate, song.sample_rate, song.length,"
     " song.audio_hash, song.copy_key, song.title, coalesce(song.artist, song.albumartist),"
-    " song.album, song.rating, song.mtime_ns, song.album_id, album.thumb"
+    " song.album, song.rating, song.mtime_ns, song.album_id, album.thumb, song.path_state"
 )
 
 
@@ -314,15 +302,16 @@ def read(c: sqlite3.Connection, songs: Sequence[int]) -> list[Copy]:
         ).fetchall()
         plays = rootfiles.totals(c, chunk)
         for (song, path, kind, bitrate, rate, length, h, key, title, artist, album, rating,
-             mtime, album_id, thumb) in rows:  # fmt: skip
+             mtime, album_id, thumb, state) in rows:  # fmt: skip
             out.append(Copy(
                 int(song), str(path), kind, bitrate, rate, length, h, key, title or "",
                 artist or "", album or "", plays.get(song, 0), int(rating or 0),
                 mtime / 1e9 if mtime is not None and mtime >= 0 else None, album_id, thumb,
+                state,
             ))  # fmt: skip
     return out
 
 
-def found(c: sqlite3.Connection, matches: Callable[[Copy], int] = path_match) -> list[Group]:
+def found(c: sqlite3.Connection, matches: Callable[[Copy], int] = path_matches) -> list[Group]:
     """Every group of copies the index holds (R2.12, A2.6): the `candidates` read and grouped."""
     return group(read(c, candidates(c)), matches)

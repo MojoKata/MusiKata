@@ -161,6 +161,11 @@ def test_an_albums_format_kicker_and_state_chips():
         {"text": "No art embedded", "tone": "info"},
         {"text": "folder.png in folder", "tone": "info"},
     ]
+    # L02's tags match path (R3.9): every song, some, or none known
+    assert bridges.state_chips(2, 2, None, [0, 0])[-1] == {"text": "Tags match path", "tone": "ok"}
+    assert bridges.state_chips(2, 2, None, [0, 1])[-1] == {
+        "text": "Tags match path: 1 of 2", "tone": "warn"}  # fmt: skip
+    assert len(bridges.state_chips(2, 2, None, [None, None])) == 1
 
 
 SONGS = [

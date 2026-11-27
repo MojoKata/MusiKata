@@ -123,16 +123,13 @@ SONG_COLUMNS = (
 )
 
 
-# the selection bar's actions after Play next (L03-songs-bulk-edit): Edit tags (R4.2, by its
-# `action`), and those that come with later slices, with what their tooltips say
+# the selection bar's actions after Play next (L03-songs-bulk-edit): Edit tags (R4.2) and Infer
+# from path (R3.1), by their `action`, and those that come with later slices, with what their
+# tooltips say
 SONG_LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
     {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"},
-    {
-        "label": "Infer from path",
-        "icon": "wand",
-        "later": "Tags from paths come in a later version",
-    },
+    {"label": "Infer from path", "icon": "wand", "later": "", "action": "infer"},
 ]
 
 # the keys a list selects with (R6.9, R18.2), by the names selection.press knows them by

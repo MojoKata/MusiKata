@@ -16,14 +16,19 @@ import "."
 // menu, Play next, Add to queue (R7.2), Edit tags and Album art; Alt+↑ (⌘↑ on macOS) or Backspace
 // goes up, Alt+← or the mouse's back button back. Edit tags, on the selection bar, in the menu and on
 // a folder of songs' strip, opens the panel on the songs selected or beneath the folders (R2.9.6,
-// R4.2); Album art opens its dialog (R5.2) on their album, offered on the bar and in the menu when
-// they are one album, and on the strip on the album most of the folder's songs are on.
+// R4.2); Infer from path, in the same places, its dialog on the same songs (R3.1); Album art opens
+// its dialog (R5.2) on their album, offered on the bar and in the menu when they are one album, and
+// on the strip on the album most of the folder's songs are on. Each folder shows the worst
+// path-match state beneath it (R2.9.5: a dot on its cover, a chip on its card and its List row),
+// each file its path-match chip (R3.9), and a folder of songs whose files differ from their path
+// says how in a line under its strip (R2.9.7).
 Item {
     id: view
     required property var library
     required property var player
     property var edit: null
     property var art: null      // the Album art dialog's bridge (R5.2)
+    property var infer: null    // Infer from path's dialog (R3)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
@@ -73,7 +78,7 @@ Item {
         x: 28
         y: 8
         width: view.width - 56
-        height: visible ? 156 : 0
+        height: visible ? 156 + (pathLine.visible ? pathLine.height + 12 : 0) : 0
 
         Cover {
             id: stripArt
@@ -126,15 +131,19 @@ Item {
                     Btn {
                         required property var modelData
                         objectName: modelData.action === "edit" ? "editFolder"
-                                    : modelData.action === "art" ? "folderArt" : ""
+                                    : modelData.action === "art" ? "folderArt"
+                                    : modelData.action === "infer" ? "inferFolder" : ""
                         label: modelData.label
                         icon: modelData.icon
                         later: modelData.later
+                        primary: modelData.primary === true
                         onClicked: {
                             if (modelData.action === "edit")
                                 view.edit.editFolder(view.folders)
                             else if (modelData.action === "art")
                                 view.art.openFolder(view.folders.path, view.folders.title)
+                            else if (modelData.action === "infer" && view.infer !== null)
+                                view.infer.openFolder(view.folders.path)
                         }
                     }
                 }
@@ -147,6 +156,29 @@ Item {
                         tone: modelData.tone
                     }
                 }
+            }
+        }
+        Rectangle {  // how its files differ from their path (R2.9.7, L08)
+            id: pathLine
+            objectName: "pathLine"
+            y: stripArt.height + 12
+            width: strip.width
+            height: lineText.implicitHeight + 24
+            radius: 10
+            visible: view.folders.pathLine !== ""
+            color: Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.12)
+            Accessible.role: Accessible.StaticText
+            Accessible.name: lineText.text
+            Icon { x: 14; y: 12; name: "attention"; size: 16; color: Theme.warn }
+            Text {
+                id: lineText
+                x: 42
+                y: 12
+                width: parent.width - 56
+                wrapMode: Text.WordWrap
+                text: view.folders.pathLine
+                color: Theme.warn
+                font { family: Theme.sans; pixelSize: 14 }
             }
         }
     }
@@ -166,10 +198,10 @@ Item {
     }
     // List: check, name, artist, album, year, rating, time
     readonly property var listColumns: columnsOf(rows.width, [22, 0, 0, 0, 44, 70, 52], [0, 0.46, 0.27, 0.27, 0, 0, 0], 16)
-    // the files in the image modes: file, title, album (or where), rating, time
-    readonly property var fileColumns: columnsOf(rows.width, [0, 0, 0, 70, 44], [0.42, 0.30, 0.28, 0, 0], 16)
-    // a folder of songs: file, title, artist, genre, year
-    readonly property var songColumns: columnsOf(rows.width, [0, 0, 0, 0, 44], [0.32, 0.28, 0.22, 0.18, 0], 16)
+    // the files in the image modes: file, title, album (or where), rating, time, from path
+    readonly property var fileColumns: columnsOf(rows.width, [0, 0, 0, 70, 44, 170], [0.42, 0.30, 0.28, 0, 0, 0], 16)
+    // a folder of songs: file, title, artist, genre, year, from path
+    readonly property var songColumns: columnsOf(rows.width, [0, 0, 0, 0, 44, 170], [0.32, 0.28, 0.22, 0.18, 0, 0], 16)
 
     component Heads: Item {
         id: heads
@@ -216,7 +248,8 @@ Item {
             labels: view.listMode
                 ? [[qsTr("NAME"), 1], [qsTr("ARTIST"), 2], [view.folders.thirdLabel === "FOLDER" ? qsTr("FOLDER") : qsTr("ALBUM"), 3],
                    [qsTr("YEAR"), 4], [qsTr("RATING"), 5], [qsTr("TIME"), 6, true]]
-                : [[qsTr("FILE"), 0, false, 26], [qsTr("TITLE"), 1], [qsTr("ARTIST"), 2], [qsTr("GENRE"), 3], [qsTr("YEAR"), 4]]
+                : [[qsTr("FILE"), 0, false, 26], [qsTr("TITLE"), 1], [qsTr("ARTIST"), 2], [qsTr("GENRE"), 3], [qsTr("YEAR"), 4],
+                   [qsTr("FROM PATH"), 5]]
         }
     }
 
@@ -273,6 +306,8 @@ Item {
             required property var odd
             required property bool playing
             required property bool selected
+            required property string dot
+            required property var pathChip
             readonly property bool isFolder: kind === "folder"
             readonly property bool inGrid: view.gridMode && isFolder
             readonly property int column: inGrid ? index % rows.columns : 0
@@ -302,7 +337,7 @@ Item {
                     columns: view.fileColumns
                     labels: [[qsTr("FILE"), 0, false, 26], [qsTr("TITLE"), 1],
                              [view.folders.thirdLabel === "FOLDER" ? qsTr("FOLDER") : qsTr("ALBUM"), 2],
-                             [qsTr("RATING"), 3], [qsTr("TIME"), 4, true]]
+                             [qsTr("RATING"), 3], [qsTr("TIME"), 4, true], [qsTr("FROM PATH"), 5]]
                 }
             }
             Loader {
@@ -315,6 +350,7 @@ Item {
                 id: tile
                 FolderTile {
                     large: rows.large
+                    dot: cell.dot
                     name: cell.name
                     line: cell.line
                     cover: cell.cover
@@ -329,6 +365,7 @@ Item {
             Component {
                 id: card
                 FolderCard {
+                    pathChip: cell.pathChip
                     name: cell.name
                     line: cell.line
                     cover: cell.cover
@@ -345,6 +382,7 @@ Item {
                     objectName: "folderListRow"
                     columns: view.listColumns
                     isFolder: cell.isFolder
+                    pathChip: cell.pathChip
                     name: cell.name
                     line: cell.line
                     cover: cell.cover
@@ -377,6 +415,7 @@ Item {
                     rating: cell.rating
                     time: cell.time
                     odd: cell.odd
+                    pathChip: cell.pathChip
                     playing: cell.playing
                     selected: cell.selected
                     onTapped: (modifiers) => view.tapped(cell.index, modifiers)
@@ -433,7 +472,7 @@ Item {
         return out
     }
 
-    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art }
+    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer }
 
     SelectionBar {
         objectName: "selectionBar"
@@ -445,6 +484,8 @@ Item {
                 view.edit.editSelection(view.rowsModel)
             else if (action === "art")
                 view.art.openAlbum(view.folders.selectedAlbum)
+            else if (action === "infer" && view.infer !== null)
+                view.infer.openSelection(view.rowsModel)
         }
         playNote: view.library.playNote
         onPlay: view.folders.playSelection()

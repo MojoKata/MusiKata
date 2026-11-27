@@ -23,7 +23,8 @@ import "."
 // album's names does (R2.8). Needs attention's Review… of a song's copies opens its dialog over the
 // whole window (R2.12), and moving copies to the trash asks first, over it (R2.11). Fix encoding…
 // (R4.10), from Needs attention or the Edit tags panel's ⋯ menu, opens its dialog over the whole
-// window too. A star clicked
+// window too, as Infer from path (R3) does from Folders, an album's page, the selection bars, the
+// right-click menus, the panel's ⋯ menu and Needs attention. A star clicked
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2).
 Window {
@@ -39,6 +40,7 @@ Window {
     required property var names
     required property var copies
     required property var encodings
+    required property var infer
     width: 1280
     height: 800
     minimumWidth: 960
@@ -49,7 +51,7 @@ Window {
     readonly property bool modal: win.edit.tool.opened || win.art.opened || win.genres.opened
                                   || win.names.opened || win.copies.opened
                                   || win.copies.question.title !== undefined
-                                  || win.encodings.opened
+                                  || win.encodings.opened || win.infer.opened
 
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -164,14 +166,14 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer } }
     Component { id: artists; ArtistsView { library: win.library } }
     Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art } }
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres } }
     Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres } }
-    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer } }
 
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -221,6 +223,11 @@ Window {
         objectName: "fixOverlay"
         anchors.fill: parent
         fix: win.encodings
+    }
+    InferDialog {
+        objectName: "inferOverlay"
+        anchors.fill: parent
+        infer: win.infer
     }
     Shortcut {
         sequence: "Ctrl+E"

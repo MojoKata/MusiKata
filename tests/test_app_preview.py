@@ -21,7 +21,7 @@ from musikata.preview import (
     save_text,
 )
 from musikata_core.tags import Job, Tags
-from musikata_core.tags.tools import Song, number_tracks, replace_in_field
+from musikata_core.tags.tools import Planned, Song, number_tracks, replace_in_field
 
 ROOT = "/home/u/Music"
 L03 = [  # L03's four songs, as the demo library tags them
@@ -138,3 +138,16 @@ def test_the_preview_checks_every_changed_file_and_unchecking_leaves_it_out(qapp
     p.show(number_tracks(songs()[:1]), undoable=False)  # shown anew: every change checked
     assert p.chosen() == [0] and "history is off" in p.property("footer")
     assert [c["name"] for c in p.property("columns")] == ["track", "tracktotal"]
+
+
+def test_a_files_note_is_in_its_row_and_noted_files_are_listed_whatever_they_change():
+    """R3.4: Infer from path's files the pattern doesn't fit are listed last, unchanged, with
+    "Doesn't fit the pattern"; the plain tools note nothing."""
+    song = Song(f"{ROOT}/a/b.flac", Tags())
+    planned = Planned(("title",), (song, song), (Tags(title="x"), Tags()),
+                      notes=("", "Doesn't fit the pattern"))  # fmt: skip
+    assert row_of(planned, 1, False, ROOT)["note"] == "Doesn't fit the pattern"
+    assert row_of(planned, 0, True, ROOT)["note"] == ""
+    assert planned.note(5) == ""
+    assert listed([True, False, False, False], noted=[False, False, False, True]) == 4
+    assert listed([True, False, False, False]) == 2

@@ -31,7 +31,9 @@ kind; everything else reads and writes through it.
 A3.3. **The pattern engine** (R3) compiles a pattern into a regular expression over the path
 relative to the root, with `/` separators and the extension removed: each token becomes a lazy
 named group (`(?P<title>.+?)`, digits for `{track}`, `{disc}` and `{year}`), literal text is
-escaped with the equivalences of R3.2.1, and the whole is anchored. Detection (R3.4) runs every
+escaped with the equivalences of R3.2.1, and the whole is anchored at both ends of as many of the
+path's last parts as the pattern has, so a preset fits an album's folder however deep it lies
+under the root; a token never takes a `/`. Detection (R3.4) runs every
 pattern over every file of the selection, which for a few thousand files is milliseconds. The
 same parsed pattern, run the other way, formats paths for R12.
 

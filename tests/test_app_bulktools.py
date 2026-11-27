@@ -10,7 +10,6 @@ the wrong tool in the history leaves the user unable to trust or find what was d
 import pytest
 
 from musikata.bulktools import (
-    INFER_LATER,
     SAVING,
     TWO,
     UNSAVED,
@@ -41,15 +40,14 @@ def songs():
 
 
 def test_the_menu_lists_r45s_tools_and_says_why_one_cant_be_used_now():
-    """R4.5's ⋯ menu; R4.5.5: Infer from path comes with R3, shown disabled saying so."""
+    """R4.5's ⋯ menu; R4.5.5: Infer from path (R3's dialog) waits as the tools do."""
     menu = menu_of(4, unsaved=False, saving=False)
     assert [(t["name"], t["label"]) for t in menu] == [
         ("number", "Number tracks"), ("replace", "Replace in field"), ("tidy", "Tidy case"),
         ("copy", "Copy from…"), ("infer", "Infer from path")]  # fmt: skip
-    assert [t["later"] for t in menu] == ["", "", "", "", INFER_LATER]
-    assert INFER_LATER == "Tags from paths come in a later version"
-    assert {t["later"] for t in menu_of(4, True, False)} == {UNSAVED, INFER_LATER}
-    assert {t["later"] for t in menu_of(4, True, True)} == {SAVING, INFER_LATER}
+    assert [t["later"] for t in menu] == ["", "", "", "", ""]
+    assert {t["later"] for t in menu_of(4, True, False)} == {UNSAVED}
+    assert {t["later"] for t in menu_of(4, True, True)} == {SAVING}
     assert menu_of(1, False, False)[3]["later"] == TWO
 
 

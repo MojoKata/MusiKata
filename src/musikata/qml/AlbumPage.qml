@@ -5,8 +5,9 @@ import "."
 // An album's page (R2.6, L02-album), under the header (R6.4) with its way back and the search box,
 // which filters its songs (R2.7): the cover, the line over the title, the title,
 // the artist (a click opens their page), songs, length and format; Play and Shuffle, Edit tags (the
-// panel for its songs, R4.2), Album art (its dialog, R5.2) and ⋯, whose Save cover to folder writes
-// the embedded cover as cover.jpg (R5.5); an image dropped on the cover opens Album art with it
+// panel for its songs, R4.2), Album art (its dialog, R5.2) and ⋯, whose Infer from path opens its
+// dialog on the album's songs (R3.1) and Save cover to folder writes the embedded cover as cover.jpg
+// (R5.5); an image dropped on the cover opens Album art with it
 // (R5.4); the album's state chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
 // rest shuffled (R7.1, R7.3); a song's double click plays it and the rest after it, its right click
 // opens its menu (R7.2). Its songs are selected as the Songs list's are (R2.6), clicks and keys
@@ -19,6 +20,7 @@ Item {
     property var edit: null
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // the Album art dialog (R5.2)
+    property var infer: null  // Infer from path's dialog (R3.1)
     readonly property var album: library.album
     readonly property var tracks: album.songs
     readonly property bool loading: art.loading
@@ -151,6 +153,12 @@ Item {
                 Menu {
                     id: albumMenu
                     MenuItem {
+                        objectName: "inferAlbum"
+                        text: qsTr("Infer from path")
+                        enabled: page.infer !== null
+                        onTriggered: page.infer.openAlbum(page.album.id)
+                    }
+                    MenuItem {
                         objectName: "saveCoverToFolder"
                         text: qsTr("Save cover to folder")
                         enabled: page.library.playNote === ""
@@ -243,5 +251,5 @@ Item {
             font { family: Theme.sans; pixelSize: 14 }
         }
     }
-    SongMenu { id: songMenu; player: page.player; edit: page.edit }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit; infer: page.infer }
 }

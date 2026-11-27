@@ -9,8 +9,13 @@ length, the artist, album and year they share (or none), its own cover (R5.8, st
 the folder, else the front cover embedded in its songs when they share one) and, without one, the
 sources of its mosaic (step 2: one picture from each of up to four subfolders, those with the most
 songs, in name order, a subfolder that is a mosaic giving its first; or a folder of loose songs'
-differing covers). The worst path-match state beneath it (R2.9.5) joins with tags from paths
-(R3.9, slice 7).
+differing covers); and the worst path-match state beneath it with how many files beneath it can be
+fixed or have no tags (R2.9.5).
+
+Tags match path (R3.9) is kept here too: when a folder is summarized again, its own songs' states
+are worked out again first (`match_folder`, patterns.states over their paths and tags, with the
+user's own patterns of the root's settings, kept in `user_pattern`), as a folder's pattern is
+detected from all its songs, so one song changed may change the state of the rest.
 
 Which picture a folder shows and what its songs share are plain functions (`picture`, `shared`),
 tested without an index; `refresh` reads and writes the rows. Names sort as people read them
@@ -18,12 +23,14 @@ tested without an index; `refresh` reads and writes the rows. Names sort as peop
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from . import art, search, sortnames
+from . import art, patterns, search, sortnames
+from .tags.fields import Tags
 
 MOSAIC = 4  # pictures a mosaic holds at most (R5.8)
 # where each of a mosaic's pictures sits (R5.8's table), as fractions of the tile: x, y, w, h
@@ -144,8 +151,129 @@ def shared(values: Iterable[object]) -> object:
 COLUMNS = (
     "parent", "name", "name_key", "fold", "folders", "songs", "folders_beneath", "songs_beneath",
     "length", "artist", "album", "year", "image", "image_size", "image_mtime", "cover_kind",
-    "cover", "thumb", "mosaic",
+    "cover", "thumb", "mosaic", "path_state", "path_fix",
 )  # fmt: skip
+
+
+# ---------- tags match path (R3.9) ----------
+
+# a song's fields its path can give, as the song table holds them, and its genres
+MATCH_COLUMNS = ("title", "artist", "album", "albumartist", "track", "tracktotal", "disc",
+                 "year", "date")  # fmt: skip
+
+
+def diff_text(diffs: Sequence[patterns.Difference]) -> str | None:
+    """How a song's tags differ from its path, as `song.path_diff` keeps it: JSON, a [field,
+    how, value] each; None for no difference."""
+    if not diffs:
+        return None
+    return json.dumps([[d.field, d.how, d.value] for d in diffs], ensure_ascii=False)
+
+
+def diffs_of(text: object) -> tuple[patterns.Difference, ...]:
+    """`song.path_diff` read back (`diff_text`); none for NULL or what isn't one."""
+    try:
+        found = json.loads(str(text)) if text else []
+    except ValueError:
+        return ()
+    if not isinstance(found, list):
+        return ()
+    return tuple(
+        patterns.Difference(str(d[0]), str(d[1]), str(d[2]))
+        for d in found
+        if isinstance(d, list) and len(d) == 3
+    )
+
+
+def user_patterns(c: sqlite3.Connection) -> list[str]:
+    """The user's own patterns (R3.3, R13.4) as the index keeps them, in order."""
+    return [str(t) for (t,) in c.execute("SELECT text FROM user_pattern ORDER BY position")]
+
+
+def set_user_patterns(c: sqlite3.Connection, texts: Sequence[str]) -> bool:
+    """Keeps the user's own patterns (the root's settings', R13.4) in the index; when they are
+    other than it had, every folder's states are worked out again (R3.9). Whether they were."""
+    texts = [str(t) for t in texts]
+    if user_patterns(c) == texts:
+        return False
+    c.execute("DELETE FROM user_pattern")
+    c.executemany("INSERT INTO user_pattern VALUES (?, ?)", list(enumerate(texts)))
+    refresh(c, [str(f) for (f,) in c.execute("SELECT DISTINCT folder FROM song")])
+    return True
+
+
+def _tags_where(
+    c: sqlite3.Connection, where: str, params: Sequence[object]
+) -> list[tuple[int, str, Tags]]:
+    """The songs `where` names (id, path under the root, and the tags a path can give), by
+    path."""
+    genres: dict[int, list[str]] = {}
+    for song, genre in c.execute(
+        "SELECT song_id, genre FROM song_genre JOIN song ON song.id = song_genre.song_id"
+        f" WHERE {where} ORDER BY song_id, position",
+        params,
+    ):
+        genres.setdefault(int(song), []).append(str(genre))
+    out = []
+    for row in c.execute(
+        f"SELECT id, path, {', '.join(MATCH_COLUMNS)} FROM song WHERE {where} ORDER BY path",
+        params,
+    ):
+        values = dict(zip(MATCH_COLUMNS, row[2:], strict=True))
+        tags = Tags(**values, genres=tuple(genres.get(int(row[0]), ())))
+        out.append((int(row[0]), str(row[1]), tags))
+    return out
+
+
+def tags_in(c: sqlite3.Connection, folder: str) -> list[tuple[int, str, Tags]]:
+    """A folder's own songs (id, path under the root, and the tags a path can give), by path."""
+    return _tags_where(c, "song.folder = ?", (folder,))
+
+
+def tags_of(c: sqlite3.Connection, ids: Sequence[int]) -> list[tuple[int, str, Tags]]:
+    """The songs of `ids` the index has, in that order (id, path under the root, and the tags a
+    path can give): what Infer from path plans from (R3)."""
+    found: dict[int, tuple[int, str, Tags]] = {}
+    for i in range(0, len(ids), 500):
+        chunk = [int(x) for x in ids[i : i + 500]]
+        marks = ", ".join("?" * len(chunk))
+        found.update((s[0], s) for s in _tags_where(c, f"song.id IN ({marks})", chunk))
+    return [found[i] for i in ids if i in found]
+
+
+def counts_of(c: sqlite3.Connection, folders: Iterable[str]) -> dict[str, int]:
+    """How many songs each of `folders` holds of its own (R3.6.4's every track)."""
+    out: dict[str, int] = {}
+    for folder in set(folders):
+        out[folder] = int(
+            c.execute("SELECT COUNT(*) FROM song WHERE folder = ?", (folder,)).fetchone()[0]
+        )
+    return out
+
+
+def match_folder(
+    c: sqlite3.Connection, folder: str, tried: Sequence[patterns.Pattern] | None = None
+) -> None:
+    """Works out again whether each of a folder's own songs' tags match its path (R3.9), under
+    the pattern detected for the folder (`tried`: the patterns, the user's own first; else those
+    the index keeps and the presets)."""
+    songs = tags_in(c, folder)
+    if not songs:
+        return
+    tried = patterns.patterns_of(user_patterns(c)) if tried is None else tried
+    found = patterns.states([(p, t) for _, p, t in songs], tried)
+    c.executemany(
+        "UPDATE song SET path_state = ?, path_diff = ? WHERE id = ?",
+        [(state, diff_text(diffs), song) for (song, _, _), (state, diffs) in zip(songs, found,
+                                                                                    strict=True)],
+    )  # fmt: skip
+
+
+def worst(states: Iterable[int | None]) -> int | None:
+    """The worst of path-match states (R2.9.5): no tags, then can be fixed, then match; None when
+    none is known."""
+    known = [s for s in states if s is not None]
+    return max(known) if known else None
 
 
 def _image(
@@ -208,11 +336,12 @@ def refresh_one(
     """Summarizes one folder's row again from its own songs and its subfolders' rows (which must
     be current), or removes it when nothing with audio is left beneath it."""
     songs = c.execute(
-        "SELECT artist, album, year, coalesce(length, 0) FROM song WHERE folder = ?", (path,)
+        "SELECT artist, album, year, coalesce(length, 0), path_state FROM song WHERE folder = ?",
+        (path,),
     ).fetchall()
     children = c.execute(
         "SELECT path, name_key, songs_beneath, folders_beneath, length, artist, album, year,"
-        " thumb, mosaic FROM folder WHERE parent = ?",
+        " thumb, mosaic, path_state, path_fix FROM folder WHERE parent = ?",
         (path,),
     ).fetchall()
     if not songs and not children:
@@ -245,6 +374,8 @@ def refresh_one(
         "cover": shown.cover,
         "thumb": shown.thumb,
         "mosaic": " ".join(shown.mosaic) or None,
+        "path_state": worst([s[4] for s in songs] + [r[10] for r in children]),
+        "path_fix": sum(1 for s in songs if (s[4] or 0) > 0) + sum(r[11] for r in children),
     }
     sets = ", ".join(f"{k} = excluded.{k}" for k in COLUMNS)
     c.execute(
@@ -265,7 +396,9 @@ def refresh(
     (A2.7). `images`: each folder's images as the walk found them; a folder it has no key for keeps
     its row's cover image."""
     every: set[str] = set()
-    for path in touched:
+    tried = patterns.patterns_of(user_patterns(c))
+    for path in set(touched):
+        match_folder(c, path, tried)  # R3.9: its songs' states, before it is summarized
         every.add(path)
         every.update(ancestors(path))
     for path in sorted(every, key=lambda p: (-(p.count("/") + bool(p)), p)):

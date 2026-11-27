@@ -37,7 +37,7 @@ from musikata_core.tags import Written
 from .attention import AttentionModel
 from .folders import MODES as folders_modes
 from .folders import SEARCH_HINT as FOLDERS_SEARCH_HINT
-from .folders import FolderView, Remembered
+from .folders import FolderView, Remembered, match_chip
 from .genres import SORT_LABELS as GENRE_SORT_LABELS
 from .genres import GenrePage, GenresModel
 from .models import (
@@ -232,10 +232,12 @@ def kicker(compilation: bool, year: int | None, genre: str | None) -> str:
     return " · ".join(p for p in parts if p)
 
 
-def state_chips(songs: int, embedded: int, folder_image: str | None) -> list[dict[str, str]]:
-    """An album's state chips (R2.6), each its text and tone ("ok", "warn", "info"): the art
-    embedded in its songs, and its folder's cover image. Whether its tags match the path (R3.9)
-    comes with tags from paths (slice 7)."""
+def state_chips(
+    songs: int, embedded: int, folder_image: str | None, path_states: Sequence[int | None] = ()
+) -> list[dict[str, str]]:
+    """An album's state chips (R2.6, L02), each its text and tone ("ok", "warn", "info", "err"):
+    the art embedded in its songs, its folder's cover image, and whether its songs' tags match
+    their paths (R3.9, `path_states`: each song's)."""
     if embedded == songs:
         out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "ok"}]
     elif embedded:
@@ -244,7 +246,8 @@ def state_chips(songs: int, embedded: int, folder_image: str | None) -> list[dic
         out = [{"text": "No art embedded", "tone": "info"}]
     if folder_image:
         out.append({"text": f"{folder_image.rpartition('/')[2]} in folder", "tone": "info"})
-    return out
+    matched = match_chip(path_states)
+    return [*out, matched] if matched else out
 
 
 def page_count_text(parts: Sequence[tuple[int, int, str]], filtered: bool) -> str:
@@ -322,7 +325,17 @@ class AlbumPage(QObject):
                 p for p in (plural(songs, "song"), length_text(length), format_text(groups)) if p
             ),
             "cover": cover_url(thumb),
-            "chips": state_chips(songs, embedded, image),
+            "chips": state_chips(
+                songs,
+                embedded,
+                image,
+                [
+                    r[0]
+                    for r in c.execute(
+                        "SELECT path_state FROM song WHERE album_id = ?", (album_id,)
+                    )
+                ],
+            ),  # fmt: skip
             "average": average_in(c, "album_id = ?", (album_id,)),
         }
         if same:  # read again where it is: after a scan, the list keeps its place

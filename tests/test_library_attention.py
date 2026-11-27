@@ -634,3 +634,46 @@ def test_the_scan_keeps_latin_1_text_and_a_fix_written_takes_the_song_out(index,
                        audio_hash=scanner.audio_hash)  # fmt: skip
     index.write(lambda c: scanner.wrote(c, str(music), [w])).result()
     assert c.execute("SELECT title, latin1, encoding FROM song").fetchone() == ("Маяк", None, None)
+
+
+# ---------- tags that differ from the path (R3.9, R2.8) ----------
+
+
+def test_a_folder_whose_tags_differ_from_its_paths_is_an_entry_about_the_folder(tmp_path):
+    """R2.8's "Tags that differ from the path": an entry a folder, with how many of its files
+    differ and in what; Ignore keeps it by its folder until a file changes; the root's own
+    folder is "."."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    tide, ld = "Lumen Drift/Tide Tables", "Lumen Drift"
+    songs = [
+        (f"{tide}/01 - Neap Tide.flac", Tags(title="Neap Tide", albumartist=ld, album="Tide Tables",
+                                              track=1)),
+        (f"{tide}/02 - Spring Tide.flac", Tags(title="Spring Tide", albumartist="lumen drift",
+                                                album="Tide Tables")),
+        (f"{ld}/Glass Harbor/01 - Tidewater.flac", Tags(title="Tidewater", albumartist=ld,
+                                                         album="Glass Harbor", track=1)),
+        ("Lumen Drift - Ebb.flac", Tags(artist="lumen drift", title="Ebb")),
+    ]  # fmt: skip
+    try:
+        batch = [
+            scanner.Read(scanner.Seen(p, 10, 2_000_000_000 + n), t,
+                         AudioInfo("flac", 60.0, 900, 44100, 2), f"{n}" * 64)
+            for n, (p, t) in enumerate(songs, 1)
+        ]  # fmt: skip
+        index.write(lambda c: scanner.write_batch(c, batch, {})).result()
+        got = [e for e in attention.find(index.read()) if e.kind == attention.PATH]
+        assert [(e.about, e.title, e.counts, e.fields) for e in got] == [
+            (".", "", (1, 1), ("artist",)),
+            ("Lumen Drift/Tide Tables", "Tide Tables", (1, 2), ("albumartist", "track")),
+        ]
+        assert got[1].song is not None and got[1].modified == pytest.approx(2.0, abs=1e-6)
+        assert attention.KINDS[0] == attention.PATH
+        assert attention.folder_of(".") == "" and attention.folder_about("") == "."
+        assert attention.folder_of("A/B") == "A/B"
+        d = attention.dismissal_of(got[1], "2026-11-26T21:00:00Z")
+        assert (d.kind, d.about, d.hash, d.modified) == ("path-differs", tide, None,
+                                                         got[1].modified)  # fmt: skip
+        left = attention.find(index.read(), [d])
+        assert [e.about for e in left if e.kind == attention.PATH] == ["."]
+    finally:
+        index.close()

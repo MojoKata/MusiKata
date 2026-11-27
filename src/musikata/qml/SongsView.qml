@@ -11,12 +11,14 @@ import "."
 // Esc clears it; all of it forwarded to the model, which decides. A double click plays a song, Enter
 // the selection from its first song, the rest of the list after it the queue (R7.1); a right click
 // opens the menu, Play next and Add to queue, for the selection when the row is in it (R7.2); the
-// selection bar counts it and offers Play next and Edit tags, which the menu and Ctrl+E open too (R4.2).
+// selection bar counts it and offers Play next and Edit tags, which the menu and Ctrl+E open too (R4.2),
+// and Infer from path (R3.1), which the menu has too.
 Item {
     id: view
     required property var library
     required property var player
     property var edit: null
+    property var infer: null    // Infer from path's dialog (R3)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var songs: library.songs
     focus: true
@@ -138,7 +140,7 @@ Item {
             }
             ScrollBar.vertical: ScrollBar { }
         }
-        SongMenu { id: songMenu; player: view.player; edit: view.edit }
+        SongMenu { id: songMenu; player: view.player; edit: view.edit; infer: view.infer }
         Connections {
             target: view.songs
             // once the list has taken its rows: a search's come with the selection it waited for
@@ -151,7 +153,12 @@ Item {
             playObjectName: "playNextSelection"
             laterActions: view.songs.laterActions
             editing: view.edit !== null && view.edit.opened
-            onAct: (action) => { if (action === "edit") view.edit.editSelection(view.songs) }
+            onAct: (action) => {
+                if (action === "edit")
+                    view.edit.editSelection(view.songs)
+                else if (action === "infer" && view.infer !== null)
+                    view.infer.openSelection(view.songs)
+            }
             visible: view.songs.selectionCount > 0
             anchors.horizontalCenter: list.horizontalCenter
             anchors.bottom: list.bottom

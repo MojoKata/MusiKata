@@ -6,9 +6,9 @@
 # (docs/process/ci.md, "The Pages site"). Extra args go to the tour (--tour-only L03-songs).
 #
 # The demo library (scripts/demo_library.py) is made in build/demo when it isn't there, or has no
-# change history (R4.9), root's settings (R9.5's same genres), album in one file (R2.8), copy of
-# Signal Fires (R2.12) or album in the wrong encoding (R4.10) yet. It
-# is the home's Music folder in the container, so the screens show ~/Music, as on a new user's
+# change history (R4.9), root's settings (R9.5's same genres, R3.3's pattern of the user's own),
+# album in one file (R2.8), copy of Signal Fires (R2.12) or album in the wrong encoding (R4.10)
+# yet. It is the home's Music folder in the container, so the screens show ~/Music, as on a new user's
 # computer. The tour runs three times, once in each state it has screens for
 # (src/musikata/tour.py): the library; the same root unmounted (X02, R2.10); a first start with
 # nothing configured (X01, R2.1).
@@ -22,7 +22,8 @@ CPY="/src${PYT#"$HERE"}"
 DEMO="$HERE/build/demo"
 OUT="$HERE/build/tour"
 mkdir -p "$DEMO"
-if [ ! -d "$DEMO/Music/.musikata/history" ] || [ ! -f "$DEMO/Music/.musikata/settings.json" ] ||
+if [ ! -d "$DEMO/Music/.musikata/history" ] ||
+    ! grep -q '"patterns"' "$DEMO/Music/.musikata/settings.json" 2>/dev/null ||
     [ ! -f "$DEMO/Music/Mara Okafor/Live at the Lantern/Live at the Lantern.cue" ] ||
     [ ! -f "$DEMO/Music/_Incoming/new rips/Signal Fires.flac" ] ||
     [ ! -d "$DEMO/Music/Ñåâåðíûé Âåòåð/Òèõàÿ Ãàâàíü" ]; then

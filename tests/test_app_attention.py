@@ -737,3 +737,28 @@ def test_needs_attention_loads_from_the_sidebar_and_its_merge_opens_with_no_qml_
     assert find(shell, "attentionAction-folder")
     assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
     assert layout.faults(shell.window) == []
+
+
+def test_a_folder_whose_tags_differ_from_its_paths_says_where_how_many_and_what():
+    """R2.8, R3.9: "Tags that differ from the path", its chip Tags differ from path (L09), an
+    entry a folder with Infer from path and Ignore."""
+    e = Entry(attention.PATH, "Lumen Drift/Tide Tables", "Tide Tables", "Lumen Drift", 3, 7,
+              fields=("artist", "year"), counts=(2, 9))  # fmt: skip
+    row = entry_row(e)
+    assert (row["title"], row["detail"], row["icon"], row["group"]) == (
+        "Tide Tables",
+        "Lumen Drift · 2 of 9 files · Artist and Year",
+        "folder",
+        "paths",
+    )
+    assert [a["name"] for a in row["actions"]] == ["infer", "ignore"]
+    assert row["actions"][0]["label"] == "Infer from path"
+    loose = entry_row(Entry(attention.PATH, ".", "", fields=("title",), counts=(1, 3)))
+    assert loose["title"] == "." and loose["detail"] == "1 of 3 files · Title"
+    assert attention_app.path_detail(Entry(attention.PATH, "A")) == ""
+    group = group_row(attention_app.BY_KEY["paths"], [Entry(attention.PATH, ".", ""), e], False)
+    assert group["title"] == "Tags differ from path"
+    assert group["summary"] == "2 folders · Your music folder, Tide Tables"
+    chips = chips_of({"paths": 6, "copies": 3}, "all")
+    assert [c["label"] for c in chips[:3]] == ["All  9", "Tags differ from path  6",
+                                               "Same song twice  3"]  # fmt: skip

@@ -4,7 +4,9 @@ import "."
 // A folder in Folders' image modes (R2.9.4, L04-folders, L05-folders-large): its cover or mosaic
 // (R5.8), or the dashed No art tile; its name and counts under it. The folder holding the song
 // playing is outlined with the playing mark on its cover; a selected one is outlined in the accent
-// with its checkbox ticked. Under the pointer the checkbox and a play button sit on the cover.
+// with its checkbox ticked. Under the pointer the checkbox and a play button sit on the cover. A dot
+// at its cover's corner says the worst path-match state beneath it (R2.9.5): amber, files can be
+// fixed; red, files have no tags; none when they all match.
 Item {
     id: tile
     signal tapped(int modifiers)
@@ -17,6 +19,7 @@ Item {
     required property bool playing
     required property bool selected
     property bool large: false
+    property string dot: ""             // R2.9.5: "warn", "err", or "" for none
     property alias loading: art.loading
     height: width + (large ? 60 : 56)
     Accessible.role: Accessible.ListItem
@@ -50,6 +53,20 @@ Item {
         source: tile.cover
         emptyText: qsTr("No art")
         emptyIcon: "folder"
+    }
+    Rectangle {  // the worst path-match state beneath it (R2.9.5)
+        objectName: "stateDot"
+        x: tile.width - 12 - width
+        y: 12
+        width: 14
+        height: 14
+        radius: 7
+        visible: tile.dot !== ""
+        color: tile.dot === "err" ? Theme.err : Theme.warn
+        border.color: Theme.bg
+        border.width: 2
+        Accessible.role: Accessible.StaticText
+        Accessible.name: tile.dot === "err" ? qsTr("Files with no tags") : qsTr("Files to fix")
     }
     Icon {  // the playing mark
         x: 12

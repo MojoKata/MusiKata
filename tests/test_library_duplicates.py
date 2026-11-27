@@ -18,6 +18,7 @@ from hypothesis import strategies as st
 
 from musikata_core import attention, db, duplicates, rootfiles, scanner
 from musikata_core.duplicates import Copy, Group
+from musikata_core.patterns import BARE, FIX, MATCH
 from musikata_core.tags import AudioInfo, Tags
 
 H1, H2, H3 = "1" * 64, "2" * 64, "3" * 64
@@ -124,9 +125,9 @@ def test_the_copy_kept_is_lossless_then_the_higher_bit_rate_then_the_path_that_m
                bitrate=256_000, hash=H3)  # fmt: skip
     assert duplicates.keep([low, mp3]) == (mp3, duplicates.BITRATE_WINS)
     filed = copy(4, "Lumen Drift/Glass Harbor/04 - Signal Fires.mp3", kind="mp3",
-                 bitrate=320_000, hash=H1, album="Glass Harbor")  # fmt: skip
+                 bitrate=320_000, hash=H1, album="Glass Harbor", path_state=MATCH)  # fmt: skip
     loose = copy(5, "_Incoming/new rips/track01.mp3", kind="mp3", bitrate=320_000, hash=H2,
-                 album="Glass Harbor", plays=50)  # fmt: skip
+                 album="Glass Harbor", plays=50, path_state=FIX)  # fmt: skip
     assert duplicates.keep([loose, filed]) == (filed, duplicates.PATH_WINS)
     played = copy(6, "b.mp3", kind="mp3", hash=H1, plays=3, title="t")
     rated = copy(7, "a.mp3", kind="mp3", hash=H1, plays=3, rating=4, title="t")
@@ -143,23 +144,20 @@ def test_the_copy_kept_is_lossless_then_the_higher_bit_rate_then_the_path_that_m
 
 def test_exact_copies_bit_rates_are_one_and_r3_9s_seam_takes_another_rule():
     """Copies of one audio differ in bit rate only by their tags' size: the path decides; and the
-    path rule is a parameter, R3.9's to replace (slice 7)."""
+    path rule is a parameter."""
     big_tags = copy(1, "_Incoming/x.flac", kind="flac", bitrate=905_000, hash=H1)
     filed = copy(2, "Lumen Drift/Glass Harbor/04 - Signal Fires.flac", kind="flac",
-                 bitrate=900_000, hash=H1, album="Glass Harbor")  # fmt: skip
+                 bitrate=900_000, hash=H1, album="Glass Harbor", path_state=MATCH)  # fmt: skip
     assert duplicates.keep([big_tags, filed]) == (filed, duplicates.PATH_WINS)
     assert duplicates.keep([big_tags, filed], lambda c: -c.song)[0] is big_tags
 
 
-def test_the_path_matches_as_many_of_its_title_artist_and_album_as_it_holds():
-    """R3.9's stand-in: the title in the file's name, the artist and the album in its folders,
-    case, accents and punctuation aside."""
-    c = copy(1, "Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.flac", album="Glass Harbor")
-    assert duplicates.path_match(c) == 3
-    assert duplicates.path_match(copy(1, "_Incoming/new rips/signal-fires.flac")) == 1
-    assert duplicates.path_match(copy(1, "lumen_drift/track01.flac", album="")) == 1
-    assert duplicates.path_match(copy(1, "x", title="", artist="", album="")) == 0
-    assert duplicates.path_match(copy(1, "Signal Fires")) == 1  # a name without an extension
+def test_the_path_matches_when_r3_9s_state_says_its_tags_agree_with_it():
+    """R3.9's rule through the seam: a copy whose tags match its path counts; one that can be
+    fixed, has no tags, or no pattern fits, doesn't."""
+    assert duplicates.path_matches(copy(1, "a.flac", path_state=MATCH)) == 1
+    for state in (FIX, BARE, None):
+        assert duplicates.path_matches(copy(1, "a.flac", path_state=state)) == 0
 
 
 # ---------- the choice and the plan ----------
@@ -223,8 +221,8 @@ RIP = "_Incoming/new rips/Signal Fires.flac"
 MOON = "Lumen Drift/Tide Tables/04 - Moonpull.flac"
 RADIO = "_Incoming/From Phone/Moonpull (radio).m4a"
 SONGS = [
-    (SIGNAL, Tags(title="Signal Fires", artist=LD, album="Glass Harbor", rating=5), "flac",
-     900_000, 258.0, H1),
+    (SIGNAL, Tags(title="Signal Fires", artist=LD, album="Glass Harbor", albumartist=LD, track=4,
+                  rating=5), "flac", 900_000, 258.0, H1),
     (RIP, Tags(title="Signal Fires", artist=LD, rating=4), "flac", 905_000, 258.0, H1),
     (MOON, Tags(title="Moonpull", artist=LD, album="Tide Tables", rating=4), "flac", 850_000,
      284.0, H2),
@@ -261,8 +259,10 @@ def test_the_groups_are_found_through_the_indexes_with_their_plays_and_ratings(i
         SIGNAL,
         RIP,
     ]
+    # R3.9: the kept copy's tags match its path; no pattern fits the rip's
     assert not signal.likely and signal.why == duplicates.PATH_WINS
     kept = signal.kept
+    assert (kept.path_state, signal.copies[1].path_state) == (MATCH, None)
     assert (kept.kind, kept.bitrate, kept.plays, kept.rating, kept.album) == (
         "flac", 900_000, 53, 5, "Glass Harbor"
     )  # fmt: skip
