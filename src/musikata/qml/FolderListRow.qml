@@ -11,6 +11,7 @@ Rectangle {
     signal activated()
     signal menu()  // a right click: its songs' menu (SongMenu)
     signal toggled()
+    signal rated(int star)  // a star of a file's rating clicked (R10.2)
     required property var columns       // [x, width]: check, name, artist, album, year, rating, time
     required property bool isFolder
     required property string name
@@ -109,6 +110,8 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         visible: !row.isFolder
         rating: row.rating
+        settable: !row.isFolder
+        onClicked: (star) => row.rated(star)
     }
     Cell { column: 6; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }
 }

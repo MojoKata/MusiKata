@@ -396,6 +396,41 @@ def test_the_change_historys_settings_broken_or_in_another_form(tags, want, prob
     assert [p for p in found.problems if problem in p] if problem else not found.problems
 
 
+def test_the_roots_own_settings_give_where_ratings_are_kept_and_their_scale():
+    """R10.3, R10.4.1, R13.3: Write ratings into the files (on), and the rating scale in files
+    (Windows Media, else MusiKata's own), as A2.10 names them."""
+    found = settings.parse_root_tags(json.dumps(ROOT_EXAMPLE))
+    assert (found.write_ratings, found.rating_scale) == (True, "windows-media")
+    beside = settings.parse_root_tags(
+        '{"format": 1, "tags": {"write_ratings": false, "rating_scale": "musikata"}}'
+    )
+    assert (beside.write_ratings, beside.rating_scale, beside.problems) == (False, "musikata", ())
+    assert (settings.RootTags().write_ratings, settings.RootTags().rating_scale) == (
+        True, "windows-media",
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "tags, want, problem",
+    [
+        ({"rating_scale": "Windows Media"}, (True, "windows-media"), None),  # as a person writes it
+        ({"rating_scale": "windows_media"}, (True, "windows-media"), None),
+        ({"rating_scale": " MusiKata "}, (True, "musikata"), None),
+        ({"rating_scale": "itunes"}, (True, "windows-media"), "isn't windows-media or musikata"),
+        ({"rating_scale": 5}, (True, "windows-media"), "isn't windows-media or musikata"),
+        ({"rating_scale": None}, (True, "windows-media"), "isn't windows-media or musikata"),
+        ({"write_ratings": "no"}, (True, "windows-media"), "write_ratings isn't true or false"),
+        ({"write_ratings": 0}, (True, "windows-media"), "write_ratings isn't true or false"),
+        ({"write_ratings": None}, (True, "windows-media"), "write_ratings isn't true or false"),
+    ],
+)
+def test_the_ratings_settings_broken_or_in_another_form(tags, want, problem):
+    """R13.9: a broken value is reported in the log and its default used."""
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": tags}))
+    assert (found.write_ratings, found.rating_scale) == want
+    assert [p for p in found.problems if problem in p] if problem else not found.problems
+
+
 @pytest.mark.parametrize("text", ["", '{"format": 1, "tags": {', "[1, 2]", '﻿{"tags": 5}'])
 def test_a_roots_file_empty_cut_short_or_not_an_object_writes_with_the_defaults(text):
     found = settings.parse_root_tags(text)

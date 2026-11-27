@@ -12,6 +12,7 @@ Rectangle {
     signal tapped(int modifiers)
     signal activated()
     signal menu()
+    signal rated(int star)  // a star of its rating clicked (R10.2)
     required property var columns       // [x, width] of each column: #, title, extra, rating, plays, time
     required property string path
     required property bool playing
@@ -87,6 +88,8 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         rating: row.rating
         size: 12
+        settable: true
+        onClicked: (star) => row.rated(star)
     }
     Cell { column: 4; text: row.plays; horizontalAlignment: Text.AlignRight }
     Cell { column: 5; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }

@@ -257,7 +257,7 @@ def test_four_songs_show_what_they_share_and_whats_mixed(root, panel, qtbot):
     assert field(panel, "title")["placeholder"] == "Mixed: keep each song's own"
     assert [v["text"] for v in field(panel, "artist")["values"]] == ["Lumen Drift", "lumen drift"]
     assert field(panel, "track")["text"] == "/ 9"
-    assert panel.property("rating") == {"stars": 0, "mixed": True}
+    assert panel.property("rating") == {"stars": 0, "mixed": True, "changed": False}
     assert panel.property("artChip") == {"text": "No cover yet", "tone": "warn"}
     assert panel.property("details") == [] and panel.property("keptNote") == ""
     assert not panel.property("canSave") and panel.property("changeLine") == ""
@@ -322,6 +322,28 @@ def test_a_save_writes_each_file_is_one_history_entry_and_its_message_offers_und
                                                    for p in paths])).result()  # fmt: skip
     panel.refresh()  # the rows read again (Library.reloaded): the panel shows them
     qtbot.waitUntil(lambda: field(panel, "artist")["mixed"], timeout=WAIT)
+
+
+def test_the_panels_rating_is_set_by_its_stars_and_saved_with_the_rest(root, panel, qtbot):
+    """R10.2 in the Edit tags panel: songs of different ratings are mixed until a star is
+    clicked; it is a change like any field's (R4.4), saved to every song as one entry, and the
+    star shown clicked again clears it."""
+    music, index, ids, paths = root
+    opened(panel, qtbot, ids)  # rated 1, 2, 3 and 4
+    panel.rate(5)
+    assert panel.property("rating") == {"stars": 5, "mixed": False, "changed": True}
+    assert panel.property("changeLine") == "1 field will change on 4 songs"
+    panel.rate(5)  # the star shown: cleared on every song
+    assert panel.property("rating") == {"stars": 0, "mixed": False, "changed": True}
+    panel.revert()
+    assert panel.property("rating")["mixed"]
+    panel.rate(4)
+    h = panel.history_
+    with qtbot.waitSignal(h.messageChanged, timeout=WAIT):
+        panel.save()
+    assert [tags.read(p)[0].rating for p in paths] == [4, 4, 4, 4]
+    assert h.property("message")["text"] == "Saved 3 files"  # the fourth was rated 4 already
+    assert panel.property("rating") == {"stars": 4, "mixed": False, "changed": False}
 
 
 def test_the_save_is_kept_in_the_history_with_what_it_was(root, panel, qtbot):
@@ -786,6 +808,8 @@ def test_the_windows_shortcuts_do_nothing_behind_a_bulk_tools_dialog(shell, qtbo
     assert h.property("message")["text"] == "Nothing to undo"
     with qtbot.waitSignal(p.changed, timeout=WAIT):
         QTest.keyClick(shell.window, Qt.Key.Key_Space)
+    # the playback thread started: playing, or saying why not, before the window closes
+    qtbot.waitUntil(lambda: p.property("playing") or p.property("failed"), timeout=WAIT)
 
 
 @pytest.mark.slow

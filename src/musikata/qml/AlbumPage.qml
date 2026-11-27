@@ -16,6 +16,7 @@ Item {
     required property var library
     required property var player
     property var edit: null
+    property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var album: library.album
     readonly property var tracks: album.songs
     readonly property bool loading: art.loading
@@ -89,11 +90,18 @@ Item {
             id: detail
             anchors.top: artist.bottom
             anchors.topMargin: 4
-            width: about.width
+            width: Math.min(implicitWidth, about.width - (average.visible ? average.width + 12 : 0))
             elide: Text.ElideRight
             text: page.album.detail
             color: Theme.muted
             font { family: Theme.sans; pixelSize: 13 }
+        }
+        Average {  // the average of its rated songs (R10.1)
+            id: average
+            objectName: "albumAverage"
+            x: detail.width + 12
+            anchors.verticalCenter: detail.verticalCenter
+            value: page.album.average
         }
         Row {
             id: buttons
@@ -191,6 +199,7 @@ Item {
                 onTapped: (modifiers) => page.tapped(index, modifiers)
                 onActivated: page.player.playFrom(page.tracks, index)
                 onMenu: songMenu.openFor(page.tracks, index)
+                onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.tracks, index, star) }
             }
             ScrollBar.vertical: ScrollBar { }
         }

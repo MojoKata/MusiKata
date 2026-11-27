@@ -26,6 +26,7 @@ FIELDS = (*TEXT, *NUMBERS, "year", "genres", "compilation", "rating", "cover")
 # R10.4: the POPM value (user Windows Media Player 9 Series) for 0 to 5 stars
 POPM_VALUES = (0, 1, 64, 128, 196, 255)
 MP4_RATING = "----:com.apple.iTunes:RATING"
+MP4_FMPS = "----:com.apple.iTunes:FMPS_Rating"  # what Clementine and Strawberry write in MP4
 FRONT = 3  # the front cover's picture type, as ID3 and FLAC number them
 UNRATED = ("wav", "aiff")  # R10.4: kinds whose ratings the root's ratings.json keeps, not the file
 
@@ -233,6 +234,15 @@ def id3(change: Change, before: Tags) -> dict[str, list[str]]:
 def popm(stars: int) -> int:
     """R10.4's POPM value for 0 to 5 stars."""
     return POPM_VALUES[stars]
+
+
+MUSIKATA_SCALE = "musikata"  # R10.4.1's setting: MusiKata's own POPM scale
+
+
+def musikata_popm(stars: int) -> int:
+    """MusiKata's own POPM value for 0 to 5 stars (R10.4.1): stars times 51, as
+    parse.musikata_popm_stars reads it."""
+    return stars * 51
 
 
 def id3v23_genres(genres: Sequence[str]) -> list[str]:

@@ -19,7 +19,7 @@ import os
 import random
 import sqlite3
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, Executor
 from typing import Any, Protocol
 
@@ -251,6 +251,26 @@ def page_count_text(parts: Sequence[tuple[int, int, str]], filtered: bool) -> st
     return " · ".join(count_text(shown, total, one, True) for shown, total, one in parts if total)
 
 
+def average_of(total: int | None, rated: int) -> dict[str, object]:
+    """The average of an album's or artist's rated songs (R10.1), for its page: its stars,
+    rounded half up, and in words ("4.3 average of 9 rated songs"); {} when none is rated."""
+    if not rated or not total:
+        return {}
+    mean = total / rated
+    return {
+        "stars": max(1, min(5, int(mean + 0.5))),
+        "text": f"{mean:.1f} average of {plural(rated, 'rated song')}",
+    }
+
+
+def average_in(c: sqlite3.Connection, where: str, params: tuple[object, ...]) -> dict[str, object]:
+    """`average_of` the songs `where` picks."""
+    total, rated = c.execute(
+        f"SELECT SUM(rating), COUNT(*) FROM song WHERE rating > 0 AND ({where})", params
+    ).fetchone()
+    return average_of(total, rated)
+
+
 def _field(name: str, default: object = "") -> Callable[[AlbumPage | ArtistPage], object]:
     """A page's property getter: its value of `name`, `default` before it shows anything."""
     return lambda page: page._values.get(name, default)
@@ -317,6 +337,7 @@ class AlbumPage(QObject):
             ),
             "cover": cover_url(thumb),
             "chips": state_chips(songs, embedded, image),
+            "average": average_in(c, "album_id = ?", (album_id,)),
         }
         if same:  # read again where it is: after a scan, the list keeps its place
             self._songs.refresh()
@@ -347,6 +368,7 @@ class AlbumPage(QObject):
     detail = QtProperty(str, _field("detail"), notify=changed)  # 10 songs · 44 min · FLAC 44.1 kHz
     cover = QtProperty(str, _field("cover"), notify=changed)
     chips = QtProperty(list, _field("chips", []), notify=changed)
+    average = QtProperty(dict, _field("average", {}), notify=changed)  # R10.1; {}: none rated
     songs = QtProperty(QObject, _get_songs, constant=True)
 
 
@@ -400,6 +422,11 @@ class ArtistPage(QObject):
             "name": name,
             "detail": artist_line(albums, songs),
             "tiles": tiles((thumbs or "").split()),
+            "average": average_in(
+                c,
+                "artist_id = ? OR album_id IN (SELECT id FROM album WHERE artist_id = ?)",
+                (artist_id, artist_id),
+            ),
         }
         self.changed.emit()
         return True
@@ -431,6 +458,7 @@ class ArtistPage(QObject):
     name = QtProperty(str, _field("name"), notify=changed)
     detail = QtProperty(str, _field("detail"), notify=changed)  # 3 albums · 41 songs
     tiles = QtProperty(list, _field("tiles", []), notify=changed)
+    average = QtProperty(dict, _field("average", {}), notify=changed)  # R10.1; {}: none rated
     othersTitle = QtProperty(str, _get_others_title, notify=changed)  # "" when it shows none
     albums = QtProperty(QObject, _get_albums, constant=True)
     others = QtProperty(QObject, _get_others, constant=True)
@@ -1095,6 +1123,18 @@ class Library(QObject):
             log.error("couldn't index the files written in %s: %s", self._root, error)
         self.reload()
 
+    @Slot(object)
+    def show_ratings(self, ratings: Mapping[int, int]) -> None:
+        """The ratings being saved, by song id, shown at once in every list of songs (R10.2)."""
+        for model in (self._songs, self._album.property("songs"), self._artist.property("others"),
+                      self._folders.property("model")):  # fmt: skip
+            model.show_ratings(ratings)
+
+    @Slot()
+    def ratings_changed(self) -> None:
+        """Ratings kept beside the files changed (another computer's, R10.3): read again."""
+        self.reload()
+
     @Slot()
     def plays_changed(self) -> None:
         """The play counts changed (R7.9; plays.PlayCounts): the lists of songs read their rows
@@ -1470,6 +1510,7 @@ class Player(QObject):
         self._up_next = UpNextModel(read, self.queue, self)
         self._up_next_open = False
         self._info: SongInfo | None = None  # the shown song's words, when the index has it
+        self._ratings: dict[int, int] = {}  # ratings being saved, by song id (R10.2)
         self._path = ""  # the shown song's path under the root
         self._tickets = itertools.count(1)
         self._requested = 0  # the ticket of the song the engine was last asked to play
@@ -1830,6 +1871,30 @@ class Player(QObject):
         """The words of the song shown, when the index has it (the system's media controls)."""
         return self._info
 
+    def song_id(self) -> int | None:
+        """The song shown, by id, when it is the queue's (None: none, or a file played alone)."""
+        entry = self.queue.current
+        return entry.song if entry is not None and self._info is not None else None
+
+    @Slot(object)
+    def show_ratings(self, ratings: Mapping[int, int]) -> None:
+        """The ratings being saved, by song id: the bar shows the song's at once (R10.2)."""
+        song = self.song_id()
+        before = self._ratings.get(song) if song is not None else None
+        self._ratings = dict(ratings)
+        if song is not None and self._ratings.get(song) != before:
+            self.changed.emit()
+
+    @Slot()
+    def reread(self) -> None:
+        """The index's rows changed (a scan, a save): the song shown read again, its words and
+        rating as they are now."""
+        song = self.song_id()
+        info = self._song(song) if song is not None else None
+        if info is not None and info != self._info:
+            self._info = info
+            self.changed.emit()
+
     def play_file(self, path: str) -> None:
         """Plays the file at `path`, a whole path, from its start, outside the queue (--play)."""
         self._info = None
@@ -2172,6 +2237,9 @@ class Player(QObject):
         return self._info.cover if self._info is not None else ""
 
     def _get_rating(self) -> int:
+        song = self.song_id()
+        if song is not None and song in self._ratings:
+            return self._ratings[song]
         return self._info.rating if self._info is not None else 0
 
     def _get_position_text(self) -> str:

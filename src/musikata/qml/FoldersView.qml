@@ -21,6 +21,7 @@ Item {
     required property var library
     required property var player
     property var edit: null
+    property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
     readonly property string mode: folders.mode
@@ -348,6 +349,7 @@ Item {
                     onActivated: view.folders.activate(cell.index)
                     onToggled: view.rowsModel.toggle(cell.index)
                     onMenu: songMenu.openFor(view.rowsModel, cell.index)
+                    onRated: (star) => { if (view.ratings) view.ratings.rateRow(view.rowsModel, cell.index, star) }
                 }
             }
             Component {

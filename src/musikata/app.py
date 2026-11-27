@@ -29,9 +29,10 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from shiboken6 import Shiboken
 
-from musikata_core import __version__, db, nowplaying, rootfiles, roots, settings, workers
+from musikata_core import __version__, db, history, nowplaying, rootfiles, roots, settings, workers
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
+from musikata_core.ratings import Writing, set_everything
 
 from . import garbage, media
 from .bridges import Library, Player
@@ -41,6 +42,7 @@ from .firstrun import FirstRun, music_folder
 from .history import ChangeHistory
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .plays import PlayCounts
+from .ratings import Ratings, file_writer
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
 FIRST_QML = os.path.join(os.path.dirname(QML), "FirstRun.qml")
@@ -144,6 +146,7 @@ class Shell:
     counts: PlayCounts | None = None
     changes: ChangeHistory | None = None
     edit: EditTags | None = None
+    ratings: Ratings | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -152,7 +155,7 @@ class Shell:
         Shiboken.delete(self.engine)
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
-            self.edit,
+            self.edit, self.ratings,
         )  # fmt: skip
 
 
@@ -164,23 +167,27 @@ def close_bridges(
     controls: media.MediaControls | None = None,
     changes: ChangeHistory | None = None,
     edit: EditTags | None = None,
+    ratings: Ratings | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's save (stopped before its next file) and threads, the
-    play counts (their file written), the change history's thread, the watcher, the scan's thread
-    and the worker processes, and the index; then deletes them (`release`)."""
+    ratings' save and watching, the play counts (their file written), the change history's
+    thread, the watcher, the scan's thread and the worker processes, and the index; then deletes
+    them (`release`)."""
     if controls is not None:
         controls.close()
     player.close()
     if edit is not None:
         edit.close()
+    if ratings is not None:
+        ratings.close()
     if counts is not None:
         counts.close()
     if changes is not None:
         changes.close()
     library.close()
     index.close()
-    release(controls, counts, edit, changes, player, library)
+    release(controls, counts, edit, ratings, changes, player, library)
 
 
 def release(*objects: QObject | None) -> None:
@@ -242,31 +249,37 @@ def load(
         counts = count_plays(player, library, root, index, shared, clock, make)
     # the root's Tags settings (R13.3): the history's, and what a save writes with (R4.7.1, R4.7.2)
     tags_settings = settings.root_tags(root) if not missing else settings.RootTags()
-    changes = keep_history(library, root, index, shared, clock, make, missing, tags_settings)
+    # where each rating goes (R10.3, R10.4): its file, or ratings.json, as the root's settings say
+    index.write(lambda c: set_everything(c, not tags_settings.write_ratings))
+    writing = Writing(root, index, file_writer(tags_settings), tags_settings.write_ratings, clock)
+    changes = keep_history(
+        library, root, index, shared, clock, make, missing, tags_settings, writing
+    )
     edit = EditTags(
-        root, index.read, tags_settings, changes, saved=library.saved, home=home_of(env),
-        available=lambda: bool(library.property("available")),
+        root, index.read, tags_settings, changes, saved=library.saved, write=writing,
+        home=home_of(env), available=lambda: bool(library.property("available")),
     )  # fmt: skip
     library.reloaded.connect(edit.refresh)  # a scan, a save or an undo changed the rows
+    rating = rate_songs(library, player, root, index, writing, changes, clock, missing)
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
     engine.setInitialProperties(
-        {"library": library, "player": player, "history": changes, "edit": edit}
+        {"library": library, "player": player, "history": changes, "edit": edit, "ratings": rating}
     )
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
         Shiboken.delete(engine)
         # none left for a collection (A1.3)
-        close_bridges(player, counts, library, index, changes=changes, edit=edit)
+        close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating)
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit,
+        changes, edit, rating,
     )  # fmt: skip
 
 
@@ -359,12 +372,14 @@ def keep_history(
     make: Callable[[], str | None],
     missing: bool = False,
     tags_settings: settings.RootTags | None = None,
+    writing: Writing | None = None,
 ) -> ChangeHistory:
     """The root's change history (R4.9, A3.5): its entries past their age removed and the rest
     read into the index, off the GUI thread, and read again when another computer adds one; the
     files an undo writes have their rows updated (Library.saved). `make` makes this computer's id
     when it has none (`Once`). A root that isn't there (R2.10) lists what the index has.
-    `tags_settings`: the root's (settings.root_tags), read here when not given."""
+    `tags_settings`: the root's (settings.root_tags), read here when not given. `writing` writes
+    an undo's files, each rating where it is kept (R10.3), and says what a rating is now."""
     changes = ChangeHistory(
         root,
         index,
@@ -375,12 +390,43 @@ def keep_history(
         tags_settings or (settings.root_tags(root) if not missing else settings.RootTags()),
         saved=library.saved,
         watching=not missing,
+        write=writing,
+        look=history.looking(writing.kept) if writing is not None else None,
     )
     if not missing:
         changes.start()
     else:
         changes.reload()
     return changes
+
+
+def rate_songs(
+    library: Library,
+    player: Player,
+    root: str,
+    index: db.Index,
+    writing: Writing,
+    changes: ChangeHistory,
+    clock: Clock,
+    missing: bool = False,
+) -> Ratings:
+    """Rating songs (R10.2) from the lists, the bar and the keys, each save written by `writing`
+    and kept in the change history; the ratings being saved shown at once in the lists and the
+    bar; the root's ratings.json read into the index, off the GUI thread, and again when another
+    computer changes it (R10.3, A2.8), the lists reading their rows again then. A root that isn't
+    there (R2.10) rates nothing, saying why."""
+    rating = Ratings(
+        root, index, writing, changes, clock, saved=library.saved,
+        available=lambda: bool(library.property("available")), watching=not missing,
+    )  # fmt: skip
+    rating.shownChanged.connect(library.show_ratings)
+    rating.shownChanged.connect(player.show_ratings)
+    rating.changed.connect(library.ratings_changed)
+    library.reloaded.connect(rating.reloaded)
+    library.reloaded.connect(player.reread)
+    if not missing:
+        rating.start()
+    return rating
 
 
 @dataclass

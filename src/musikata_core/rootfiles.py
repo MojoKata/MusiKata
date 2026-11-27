@@ -36,6 +36,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Protocol
 
 from . import db, settings
 from .clock import Clock
@@ -89,7 +90,7 @@ def time_text(when: datetime) -> str:
     return when.astimezone(UTC).replace(microsecond=0, tzinfo=None).isoformat() + "Z"
 
 
-def _time(value: object) -> str | None:
+def parse_time(value: object) -> str | None:
     """A time as A2.10 writes it, from `value`; None when it isn't a time with its zone."""
     if not isinstance(value, str):
         return None
@@ -131,7 +132,7 @@ def _entry(value: object, problems: list[str]) -> tuple[Entry, dict[str, object]
     else:
         problems.append(f"{path}: its hash isn't an audio hash: {hash_!r}; found by its path only")
         hash_ = None
-    last = _time(value.get("last"))
+    last = parse_time(value.get("last"))
     if last is None:
         problems.append(f"{path}: last isn't a UTC time: {value.get('last')!r}; not known")
         last = UNKNOWN
@@ -260,11 +261,34 @@ def read_other(musikata: str, computer: str) -> Plays | None:
     return found
 
 
+def path_under(root: str, path: str) -> str | None:
+    """A file's path under the root, with /, as the index holds it; None when it isn't under it
+    (on another drive, on Windows, included)."""
+    try:
+        rel = os.path.relpath(path, root)
+    except ValueError:
+        return None
+    if rel == os.curdir or rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return None
+    return rel.replace(os.sep, "/")
+
+
 # ---------- matching entries to the index ----------
 
 
+class Named(Protocol):
+    """What names a song in a root's own file (A2.8): its path under the root and its audio hash
+    (None: not known)."""
+
+    @property
+    def path(self) -> str: ...
+
+    @property
+    def hash(self) -> str | None: ...
+
+
 def match(
-    entries: Sequence[Entry], by_path: Mapping[str, int], by_hash: Mapping[str, int]
+    entries: Sequence[Named], by_path: Mapping[str, int], by_hash: Mapping[str, int]
 ) -> list[int | None]:
     """The song each entry stands for (A2.8): the song with its path, else the one with its
     audio hash; None when neither is in the index."""
@@ -286,7 +310,7 @@ def _lookup(c: sqlite3.Connection, column: str, values: Iterable[str]) -> dict[s
     return out
 
 
-def find(c: sqlite3.Connection, entries: Sequence[Entry]) -> list[int | None]:
+def find(c: sqlite3.Connection, entries: Sequence[Named]) -> list[int | None]:
     """The song in the index on `c` each entry stands for (`match`)."""
     by_path = _lookup(c, "path", (e.path for e in entries))
     hashes = [e.hash for e in entries if e.hash is not None and e.path not in by_path]

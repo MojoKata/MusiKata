@@ -27,11 +27,12 @@ import sqlite3
 import stat
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from concurrent.futures import Executor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import BinaryIO, Literal
 
-from . import albums, art, db, folders, rootfiles, search, sortnames
+from . import albums, art, db, folders, ratings, rootfiles, search, sortnames
 from .clock import Clock, SystemClock
+from .rootfiles import path_under as path_under  # A2.8's naming, here as ever
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover
 from .tags import read as read_tags
 from .tags.safe import remove_stale
@@ -471,6 +472,7 @@ def _values(r: Read) -> dict[str, object]:
         **_place(r.seen.path),
     }  # fmt: skip
     row.update({name: getattr(t, name) for name in db.FIELDS})
+    row["file_rating"] = t.rating  # the file's; the rating shown is ratings.py's to work out
     return row
 
 
@@ -518,6 +520,7 @@ def write_batch(
         written.append(song_id)
     search.index_songs(c, written)
     rootfiles.link(c, written)  # plays waiting for these songs, by path or hash (A2.8)
+    ratings.link(c, written)  # and ratings kept beside them (R10.3)
     albums.refresh(c, touched, images)
     places |= albums.folders_of(c, touched.albums)  # an album's cover changed through another
     folders.refresh(c, places, images)
@@ -528,32 +531,27 @@ def wrote(c: sqlite3.Connection, root: str, written: Iterable[Written]) -> Resul
     """In the writer's transaction: the rows of the songs MusiKata wrote itself (A2.4; tags.save),
     each updated from what its file was read back as, with the size and modification time the
     write left it with, so no scan reads it again (`plan`). A file outside the root is passed
-    by, and the log says so."""
+    by, and the log says so. A song whose rating ratings.json keeps (R10.3) keeps its file's
+    rating as it was: the rating it reads as is the one kept there (ratings.Writing)."""
     batch = []
+    rule = c.execute("SELECT everything FROM rating_rule").fetchone()
+    write_ratings = not (rule and rule[0])
     for w in written:
         rel = path_under(root, w.path)
         if rel is None:
             log.warning("didn't index %s: it isn't under %s", w.path, root)
             continue
-        batch.append(Read(Seen(rel, w.size, w.mtime_ns), w.tags, w.info, w.audio_hash))
+        t = w.tags
+        if not ratings.in_file(w.info.kind, write_ratings):  # its rating is ratings.json's
+            had = c.execute("SELECT file_rating FROM song WHERE path = ?", (rel,)).fetchone()
+            t = replace(t, rating=had[0] if had is not None else None)
+        batch.append(Read(Seen(rel, w.size, w.mtime_ns), t, w.info, w.audio_hash))
     return write_batch(c, batch, {})
-
-
-def path_under(root: str, path: str) -> str | None:
-    """A file's path under the root, with /, as the index holds it; None when it isn't under it
-    (on another drive, on Windows, included)."""
-    try:
-        rel = os.path.relpath(path, root)
-    except ValueError:
-        return None
-    if rel == os.curdir or rel == os.pardir or rel.startswith(os.pardir + os.sep):
-        return None
-    return rel.replace(os.sep, "/")
 
 
 # a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
 ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
-       "error", *db.FIELDS)  # fmt: skip
+       "error", *db.FIELDS, "file_rating")  # fmt: skip
 
 
 def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched) -> bool:
@@ -584,6 +582,7 @@ def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched
     albums.place(c, keep[0], touched)
     search.index_songs(c, [keep[0]])
     rootfiles.moved(c, keep[0])
+    ratings.link(c, [keep[0]])
     return True
 
 

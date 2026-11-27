@@ -302,6 +302,19 @@ def view_field(
     }
 
 
+def rating_of(field: Mapping[str, Any] | None, typed: str | None) -> dict[str, Any]:
+    """The rating as the panel shows it (R10.1, R10.2): its stars, "Mixed: keep each song's own"
+    while the songs' differ and no star was clicked (R4.3), and whether it will change (R4.4)."""
+    if not field:
+        return {"stars": 0, "mixed": False, "changed": False}
+    text = typed if typed is not None else str(field["text"])
+    return {
+        "stars": int(text) if text.isdigit() else 0,
+        "mixed": bool(field["mixed"]) and typed is None,
+        "changed": bool(field["changed"]),
+    }
+
+
 def is_edit(field: edit.Field, typed: str) -> bool:
     """Whether what is typed into a field is an edit: not what it showed, and for a mixed field,
     not left empty (R4.3)."""
@@ -599,6 +612,14 @@ class EditTags(QObject):
         self._set(name, text)
         self._replan()
 
+    @Slot(int)
+    def rate(self, star: int) -> None:
+        """A star of the rating clicked (R10.2): the songs' rating set to it, or cleared when it
+        is the rating shown already; saved with the rest."""
+        field = self._shown["rating"]
+        shown = self._edits.get("rating", "" if field.mixed else field.text)
+        self.setText("rating", "0" if shown == str(star) else str(star))
+
     @Slot(str, str)
     def pick(self, name: str, value: str) -> None:
         """A value picked from a mixed field's ▾ (R4.3), set on every song."""
@@ -667,7 +688,7 @@ class EditTags(QObject):
         s = self._settings
         return save_tags(
             job.path, job.changes, audio_hash=scanner.audio_hash, id3_version=s.id3_version,
-            keep_mtime=s.keep_modified_times,
+            keep_mtime=s.keep_modified_times, rating_scale=s.rating_scale,
         )  # fmt: skip
 
     @Slot()
@@ -856,9 +877,7 @@ class EditTags(QObject):
         return heading_of(self._songs, self._what)[1]
 
     def _get_rating(self) -> dict[str, Any]:
-        ratings = {s.tags.rating or 0 for s in self._songs}
-        return {"stars": next(iter(ratings)) if len(ratings) == 1 else 0,
-                "mixed": len(ratings) > 1}  # fmt: skip
+        return rating_of(self._fields.get("rating"), self._edits.get("rating"))
 
     def _get_change_line(self) -> str:
         return problem_line(self._problems) or change_line(
@@ -911,7 +930,7 @@ class EditTags(QObject):
     cover = QtProperty(str, lambda self: self._art["cover"], notify=changed)
     artChip = QtProperty(dict, lambda self: self._art["chip"], notify=changed)
     emptyText = QtProperty(str, _get_empty_text, notify=changed)
-    rating = QtProperty(dict, _get_rating, notify=changed)  # read only until R10 (5.7)
+    rating = QtProperty(dict, _get_rating, notify=fieldsChanged)  # R10.2: set by its stars
     details = QtProperty(list, _get_details, notify=changed)  # one song's file (R4.8)
     kept = QtProperty(list, _get_kept, notify=changed)
     keptNote = QtProperty(str, _get_kept_note, notify=changed)

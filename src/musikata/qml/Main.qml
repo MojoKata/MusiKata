@@ -16,13 +16,16 @@ import "."
 // under Change history while that is open; Ctrl+E (⌘E) opens it on the open view's selection, and
 // the views open it from their buttons, selection bars and right-click menus. A bulk tool of its ⋯
 // menu (R4.5) opens its dialog over the whole window. While a modal dialog is open over the window
-// (`modal`: a bulk tool's), the window's shortcuts don't act on what is behind it.
+// (`modal`: a bulk tool's), the window's shortcuts don't act on what is behind it. A star clicked
+// in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
+// selection's (R10.2).
 Window {
     id: win
     required property var library
     required property var player
     required property var history
     required property var edit
+    required property var ratings
     width: 1280
     height: 800
     minimumWidth: 960
@@ -139,11 +142,11 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
     Component { id: artists; ArtistsView { library: win.library } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit } }
-    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
 
     UpNext {
         objectName: "upNext"
@@ -164,6 +167,7 @@ Window {
         objectName: "nowPlayingBar"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         player: win.player
+        ratings: win.ratings
     }
     ToolDialog {
         objectName: "toolOverlay"
@@ -174,6 +178,18 @@ Window {
         sequence: "Ctrl+E"
         enabled: !win.modal
         onActivated: win.edit.editCurrent(win.library)
+    }
+    Repeater {  // Ctrl+0 to Ctrl+5 (⌘ on macOS) rate the selection, Ctrl+0 clearing it (R10.2)
+        model: 6
+        Item {
+            id: rateKey
+            required property int index
+            Shortcut {
+                sequence: "Ctrl+" + rateKey.index
+                enabled: !win.modal
+                onActivated: win.ratings.rateSelection(win.library, rateKey.index)
+            }
+        }
     }
     Shortcut {
         sequences: [StandardKey.Undo]

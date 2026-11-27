@@ -12,6 +12,7 @@ Item {
     required property var library
     required property var player
     property var edit: null
+    property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var artist: library.artist
     readonly property var others: artist.others
     focus: true
@@ -82,14 +83,22 @@ Item {
                 font { family: Theme.sans; pixelSize: 36; weight: Font.Bold }
             }
             Text {
+                id: artistDetail
                 x: kicker.x
                 anchors.top: name.bottom
                 anchors.topMargin: 2
-                width: head.width - x - 12
+                width: Math.min(implicitWidth, head.width - x - 12 - (average.visible ? average.width + 12 : 0))
                 elide: Text.ElideRight
                 text: page.artist.detail
                 color: Theme.muted
                 font { family: Theme.sans; pixelSize: 13 }
+            }
+            Average {  // the average of their rated songs (R10.1)
+                id: average
+                objectName: "artistAverage"
+                x: artistDetail.x + artistDetail.width + 12
+                anchors.verticalCenter: artistDetail.verticalCenter
+                value: page.artist.average
             }
 
             Text {
@@ -152,6 +161,7 @@ Item {
             onTapped: (modifiers) => page.tapped(index, modifiers)
             onActivated: page.player.playFrom(page.others, index)
             onMenu: songMenu.openFor(page.others, index)
+            onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.others, index, star) }
         }
         ScrollBar.vertical: ScrollBar { }
     }

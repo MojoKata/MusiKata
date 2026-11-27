@@ -162,7 +162,27 @@ def _v6(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX change_file_cover ON change_file (cover)")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6]
+def _v7(c: sqlite3.Connection) -> None:
+    """Ratings kept beside the files (R10.3, A2.8): the rating each song's file holds, apart
+    (`song.file_rating`), as `song.rating` becomes the rating shown, which is the song's
+    `.musikata/ratings.json` entry when its ratings are kept there; the entries of that file
+    (`rating`), each by its path and audio hash as the file names it, with its stars and when
+    it was set, and the song it stands for (by that path, else that hash; None until one is); and
+    whether the root keeps every song's rating there (`rating_rule`, R10.3's setting), one row.
+    The ratings shown so far were the files', so nothing needs reading again."""
+    c.execute("ALTER TABLE song ADD COLUMN file_rating")
+    c.execute("UPDATE song SET file_rating = rating")
+    c.execute(
+        "CREATE TABLE rating (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, hash TEXT,"
+        " stars INTEGER NOT NULL, changed TEXT NOT NULL,"
+        " song_id INTEGER REFERENCES song (id) ON DELETE SET NULL)"
+    )
+    c.execute("CREATE INDEX rating_song ON rating (song_id)")
+    c.execute("CREATE TABLE rating_rule (everything INTEGER NOT NULL)")
+    c.execute("INSERT INTO rating_rule VALUES (0)")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6, _v7]
 
 
 def connect(path: str) -> sqlite3.Connection:

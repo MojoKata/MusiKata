@@ -384,6 +384,11 @@ class FolderModel(PagedModel):
             return index_folders.songs_beneath(self._read(), row_["path"])
         return [int(row_["key"]) // 2]
 
+    def song_at(self, n: int) -> int | None:
+        """A file's song, by id (its key is odd); None for a folder's row."""
+        k = self._key_at(n)
+        return k // 2 if k is not None and k % 2 else None
+
     def is_selected(self, n: int) -> bool:
         """Whether row n is selected."""
         return self._key_at(n) in self._selected

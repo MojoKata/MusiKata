@@ -36,17 +36,23 @@ CHUNK = 1 << 20  # bytes copied at a time
 
 
 def apply(
-    path: str, change: compose.Change, before: Tags, id3_version: str = "2.4", name: str = ""
+    path: str,
+    change: compose.Change,
+    before: Tags,
+    id3_version: str = "2.4",
+    name: str = "",
+    rating_scale: str = "windows-media",
 ) -> None:
     """Writes `change` (compose.effective's) into the file at `path`, in place, whose tags read
-    as `before`: MP3s in `id3_version` ("2.4" or "2.3"). `name` is the song's own, whose
-    extension says its kind, for its copy (read.open_song). Raises Mutagen's and the system's
-    errors as they come: safe.py says what they mean."""
+    as `before`: MP3s in `id3_version` ("2.4" or "2.3"), their rating's POPM in `rating_scale`
+    (R10.4's "windows-media", or "musikata", R10.4.1). `name` is the song's own, whose extension
+    says its kind, for its copy (read.open_song). Raises Mutagen's and the system's errors as
+    they come: safe.py says what they mean."""
     kind, f = open_song(path, name or None)
     tags = _tags(f)
     if kind in ("mp3", "wav", "aiff"):
         version = ID3_VERSIONS[id3_version]
-        _id3(tags, change, before, version)
+        _id3(tags, change, before, version, rating_scale)
         if kind == "mp3":
             f.save(v1=1, v2_version=version, v23_sep=V23_SEP)  # v1=1: updated, never added
             _v1_comment(path, tags)
@@ -70,7 +76,13 @@ def _tags(f: Any) -> Any:
 # ---------- ID3 ----------
 
 
-def _id3(tags: mutagen.id3.ID3, change: compose.Change, before: Tags, version: int) -> None:
+def _id3(
+    tags: mutagen.id3.ID3,
+    change: compose.Change,
+    before: Tags,
+    version: int,
+    rating_scale: str = "windows-media",
+) -> None:
     for fid, texts in compose.id3(change, before).items():
         tags.delall(fid)
         if texts:
@@ -82,7 +94,11 @@ def _id3(tags: mutagen.id3.ID3, change: compose.Change, before: Tags, version: i
         if change["comment"]:
             tags.add(mutagen.id3.COMM(encoding=3, lang="eng", desc="", text=[change["comment"]]))
     if "rating" in change:
-        _popm(tags, int(change["rating"]))  # type: ignore[call-overload]
+        stars = int(change["rating"])  # type: ignore[call-overload]
+        if rating_scale == compose.MUSIKATA_SCALE:
+            _musikata_popm(tags, stars)
+        else:
+            _popm(tags, stars)
     if "cover" in change:
         _apic(tags, change["cover"])  # type: ignore[arg-type]
     _versions(tags, version)
@@ -97,6 +113,23 @@ def _popm(tags: mutagen.id3.ID3, stars: int) -> None:
     tags.delall(key)
     if stars or count or tags.getall("POPM"):
         tags.add(mutagen.id3.POPM(email=parse.WMP, rating=compose.popm(stars), count=count))
+
+
+def _musikata_popm(tags: mutagen.id3.ID3, stars: int) -> None:
+    """R10.4.1's setting: the rating in MusiKata's own scale, under the user MusiKata, its play
+    count kept, cleared as `_popm` clears; Windows Media Player's POPM, which a reader prefers
+    (R10.4.1), kept in step when the file has one, so the rating reads back as written."""
+    key = f"POPM:{parse.MUSIKATA}"
+    count = int(getattr(tags[key], "count", 0) or 0) if key in tags else 0
+    tags.delall(key)
+    wmp = f"POPM:{parse.WMP}"
+    if wmp in tags:
+        frame = tags[wmp]
+        frame.rating = compose.popm(stars)
+    if stars or count or tags.getall("POPM"):
+        tags.add(
+            mutagen.id3.POPM(email=parse.MUSIKATA, rating=compose.musikata_popm(stars), count=count)
+        )
 
 
 def _apic(tags: mutagen.id3.ID3, cover: Picture | None) -> None:
@@ -189,6 +222,13 @@ def _mp4(tags: mutagen.mp4.MP4Tags, change: compose.Change, before: Tags) -> Non
             tags.pop(atom, None)
         else:
             tags[atom] = value
+    if "rating" in change:  # another player's FMPS_Rating, which reads where RATING is none
+        stars = int(change["rating"])  # type: ignore[call-overload]
+        for key in [k for k in tags if k.lower() == compose.MP4_FMPS.lower()]:
+            if stars:
+                tags[key] = [mutagen.mp4.MP4FreeForm(f"{stars / 5:.1f}".encode())]
+            else:
+                del tags[key]
     if "cover" in change:
         cover: Picture | None = change["cover"]  # type: ignore[assignment]
         before_covers: list[Any] = list(tags.get("covr") or [])

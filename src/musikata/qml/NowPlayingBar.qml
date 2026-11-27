@@ -3,7 +3,7 @@ import QtQuick.Controls.Basic
 import "."
 
 // The now-playing bar (R6.5, L01-albums), the full width along the bottom: on the left the song's
-// cover, title, artist and album and its rating (set there with slice 5, R10.2); in the centre
+// cover, title, artist and album and its rating, set by its stars (R10.2); in the centre
 // shuffle, previous, play/pause, next and repeat (R7.3), and under them the time played, the seek
 // bar and the length (a plain bar until R11.2's waveform; clicking or dragging it seeks there,
 // R7.4, and it never takes the focus, so ← and → seek whatever has it but a list or a box that
@@ -13,6 +13,7 @@ import "."
 Rectangle {
     id: bar
     required property var player
+    property var ratings: null  // a star clicked rates the song shown (R10.2)
     readonly property bool hasSong: player.path !== ""
     height: 88
     color: Theme.bar
@@ -91,9 +92,12 @@ Rectangle {
         }
         Item { width: 1; height: 5 }
         Stars {
+            objectName: "barRating"
             visible: bar.hasSong && !bar.player.failed
             rating: bar.player.rating
             size: 11
+            settable: bar.ratings !== null
+            onClicked: (star) => bar.ratings.ratePlaying(bar.player, star)
         }
     }
 

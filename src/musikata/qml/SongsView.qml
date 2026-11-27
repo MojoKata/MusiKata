@@ -17,6 +17,7 @@ Item {
     required property var library
     required property var player
     property var edit: null
+    property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var songs: library.songs
     focus: true
 
@@ -133,6 +134,7 @@ Item {
                 onToggled: view.songs.toggle(index)
                 onActivated: view.player.playFrom(view.songs, index)
                 onMenu: songMenu.openFor(view.songs, index)
+                onRated: (star) => { if (view.ratings) view.ratings.rateRow(view.songs, index, star) }
             }
             ScrollBar.vertical: ScrollBar { }
         }

@@ -132,6 +132,23 @@ def test_text_that_cant_be_written_says_why_and_changes_nothing():
     assert problems({"year": "20x2", "title": "x"}) == {"year": "“20x2” isn't a year"}
 
 
+def test_the_rating_is_its_stars_mixed_until_set_and_0_clears_it():
+    """R10.1, R10.2 in the panel: songs of one rating show its stars (none as 0); songs of
+    several are mixed until a star sets it on every one; "0" clears it; anything else can't be
+    written."""
+    rated = [Tags(rating=4), Tags(rating=4), Tags()]
+    assert field_of("rating", rated[:2]).text == "4" and field_of("rating", rated[2:]).text == "0"
+    shown = fields_of(rated)
+    assert shown["rating"].mixed and shown["rating"].text == ""
+    p = plan([(str(i), t) for i, t in enumerate(rated)], {"rating": "4"}, shown)
+    assert p.jobs == (Job("2", {"rating": 4}),) and p.fields == ("rating",)
+    p = plan([(str(i), t) for i, t in enumerate(rated)], {"rating": "0"}, shown)
+    assert [j.changes for j in p.jobs] == [{"rating": 0}, {"rating": 0}]
+    assert plan([("0", rated[0])], {"rating": ""}, shown).jobs == ()  # empty: each its own
+    assert problem("rating", "6") == "“6” isn't 0 to 5 stars" and problem("rating", "x")
+    assert change_of("rating", "9", shown["rating"], rated[2]) == {}
+
+
 @settings(max_examples=50, derandomize=True)
 @given(
     st.lists(st.sampled_from(["Lumen Drift", "lumen drift", "Mara Okafor", None]), min_size=1,

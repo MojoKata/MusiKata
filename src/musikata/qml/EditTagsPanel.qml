@@ -5,7 +5,7 @@ import "."
 // The Edit tags panel (R4.2 to R4.4, R4.6 to R4.8; L03-songs-bulk-edit), docked on the right: its
 // heading and ×, the cover with what is edited ("Tide Tables", "Lumen Drift · 4 songs") and its
 // art's chip; a field for each tag (TagField: shared, or mixed with the values in use), the rating
-// read only (R10 comes with its own piece), and **More fields** (Composer, Comment, the sort names,
+// set by its stars (R10.2), and **More fields** (Composer, Comment, the sort names,
 // Compilation), closed until opened and open from then on. For one song, its file and the tags kept
 // without showing (R4.8), read only. At its foot: R4.2's question when the selection changes, or it
 // closes, with changes not saved; a save's progress with Cancel (R4.7); the files that failed with
@@ -178,11 +178,11 @@ Rectangle {
                 TagField { width: (body.width - 16) * 0.75; edit: panel.edit; name: "title" }
                 TagField { width: (body.width - 16) * 0.25; edit: panel.edit; name: "track" }
             }
-            Item {  // the rating, read only (R10)
+            Item {  // the rating, set by its stars (R10.2): the current star again clears it
                 objectName: "editRating"
                 width: parent.width
                 height: 54
-                Accessible.role: Accessible.StaticText
+                Accessible.role: Accessible.Grouping
                 Accessible.name: qsTr("Rating") + ": " + (panel.edit.rating.mixed ? qsTr("Mixed: keep each song's own") : panel.edit.rating.stars)
                 Text {
                     text: qsTr("Rating")
@@ -195,23 +195,37 @@ Rectangle {
                     height: 34
                     radius: 8
                     color: Theme.input
-                    border.color: Theme.border
+                    border.color: panel.edit.rating.changed ? Theme.accent : Theme.border
+                    border.width: panel.edit.rating.changed ? 1.5 : 1
                     Stars {
+                        id: editStars
+                        objectName: "editStars"
                         x: 12
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: !panel.edit.rating.mixed
                         rating: panel.edit.rating.stars || 0
                         size: 14
+                        settable: true
+                        onClicked: (star) => panel.edit.rate(star)
                     }
-                    Text {
-                        x: 12
+                    Text {  // mixed (R4.3): each song keeps its own until a star is clicked
+                        x: editStars.x + editStars.width + 12
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 24
+                        width: parent.width - x - 24
                         elide: Text.ElideRight
                         visible: panel.edit.rating.mixed === true
                         text: qsTr("Mixed: keep each song's own")
                         color: Theme.faint
                         font { family: Theme.sans; pixelSize: 14 }
+                    }
+                    Rectangle {  // changed (R4.4)
+                        visible: panel.edit.rating.changed === true
+                        width: 7
+                        height: 7
+                        radius: 3.5
+                        color: Theme.accent
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right
+                        anchors.rightMargin: 12
                     }
                 }
             }

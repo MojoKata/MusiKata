@@ -352,6 +352,46 @@ def test_mp4_freeform_atoms_are_kept_and_its_rating_replaced_in_any_case(audio, 
     assert (f["tmpo"], f["pgap"]) == ([120], True)
 
 
+@pytest.mark.slow
+def test_mp4s_fmps_rating_of_another_player_is_kept_in_step_and_cleared_with_it(audio, tmp_path):
+    """R10.4.2: an MP4's FMPS_Rating (Clementine, Strawberry) reads where RATING is none, so a
+    rating written keeps it in step, and a rating cleared takes it out with RATING."""
+    path = _copy(audio, "aac", tmp_path)
+    f = mutagen.mp4.MP4(path)
+    f["----:com.apple.iTunes:FMPS_Rating"] = [mutagen.mp4.MP4FreeForm(b"0.4")]
+    f.save()
+    assert tags.read(path)[0].rating == 2
+    save(path, rating=5)
+    f = mutagen.mp4.MP4(path)
+    assert bytes(f["----:com.apple.iTunes:FMPS_Rating"][0]) == b"1.0"
+    save(path, rating=0)
+    assert not [k for k in mutagen.mp4.MP4(path).tags if "rating" in k.lower()]
+    assert tags.read(path)[0].rating is None
+
+
+@pytest.mark.slow
+def test_musikatas_own_popm_scale_is_written_under_its_name_and_reads_back(audio, tmp_path):
+    """R10.4.1's setting: the rating as MusiKata's own POPM (stars times 51) under the user
+    MusiKata; Windows Media Player's, which a reader prefers, kept in step when the file has it;
+    another program's left alone; cleared, MusiKata's says 0 while another's would read."""
+    path = _copy(audio, "mp3", tmp_path)
+    tags.save(path, {"rating": 4}, audio_hash=scanner.audio_hash, rating_scale="musikata")
+    assert {p.email: p.rating for p in id3.ID3(path).getall("POPM")} == {"MusiKata": 204}
+    assert tags.read(path)[0].rating == 4
+    f = id3.ID3(path)
+    f.add(id3.POPM(email=parse.WMP, rating=64, count=7))
+    f.add(id3.POPM(email="MusicBee", rating=255))
+    f.save(path)
+    tags.save(path, {"rating": 3}, audio_hash=scanner.audio_hash, rating_scale="musikata")
+    popms = {p.email: (p.rating, getattr(p, "count", 0)) for p in id3.ID3(path).getall("POPM")}
+    assert popms == {"MusiKata": (153, 0), parse.WMP: (128, 7), "MusicBee": (255, 0)}
+    assert tags.read(path)[0].rating == 3
+    tags.save(path, {"rating": 0}, audio_hash=scanner.audio_hash, rating_scale="musikata")
+    popms = {p.email: p.rating for p in id3.ID3(path).getall("POPM")}
+    assert popms == {"MusiKata": 0, parse.WMP: 0, "MusicBee": 255}
+    assert tags.read(path)[0].rating == 0
+
+
 def _info_wav(path, *subs):
     with open(path, "rb") as f:
         data = bytearray(f.read())

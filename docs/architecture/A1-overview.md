@@ -123,7 +123,8 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.folders` | library | The folder table and the mosaics' sources (A2.7, R2.9, R5.8) |
 | `musikata_core.attention` | library | Needs attention's views (A2.6, R2.8) |
 | `musikata_core.duplicates` | library | Exact and likely copies, and the best copy (R2.12) |
-| `musikata_core.rootfiles` | library | The root's own files: plays, ratings, dismissals, merged and matched (A2.8, A2.10) |
+| `musikata_core.rootfiles` | library | The root's own files: plays, dismissals, merged and matched, and what naming and matching songs takes for every one of them, `ratings.json` included (A2.8, A2.10) |
+| `musikata_core.ratings` | library | Ratings where they are kept: into the files or the root's `ratings.json`, read, merged and written, the rating each song shows worked out in the index, and a save's writer that puts each rating where it goes (R10, A2.8, A2.10) |
 | `musikata_core.roots` | library | A root's id and finding its index; removing old ones (A2.9) |
 | `musikata_core.nowplaying` | library | What's playing kept across restarts: `now-playing.json` read, matched to the index and written on its rhythm (R1.8, R7.2, A2.8, A2.10) |
 | `musikata_core.settings` | library | The two `settings.json`, their defaults and the split (R13, R13.9, A2.10) |
@@ -156,6 +157,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.bulktools` | app | The Edit tags panel's bulk tools: the ⋯ menu, and a tool's dialog with its options and its preview, saved through the panel (R4.5) |
 | `musikata.preview` | app | The preview of a change to many files' tags before it is saved: each file's old and new values, its checkbox, the footer and Save (R3.7, R3.8; the bulk tools', and Infer from path's) |
 | `musikata.history` | app | The change history in the running app: the entries read and watched, the Change history panel, Ctrl+Z, R4.9.1's question and the message that follows a save, with Undo (R4.9, R6.7) |
+| `musikata.ratings` | app | Ratings in the running app: a star clicked in a list or the now-playing bar, and Ctrl+0 to Ctrl+5 on the selection, saved through the batch and the change history, shown at once and put back when the save fails; the root's `ratings.json` watched and read again (R10.2, R10.3) |
 | `musikata.plays` | app | Play counts in the running app: the player's plays kept, the other computers' play files watched and read again (R7.9, A2.8) |
 | `musikata.media` | app | The system's media controls (A4.5): `MediaControls` over the Player bridge, `controls` (what the system is told and what its commands do, without Qt), and the backends `mpris`, `smtc` and `nowplaying_mac` |
 | `musikata.tour` | app | The tour (A1.6) |

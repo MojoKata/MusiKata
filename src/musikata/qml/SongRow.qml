@@ -12,6 +12,7 @@ Rectangle {
     signal toggled()
     signal activated()
     signal menu()
+    signal rated(int star)  // a star of its rating clicked (R10.2)
     required property var columns       // [x, width] of each column, from SongsView
     required property string path
     required property bool playing
@@ -72,9 +73,12 @@ Rectangle {
     Cell { column: 4; text: row.genre }
     Cell { column: 5; text: row.year || "—"; color: row.year ? Theme.cell : Theme.faint }
     Stars {
+        objectName: "rowStars"
         x: row.columns[6][0]
         anchors.verticalCenter: parent.verticalCenter
         rating: row.rating
+        settable: true
+        onClicked: (star) => row.rated(star)
     }
     Cell { column: 7; text: row.plays; horizontalAlignment: Text.AlignRight }
     Cell { column: 8; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }

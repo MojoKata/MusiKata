@@ -90,11 +90,13 @@ def save(
     id3_version: str = "2.4",
     keep_mtime: bool = False,
     platform: str = sys.platform,
+    rating_scale: str = "windows-media",
 ) -> Written:
     """Writes `changes` (R4.1's fields, as compose.normalize takes them) into the song at `path`
     by A3.4's steps, and says what it reads as now. MP3s are written in `id3_version` ("2.4" or
-    "2.3", R4.7.2); `keep_mtime` keeps the file's modification time (R4.7.1); `audio_hash` is
-    A2.3's (scanner.audio_hash). A change that leaves every field as it was writes nothing.
+    "2.3", R4.7.2), their rating in `rating_scale` (R10.4.1); `keep_mtime` keeps the file's
+    modification time (R4.7.1); `audio_hash` is A2.3's (scanner.audio_hash). A change that
+    leaves every field as it was writes nothing.
     Raises WriteError, the file as it was, when it can't be written; ValueError for changes that
     aren't R4.1's fields, or a rating for a WAV or AIFF file, which R10.4 keeps out of it."""
     normalized = compose.normalize(changes)
@@ -122,7 +124,7 @@ def save(
         step = "copying"
         write.copy(path, tmp, change)
         step = "writing"
-        write.apply(tmp, change, before, id3_version, path)
+        write.apply(tmp, change, before, id3_version, path, rating_scale)
         flush(tmp)
         step = "checking"
         tags, tmp_info = read(tmp, path)

@@ -82,6 +82,30 @@ def test_vorbis_and_mp4_ratings_as_stars_hundredths_or_fmps(rating, fmps, stars)
     assert parse.vorbis_rating(rating, fmps) == stars
 
 
+@pytest.mark.parametrize(
+    ("rating", "fmps", "stars"),
+    [
+        ("5", None, 5), ("6", None, 0), ("0", "1.0", 0), ("2.5", None, 3),  # 5 or less: stars
+        ("10", None, 1), ("30", None, 2), ("50", None, 3), ("70", None, 4), ("90", None, 5),
+        ("150", None, 5), (None, "0.0", 0), (None, "0.5", 3), (None, "0.1", 1), (None, "2", 5),
+        ("", "0.4", 2), (" 60 ", None, 3),
+    ],
+)  # fmt: skip
+def test_ratings_edges_half_stars_round_up_and_rating_wins_over_fmps(rating, fmps, stars):
+    """R10.4.2: RATING of 5 or less is stars and more hundredths (MusicBee's half stars 10 … 90
+    round up), FMPS_RATING 0.0 to 1.0, RATING winning when both are there."""
+    assert parse.vorbis_rating(rating, fmps) == stars
+
+
+def test_mp4_reads_fmps_rating_where_it_has_no_rating():
+    """R10.4.2 for MP4: the freeform FMPS_Rating Clementine and Strawberry write, in any case,
+    read when there is no RATING, which wins when there is."""
+    fmps = {"----:com.apple.iTunes:FMPS_Rating": ["0.6"]}
+    assert parse.from_mp4(fmps).rating == 3
+    both = {**fmps, "----:com.apple.itunes:rating": ["100"]}
+    assert parse.from_mp4(both).rating == 5
+
+
 def test_replaygain_reads_db_and_peaks_in_their_written_forms():
     assert parse.replaygain("-6.20 dB") == -6.2
     assert parse.replaygain("+1.5 dB") == 1.5

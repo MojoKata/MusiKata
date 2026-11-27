@@ -121,8 +121,9 @@ def popm_rating(popms: Sequence[tuple[str, int]]) -> int | None:
 
 def vorbis_rating(rating: str | None, fmps: str | None) -> int | None:
     """RATING as stars when 5 or less and as hundredths when more; FMPS_RATING as 0.0 to 1.0;
-    RATING wins when both are there (R10.4.2). What float reads that isn't a number of stars
-    ("inf", "nan") is no rating."""
+    RATING wins when both are there (R10.4.2). A half star (MusicBee's 10, 30 … 90, or 0.5 …
+    4.5) rounds up. What float reads that isn't a number of stars ("inf", "nan") is no
+    rating."""
     for value, scale in ((rating, None), (fmps, 5.0)):
         try:
             x = float((value or "").strip().replace(",", "."))
@@ -131,7 +132,7 @@ def vorbis_rating(rating: str | None, fmps: str | None) -> int | None:
         if not math.isfinite(x) or x < 0:
             continue
         stars = (x if x <= 5 else x / 20) if scale is None else min(x, 1.0) * scale
-        return max(0, min(5, round(stars)))
+        return max(0, min(5, math.floor(stars + 0.5)))
     return None
 
 
@@ -341,7 +342,7 @@ def from_mp4(
         date=date,
         genres=genres(get("\xa9gen") or ()),
         compilation=compilation,
-        rating=vorbis_rating(freeform("RATING"), None),
+        rating=vorbis_rating(freeform("RATING"), freeform("FMPS_RATING")),
         rg_track_gain=replaygain(freeform("replaygain_track_gain")),
         rg_track_peak=replaygain(freeform("replaygain_track_peak")),
         rg_album_gain=replaygain(freeform("replaygain_album_gain")),
@@ -415,7 +416,7 @@ KNOWN = {
                "COMPILATION", "RATING", "FMPS_RATING", "METADATA_BLOCK_PICTURE", "COVERART",
                "R128_TRACK_GAIN", "R128_ALBUM_GAIN"},
     "mp4": {*MP4.values(), "trkn", "disk", "\xa9day", "\xa9gen", "cpil", "covr",
-            "----:com.apple.itunes:rating"},
+            "----:com.apple.itunes:rating", "----:com.apple.itunes:fmps_rating"},
 }  # fmt: skip
 # what the common keys of other programs are, in words
 KEPT_NAMES = {

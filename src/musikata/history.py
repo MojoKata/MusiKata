@@ -44,7 +44,9 @@ LABELS = {
     "compilation": "Compilation", "rating": "Rating", "artistsort": "Artist sort",
     "albumartistsort": "Album artist sort", "albumsort": "Album sort", "cover": "Cover",
 }  # fmt: skip
-ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo"}  # an entry with no description
+RATE = "rate"  # a save of ratings (R10.2)
+ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs"}  # an entry
+# with no description, by its action
 
 
 # ---------- what the panel, the question and the message say ----------
@@ -212,7 +214,10 @@ class ChangeHistory(QObject):
     off and its days, the ID3 version and modification times an undo writes with. `saved` is told
     of the files an undo wrote (Library.saved), on this thread. The work runs on `executor`, one
     job at a time (its own thread when None); `watching` watches the history folder; `zone` is
-    the local zone the days are in (None: the system's)."""
+    the local zone the days are in (None: the system's). `write` writes a file of an undo
+    (ratings.Writing, so a rating goes back where it is kept; safe.save with the root's settings
+    when None) and `look` reads a file as it is now for R4.9.1 (history.looking; history.current
+    when None)."""
 
     changed = Signal()  # the rows, or whether the panel is open
     messageChanged = Signal()
@@ -237,8 +242,11 @@ class ChangeHistory(QObject):
         zone: tzinfo | None = None,
         message_ms: int = MESSAGE_MS,
         parent: QObject | None = None,
+        write: Callable[[Job], Written] | None = None,
+        look: Callable[[str, bool], history.Current] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._writer, self._look = write, look
         self._root, self._index, self._clock = root, index, clock
         self._computer, self._own, self._own_name = computer, own, own_name
         self._settings, self._saved, self._zone = tags_settings, saved, zone
@@ -369,7 +377,7 @@ class ChangeHistory(QObject):
         """Ctrl+Z / ⌘Z (R4.9, R6.9): the most recent entry still in effect undone."""
         name = history.last(self._index.read())
         if name is None:
-            self._say("Nothing to undo")
+            self.say("Nothing to undo")
             return
         self.undo(name)
 
@@ -389,14 +397,15 @@ class ChangeHistory(QObject):
             return
         self._busy = self._loading = True
         self.changed.emit()
-        root, folder = self._root, self._folder
+        root, folder, look = self._root, self._folder, self._look
 
         def job() -> None:
             entry = history.read(folder, name)
             if isinstance(entry, history.Broken):
                 self._planned.emit(f"This change can't be undone: {entry.why}")
                 return
-            self._planned.emit(history.plan(entry, root, history.finder(self._index.read()), which))
+            find = history.finder(self._index.read())
+            self._planned.emit(history.plan(entry, root, find, which, look or history.current))
 
         self._submit(job)
 
@@ -404,7 +413,7 @@ class ChangeHistory(QObject):
     def _on_planned(self, planned: Plan | str) -> None:
         if isinstance(planned, str):
             self._busy = self._loading = False
-            self._say(planned)
+            self.say(planned)
             self.changed.emit()
             return
         if planned.changed:  # R4.9.1: asked first
@@ -438,12 +447,15 @@ class ChangeHistory(QObject):
         skipped = 0 if overwrite else len(planned.changed)
         what = planned.entry.description or ACTIONS.get(planned.entry.action, "the change")
 
-        def write(job: Job) -> Written:
+        def save_one(job: Job) -> Written:
             return save_tags(
                 job.path, job.changes, audio_hash=scanner.audio_hash,
                 id3_version=tags_settings.id3_version,
                 keep_mtime=tags_settings.keep_modified_times,
+                rating_scale=tags_settings.rating_scale,
             )  # fmt: skip
+
+        write = self._writer or save_one
 
         def job() -> None:
             out = history.undo(planned, root, overwrite, write, record)
@@ -465,14 +477,16 @@ class ChangeHistory(QObject):
 
     # ---------- the message (R6.7) ----------
 
-    def after_save(self, outcome: Outcome[Written]) -> None:
-        """A save finished (the panel's, R3's, …): its message, with Undo when it made an entry."""
-        self._message = {"text": saved_text(outcome), "undo": outcome.entry or ""}
+    def after_save(self, outcome: Outcome[Written], text: str = "") -> None:
+        """A save finished (the panel's, R3's, …): its message (`text`, else `saved_text`), with
+        Undo when it made an entry."""
+        self._message = {"text": text or saved_text(outcome), "undo": outcome.entry or ""}
         self._timer.start()
         self.messageChanged.emit()
         self.refresh()
 
-    def _say(self, text: str) -> None:
+    def say(self, text: str) -> None:
+        """A short-lived message (R6.7) with no Undo: why something can't be done now."""
         self._message = {"text": text, "undo": ""}
         self._timer.start()
         self.messageChanged.emit()
@@ -504,7 +518,7 @@ class ChangeHistory(QObject):
             self._executor.shutdown(wait=True)
             self._executor = None
         self._plan = None
-        self._saved = None
+        self._saved = self._writer = self._look = None
 
     # ---------- what QML reads ----------
 

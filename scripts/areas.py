@@ -57,6 +57,7 @@ CODE = {
             "attention",
             "duplicates",
             "rootfiles",
+            "ratings",
             "roots",
             "nowplaying",
             "settings",

@@ -34,6 +34,7 @@ only when it is done."""
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -627,6 +628,23 @@ def current(path: str, cover: bool) -> Current:
         return Current(tags)
     picture = compose.cover_of(read_pictures(path), info.kind not in ("aac", "alac"))
     return Current(tags, image_hash(picture.data) if picture is not None else None)
+
+
+def looking(
+    kept: Callable[[str], int | None], look: Callable[[str, bool], Current] = current
+) -> Callable[[str, bool], Current]:
+    """`look` for a root whose songs' ratings may be kept beside them (R10.3): a file as it is
+    now, its rating the one `kept` says ratings.json keeps for it (ratings.Writing.kept; None:
+    its file keeps it)."""
+
+    def now(path: str, cover: bool) -> Current:
+        found = look(path, cover)
+        rating = kept(path)
+        if rating is None:
+            return found
+        return Current(dataclasses.replace(found.tags, rating=rating), found.cover)
+
+    return now
 
 
 def lost(change: FileChange, now: Current) -> tuple[Lost, ...]:

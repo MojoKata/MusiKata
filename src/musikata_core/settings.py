@@ -334,6 +334,7 @@ ROOT_DIR = ".musikata"  # the root's own folder (R1.5)
 
 
 HISTORY_DAYS = 90  # R4.9, R13.3: how long the change history keeps an entry, by default
+RATING_SCALES = ("windows-media", "musikata")  # R10.4.1, R13.3: Windows Media the default
 
 
 @dataclass(frozen=True)
@@ -341,13 +342,17 @@ class RootTags:
     """The root's Tags settings (R13.3) that writing tags needs: the ID3 version MP3s are written
     as (R4.7.2), whether a written file keeps its modification time (R4.7.1's "Leave file
     modification times alone", off), and the change history's "Keep a history of tag changes"
-    (`history`, on) and for how many days (`history_days`, 90) (R4.9); what couldn't be used, for
-    the log."""
+    (`history`, on) and for how many days (`history_days`, 90) (R4.9); "Write ratings into the
+    files" (`write_ratings`, on: off keeps every rating in ratings.json, R10.3) and "Rating scale
+    in files" (`rating_scale`, Windows Media's, or MusiKata's own POPM scale, R10.4.1); what
+    couldn't be used, for the log."""
 
     id3_version: str = "2.4"
     keep_modified_times: bool = False
     history: bool = True
     history_days: int = HISTORY_DAYS
+    write_ratings: bool = True
+    rating_scale: str = "windows-media"
     problems: tuple[str, ...] = ()
 
 
@@ -369,11 +374,12 @@ def root_path(root: str) -> str:
 
 
 def parse_root_tags(text: str) -> RootTags:
-    """The `tags` group's id3_version, keep_modified_times, history and history_days in the root's
-    settings.json, `text`, whatever was written there (A2.10): what can't be used is named in
-    `problems` and takes its default (R13.9). A version written as a number (2.3) or with a "v"
-    ("v2.3"), and days written as text ("90") or 90.0, are read as meant; a newer format is read
-    for what it can."""
+    """The `tags` group's id3_version, keep_modified_times, history, history_days, write_ratings
+    and rating_scale in the root's settings.json, `text`, whatever was written there (A2.10): what
+    can't be used is named in `problems` and takes its default (R13.9). A version written as a
+    number (2.3) or with a "v" ("v2.3"), days written as text ("90") or 90.0, and a scale in
+    another case or with a space or "_" ("Windows Media", "MUSIKATA") are read as meant; a newer
+    format is read for what it can."""
     try:
         data = json.loads(text.removeprefix("\ufeff"))
     except ValueError as e:
@@ -409,7 +415,20 @@ def parse_root_tags(text: str) -> RootTags:
             f" {default.history_days}"
         )
         days = default.history_days
-    return RootTags(str(version), keep, history, days, tuple(problems))
+    write_ratings = group.get("write_ratings", default.write_ratings)
+    if not isinstance(write_ratings, bool):
+        problems.append(f"tags.write_ratings isn't true or false: {write_ratings!r}; on")
+        write_ratings = default.write_ratings
+    scale = group.get("rating_scale", default.rating_scale)
+    if isinstance(scale, str):
+        scale = "-".join(scale.strip().lower().replace("_", " ").split())
+    if scale not in RATING_SCALES:
+        problems.append(
+            f"tags.rating_scale isn't windows-media or musikata: {group.get('rating_scale')!r};"
+            " windows-media"
+        )
+        scale = default.rating_scale
+    return RootTags(str(version), keep, history, days, write_ratings, str(scale), tuple(problems))
 
 
 def root_tags(root: str) -> RootTags:

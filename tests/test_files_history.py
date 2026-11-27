@@ -19,11 +19,11 @@ from datetime import UTC, datetime, timedelta
 
 import jsonschema
 import pytest
-from fakes import FakeClock, fill
+from fakes import FakeClock, fill, wav
 from hypothesis import given
 from hypothesis import strategies as st
 
-from musikata_core import db, history, scanner, tags
+from musikata_core import db, history, ratings, scanner, tags
 from musikata_core.history import Broken, Current, Entry, FileChange, Recording
 from musikata_core.tags import AudioInfo, Batch, Job, Picture, Tags, Written
 
@@ -723,3 +723,45 @@ def test_a_cover_set_or_removed_is_put_back_from_the_history(library):
     shutil.rmtree(os.path.join(history.folder_of(root), "images"))
     _, failed = undo(root, i, clock, out.entry)
     assert [f.why for f in failed.failed] == ["its old cover isn't in the change history any more"]
+
+
+def test_a_rating_kept_beside_the_files_is_undone_where_it_is_kept(tmp_path):
+    """R4.9 with R10.3: a WAV's rating, kept in the root's ratings.json, is one entry like any
+    field; undoing it puts the old rating back there (and in the index), and R4.9.1 sees a
+    rating changed since in ratings.json, not in the file."""
+    root = tmp_path / "Music"
+    (root / ".musikata").mkdir(parents=True)
+    path = str(root / "a.wav")
+    wav(path, 3, "Tidewater")
+    i = db.Index(str(tmp_path / "musikata.db"))
+    try:
+        t, info = tags.read(path)
+        size = os.stat(path)
+        read_ = scanner.Read(scanner.Seen("a.wav", size.st_size, size.st_mtime_ns), t, info,
+                             scanner.audio_hash(path, "wav"))  # fmt: skip
+        i.write(lambda c: scanner.write_batch(c, [read_], {})).result()
+        clock = FakeClock(WHEN)
+
+        def write_file(job):
+            return tags.save(job.path, job.changes, audio_hash=scanner.audio_hash)
+
+        w = ratings.Writing(str(root), i, write_file, True, clock)
+        rec = Recording(str(root), lambda: ME, clock)
+        out = Batch([Job(path, {"rating": 4})], w, record=rec, action="rate").run()
+        entry = history.read(history.folder_of(str(root)), out.entry)
+        assert (entry.files[0].old, entry.files[0].new) == ({"rating": 0}, {"rating": 4})
+        look = history.looking(w.kept)
+        assert look(path, False).tags.rating == 4 and look(path, False).tags.title == "Tidewater"
+        clock.advance(seconds=1)
+        w(Job(path, {"rating": 2}))  # rated again since
+        p = history.plan(entry, str(root), history.finder(i.read()), look=look)
+        assert [(x.field, x.now, x.back) for x in p.changed[0].lost] == [("rating", 2, 0)]
+        undone = history.undo(p, str(root), True, w, Recording(str(root), lambda: ME, clock,
+                                                                 entry.name))  # fmt: skip
+        assert undone.failed == [] and w.kept(path) == 0
+        assert i.read().execute("SELECT rating FROM song").fetchone() == (0,)
+        assert ratings.read(ratings.file_of(str(root))).entries[0].stars == 0
+        assert tags.read(path)[0].rating is None  # never in the file
+        assert history.looking(lambda p: None)(path, False).tags.rating is None
+    finally:
+        i.close()

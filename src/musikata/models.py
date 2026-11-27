@@ -20,7 +20,7 @@ import os
 import sqlite3
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from typing import Any
 
 from PySide6.QtCore import Property as QtProperty
@@ -365,6 +365,7 @@ class PagedModel(QAbstractListModel):
         self._generation = 0  # which reload a search's result belongs to
         self._shown = ""  # the search whose rows the list shows
         self._pending = False  # a search sent to the search thread, its rows still to come
+        self._ratings: Mapping[int, int] = {}  # ratings being saved, shown at once (R10.2)
 
     def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
         """The columns selected, the table, the WHERE ("" for none), its parameters, the order."""
@@ -504,6 +505,28 @@ class PagedModel(QAbstractListModel):
         rows = {r[0]: self._row(r[1:]) for r in self._read().execute(sql, ids)}
         return [rows.get(i) for i in ids]  # None for a row gone since they were found
 
+    def song_at(self, n: int) -> int | None:
+        """The song row n stands for, by id; None for a row of no one song (a folder)."""
+        return None
+
+    def rating_at(self, n: int) -> int:
+        """Row n's rating as the list shows it, one being saved included (R10.2); 0 for none."""
+        song = self.song_at(n)
+        if song is not None and song in self._ratings:
+            return self._ratings[song]
+        row = self.row(n)
+        return int(row.get("rating") or 0) if row is not None else 0
+
+    def show_ratings(self, ratings: Mapping[int, int]) -> None:
+        """The ratings being saved, by song id, shown at once in place of the index's until
+        they are saved (R10.2: the list shows a new rating at once, and goes back when it
+        fails)."""
+        if not ratings and not self._ratings:
+            return
+        self._ratings = dict(ratings)
+        if "rating" in self.roles:
+            self._changed("rating")
+
     def _changed(self, role: str) -> None:
         if self._count:
             self.dataChanged.emit(self.index(0), self.index(self._count - 1), [self._role(role)])
@@ -526,6 +549,10 @@ class PagedModel(QAbstractListModel):
         i = role - int(Qt.ItemDataRole.UserRole)
         if not 0 <= i < len(self.roles):
             return None
+        if self._ratings and self.roles[i] == "rating":
+            song = self.song_at(index.row())
+            if song is not None and song in self._ratings:
+                return self._ratings[song]
         row = self.row(index.row())
         return None if row is None else self._value(row, self.roles[i])
 
@@ -617,6 +644,9 @@ class SongsModel(PagedModel):
     def _id_at(self, row: int) -> int | None:
         ids = self._ids or []
         return ids[row] if 0 <= row < min(self._count, len(ids)) else None
+
+    def song_at(self, n: int) -> int | None:
+        return self._id_at(n)
 
     def select(self, where: str, params: tuple[Any, ...]) -> None:
         """Lists the songs `where` picks instead, and reads them."""

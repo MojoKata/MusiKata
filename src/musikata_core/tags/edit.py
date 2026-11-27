@@ -8,7 +8,8 @@ The panel edits text, so a field's value is the text it shows: genres joined wit
 four digits, a number and its total as "4 / 10" (Track, Disc), compilation as "Yes" or "No". What
 the user typed into a field is an edit; a field not edited changes nothing. An edit of a field
 whose values differ (mixed) sets the typed value on every song, and an empty one keeps each song's
-own (R4.3); of a field the songs share, it sets the value, an empty one removing it. Track and
+own (R4.3); of a field the songs share, it sets the value, an empty one removing it. The rating
+is its stars as a digit, "0" to clear it (R10.2), set by its stars, never typed. Track and
 Disc go part by part: a part (the number, the total) the songs don't share keeps each song's own
 unless one is typed for it, so "/ 12" sets the total of an album's songs and keeps their
 numbers."""
@@ -25,13 +26,14 @@ from .batch import Job
 from .fields import Tags
 
 # the panel's fields, in its order (L03-songs-bulk-edit), then those under More fields (R4.2)
-MAIN = ("artist", "album", "genres", "year", "albumartist", "disc", "title", "track")
+MAIN = ("artist", "album", "genres", "year", "albumartist", "disc", "title", "track", "rating")
 MORE = ("composer", "comment", "artistsort", "albumartistsort", "albumsort", "compilation")
 FIELDS = (*MAIN, *MORE)
 TEXT = ("title", "artist", "album", "albumartist", "composer", "comment", "artistsort",
         "albumartistsort", "albumsort")  # fmt: skip
 PAIRS = {"track": ("track", "tracktotal"), "disc": ("disc", "disctotal")}  # a field of two parts
 YES, NO = "Yes", "No"
+STARS = tuple("012345")  # the rating's text: its stars (R10.1)
 _PAIR = re.compile(r"\s*(\d+)?\s*(?:(?:/|of)\s*(\d+)?)?\s*", re.I)
 _YEAR = re.compile(r"\s*\d{4}(?:[-/.]?\d{2}(?:[-/.]?\d{2})?)?\s*")
 
@@ -69,6 +71,8 @@ def text_of(name: str, tags: Tags) -> str:
         return f"{tags.year:04d}" if tags.year else ""
     if name == "compilation":
         return YES if tags.compilation else NO
+    if name == "rating":
+        return str(tags.rating or 0)
     value = getattr(tags, name)
     return value or ""
 
@@ -105,6 +109,8 @@ def problem(name: str, typed: str) -> str | None:
         return f"“{typed.strip()}” isn't a year"
     if name == "compilation" and typed not in (YES, NO):
         return f"“{typed}” isn't {YES} or {NO}"
+    if name == "rating" and typed.strip() not in STARS:
+        return f"“{typed.strip()}” isn't 0 to 5 stars"
     return None
 
 
@@ -125,6 +131,11 @@ def change_of(name: str, typed: str, field: Field, tags: Tags) -> dict[str, obje
         return _pair_change(name, typed, field, tags)
     if blank and field.mixed:
         return {}  # R4.3: leaving a mixed field alone keeps each song's own
+    if name == "rating":
+        if blank:
+            return {}
+        stars = int(typed.strip())
+        return {name: stars} if (tags.rating or 0) != stars else {}
     if name in TEXT:
         new = parse.text([typed])
         return {name: new} if getattr(tags, name) != new else {}
