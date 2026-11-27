@@ -56,11 +56,13 @@ INFER = {
     "icon": "wand",
     "later": "Tags from paths come in a later version",
 }
-# the selection bar's actions (R2.9.6) after Play: Edit tags (R4.2, its `action`), and those that
-# come with later slices, with what their tooltips say; Album art (slice 6) shows only when the
-# songs are one album; the right-click menu holds Play next, Add to queue (R7.2) and Edit tags until
-# the slices that fill the rest, and dragging (R6.10) comes whole with its own
+# the selection bar's actions (R2.9.6) after Play: Edit tags (R4.2) and Album art (R5.2), by their
+# `action`, Album art only when the songs are one album (`selection_actions`), and those that come
+# with later slices, with what their tooltips say; the right-click menu holds Play next, Add to
+# queue (R7.2), Edit tags and Album art (when the row's songs are one album) until the slices that
+# fill the rest, and dragging (R6.10) comes whole with its own
 EDIT = {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"}
+ART = {"label": "Album art", "icon": "image", "later": "", "action": "art"}
 LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
     EDIT,
@@ -71,7 +73,8 @@ LATER = [
     },
     {"label": "Organize…", "icon": "arrow", "later": "Organizing files comes in a later version"},
 ]
-# a folder of songs' buttons (R2.9.7): Edit tags (R4.2), and those of later slices
+# a folder of songs' buttons (R2.9.7): Edit tags (R4.2), Album art (R5.2), and those of later
+# slices
 STRIP_LATER = [
     {
         "label": "Infer from path",
@@ -79,7 +82,7 @@ STRIP_LATER = [
         "later": "Tags from paths come in a later version",
     },
     EDIT,
-    {"label": "Album art", "icon": "image", "later": "Album art comes in a later version"},
+    ART,
 ]
 
 
@@ -117,6 +120,14 @@ def selection_text(folders: int, files: int, songs: int) -> str:
         return f"{plural(songs, 'song')} selected"
     parts = [plural(folders, "folder")] + ([plural(files, "file")] if files else [])
     return " · ".join([*parts, plural(songs, "song")]) + " selected"
+
+
+def selection_actions(one_album: bool) -> list[dict[str, str]]:
+    """The selection bar's actions after Play (R2.9.6), in its order: Album art among them when
+    the songs selected are one album."""
+    if not one_album:
+        return LATER
+    return [*LATER[:-1], ART, LATER[-1]]
 
 
 def where_text(path: str, folder: str) -> str:
@@ -462,6 +473,25 @@ class FolderModel(PagedModel):
         self._changed("selected")
         self.selectionChanged.emit()
 
+    @Slot(int, result=int)
+    def albumAt(self, n: int) -> int:  # noqa: N802
+        """The album the songs row `n` stands for are on, as its right-click menu's Album art opens
+        it (R2.9.6): the selection's when the row is in it; -1 when they aren't one album."""
+        if self.is_selected(n):
+            return self.selected_album()
+        row = self.row(n)
+        if row is None:
+            return -1
+        folders, files = ([row["path"]], []) if row["kind"] == "folder" else ([], [row["path"]])
+        found = index_folders.album_of(self._read(), folders, files)
+        return -1 if found is None else found
+
+    def selected_album(self) -> int:
+        """The album the songs selected are all on (R2.9.6), by id; -1 when they aren't one."""
+        folders, files = self.selected()
+        found = index_folders.album_of(self._read(), folders, files)
+        return -1 if found is None else found
+
     def selected(self) -> tuple[list[str], list[str]]:
         """The folders and files selected that are still there, each by its path, in the list's
         order."""
@@ -750,7 +780,14 @@ class FolderView(QObject):
     artLine = QtProperty(str, _value("artLine"), notify=changed)
     chips = QtProperty(list, _value("chips", []), notify=changed)
     stripButtons = QtProperty(list, lambda self: STRIP_LATER, constant=True)
-    laterActions = QtProperty(list, lambda self: LATER, constant=True)
+    laterActions = QtProperty(
+        list,
+        lambda self: selection_actions(self._model.selected_album() >= 0),
+        notify=selectionChanged,
+    )
+    selectedAlbum = QtProperty(
+        int, lambda self: self._model.selected_album(), notify=selectionChanged
+    )  # -1: none
     selectionText = QtProperty(str, _get_selection_text, notify=selectionChanged)
     selectionCount = QtProperty(int, _get_selection_count, notify=selectionChanged)
     selectionState = QtProperty(str, _get_selection_state, notify=selectionChanged)

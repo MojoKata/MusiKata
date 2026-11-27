@@ -4,18 +4,22 @@ import "."
 
 // A song list's right-click menu (R7.2): Play next and Add to queue, for the row it was opened on
 // (a folder's row stands for its songs), or in a list of songs for the whole selection when that
-// row is in it (the model's songs_at decides); and Edit tags (R4.2, R2.9.6), the same way, when the
-// view gives it the panel. The rest of R2.9.6's comes with the slices that build them.
+// row is in it (the model's songs_at decides); Edit tags (R4.2, R2.9.6), the same way, when the
+// view gives it the panel; and in Folders, Album art (R5.2, R2.9.6) when those songs are one album
+// (the model's albumAt says which). The rest of R2.9.6's comes with the slices that build them.
 Menu {
     id: menu
     required property var player
     property var edit: null           // the Edit tags panel's bridge
+    property var art: null            // the Album art dialog's bridge, in Folders
     property var songs                 // the list's model: what a row's songs are
     property int row: -1
+    property int album: -1             // the album the row's songs are on, -1 for none
 
     function openFor(songs, row) {
         menu.songs = songs
         menu.row = row
+        menu.album = menu.art !== null ? songs.albumAt(row) : -1
         menu.popup()
     }
 
@@ -35,5 +39,12 @@ Menu {
         visible: menu.edit !== null
         height: visible ? implicitHeight : 0
         onTriggered: menu.edit.editRow(menu.songs, menu.row)
+    }
+    MenuItem {
+        objectName: "albumArtRow"
+        text: qsTr("Album art")
+        visible: menu.album >= 0
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.art.openAlbum(menu.album)
     }
 }

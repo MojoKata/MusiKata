@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fakes import FakeClock, FakeEngine, fill
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from musikata import app, bridges, layout, tour
@@ -648,9 +648,9 @@ def find(shell, name):
     return found
 
 
-def click(shell, item):
+def click(shell, item, button=Qt.MouseButton.LeftButton):
     at = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
-    QTest.mouseClick(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at)
+    QTest.mouseClick(shell.window, button, Qt.KeyboardModifier(0), at)
 
 
 def settled(shell, qtbot):
@@ -717,3 +717,26 @@ def test_a_genres_page_loads_and_its_menu_selects_its_songs_with_no_qml_warning(
     assert len(find(shell, "chips-genres")) == 1
     assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
     assert layout.faults(shell.window) == []
+
+
+@pytest.mark.slow
+def test_a_genres_song_list_has_play_next_and_add_to_queue_in_its_menu(shell, qtbot):
+    """R7.2 on a genre's page (R9.1): a right click on one of its songs offers Play next and Add
+    to queue, which queue that song."""
+    lib, p = shell.library, shell.player
+    lib.show("genres")
+    settled(shell, qtbot)
+    lib.selectGenre("Ambient")
+    settled(shell, qtbot)
+
+    def row(title):
+        rows = [r for lst in find(shell, "genreSongs")
+                for r in lst.property("contentItem").childItems()]  # fmt: skip
+        return next((r for r in rows if r.property("title") == title), None)
+
+    qtbot.waitUntil(lambda: row("Slack Water") is not None, timeout=WAIT)
+    click(shell, row("Slack Water"), Qt.MouseButton.RightButton)
+    for name in ("playNext", "addToQueue"):
+        assert shell.window.findChild(QObject, name).property("visible") is True
+    shell.window.findChild(QObject, "addToQueue").triggered.emit()
+    qtbot.waitUntil(lambda: p.property("title") == "Slack Water", timeout=WAIT)  # cued

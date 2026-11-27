@@ -325,3 +325,22 @@ def test_a_selection_of_folders_resolves_to_the_songs_beneath_them(index):
     assert folders.songs_beneath(c, "Nope") == []
     where, params = folders.beneath("path", "")
     assert c.execute(f"SELECT COUNT(*) FROM song WHERE {where}", params).fetchone()[0] == 5
+
+
+def test_a_selection_is_one_album_only_when_every_song_it_stands_for_is_on_it(index):
+    """R2.9.6: Album art is offered for a selection when its songs are one album."""
+    fill(index, [
+        {"path": "LD/GH/01.flac", "album": "Glass Harbor", "artist": "Lumen Drift"},
+        {"path": "LD/GH/02.flac", "album": "Glass Harbor", "artist": "Lumen Drift"},
+        {"path": "LD/TT/01.flac", "album": "Tide Tables", "artist": "Lumen Drift"},
+        {"path": "LD/loose.mp3"},
+    ])  # fmt: skip
+    c = index.read()
+    (glass,) = c.execute("SELECT id FROM album WHERE title = 'Glass Harbor'").fetchone()
+    assert folders.album_of(c, ["LD/GH"], []) == glass
+    assert folders.album_of(c, ["LD/GH"], ["LD/GH/01.flac"]) == glass  # a file inside it, once
+    assert folders.album_of(c, [], ["LD/GH/02.flac"]) == glass
+    assert folders.album_of(c, ["LD/GH", "LD/TT"], []) is None  # two albums
+    assert folders.album_of(c, ["LD/GH"], ["LD/loose.mp3"]) is None  # a song on none
+    assert folders.album_of(c, [], ["LD/loose.mp3"]) is None
+    assert folders.album_of(c, ["Nope"], []) is None and folders.album_of(c, [], []) is None

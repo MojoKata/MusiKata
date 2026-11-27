@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fakes import FakeClock
-from PySide6.QtCore import QBuffer, QMimeData, QPointF, Qt, QUrl
+from PySide6.QtCore import QBuffer, QMimeData, QObject, QPointF, Qt, QUrl
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 
@@ -584,6 +584,20 @@ def test_songs_on_no_album_are_their_own_and_an_album_gone_says_so(root, dialog,
     assert dialog.property("footer") == "" and dialog.property("title") == "Album art"
 
 
+def test_a_folder_of_songs_opens_on_the_album_most_of_them_are_on_else_on_them(root, dialog, qtbot):
+    """R2.9.7's Album art: the folder's songs' album; songs on no album are their own, named as
+    the folder is."""
+    music, index, album_id = root
+    dialog.openFolder("LD/GH", "GH")
+    qtbot.waitUntil(lambda: not dialog.property("loading"), timeout=WAIT)
+    assert dialog.property("title") == "Album art · Glass Harbor"
+    index.write(lambda w: w.execute("UPDATE song SET album_id = NULL")).result()
+    dialog.openFolder("LD/GH", "GH")
+    qtbot.waitUntil(lambda: not dialog.property("loading"), timeout=WAIT)
+    assert dialog.property("title") == "Album art · GH"
+    assert albumart.songs_in(index.read(), "LD") == []
+
+
 def test_what_cant_be_read_is_passed_by_and_logged(tmp_path, caplog):
     music = tmp_path / "Music"
     (music / "A").mkdir(parents=True)
@@ -661,9 +675,9 @@ def find(shell, name):
     return found
 
 
-def click(shell, item):
+def click(shell, item, button=Qt.MouseButton.LeftButton):
     at = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
-    QTest.mouseClick(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at)
+    QTest.mouseClick(shell.window, button, Qt.KeyboardModifier(0), at)
 
 
 def settled(shell, qtbot):
@@ -709,6 +723,49 @@ def test_album_art_opens_from_an_albums_page_saves_and_closes_with_no_qml_warnin
     find(shell, "artDialog")[0].forceActiveFocus()
     QTest.keyClick(shell.window, Qt.Key.Key_Escape)
     assert not a.property("opened")
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
+
+
+@pytest.mark.slow
+def test_album_art_opens_from_folders_bar_menu_and_strip_with_no_qml_warning(shell, qtbot, qtlog):
+    """R2.9.6 and R2.9.7 in the window: Folders' selection bar and a row's right-click menu offer
+    Album art when the songs are one album, and a folder of songs' strip has it; each opens the
+    dialog on that album."""
+    lib, a = shell.library, shell.art
+    folders = lib.property("folders")
+    lib.show("folders")
+    folders.open("Lumen Drift")
+    folders.select_paths(["Lumen Drift/Glass Harbor"])
+    qtbot.waitUntil(lambda: bool(find(shell, "artSelection")), timeout=WAIT)
+    click(shell, find(shell, "artSelection")[0])
+    qtbot.waitUntil(lambda: a.property("opened") and not a.property("loading"), timeout=WAIT)
+    assert a.property("title") == "Album art · Glass Harbor"
+    settled(shell, qtbot)
+    a.close()
+    folders.property("model").clearSelection()
+    folders.setMode("list")
+
+    def row():
+        found = [r for r in find(shell, "folderListRow") if r.property("name") == "Glass Harbor"]
+        return found[0] if found else None
+
+    qtbot.waitUntil(lambda: row() is not None, timeout=WAIT)
+    click(shell, row(), Qt.MouseButton.RightButton)
+    item = shell.window.findChild(QObject, "albumArtRow")
+    qtbot.waitUntil(lambda: item.property("visible") is True, timeout=WAIT)
+    item.triggered.emit()
+    qtbot.waitUntil(lambda: a.property("opened") and not a.property("loading"), timeout=WAIT)
+    assert a.property("title") == "Album art · Glass Harbor"
+    settled(shell, qtbot)
+    a.close()
+    folders.open("Lumen Drift/Glass Harbor")  # a folder of songs (R2.9.7)
+    qtbot.waitUntil(lambda: bool(find(shell, "folderArt")), timeout=WAIT)
+    click(shell, find(shell, "folderArt")[0])
+    qtbot.waitUntil(lambda: a.property("opened") and not a.property("loading"), timeout=WAIT)
+    assert a.property("title") == "Album art · Glass Harbor"
+    settled(shell, qtbot)
+    assert layout.faults(shell.window) == []
+    a.close()
     assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
 
 

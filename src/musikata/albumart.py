@@ -206,6 +206,13 @@ def target_of_songs(c: sqlite3.Connection, ids: Sequence[int], title: str) -> Ta
     return Target(title, tuple(paths), folder=folder)
 
 
+def songs_in(c: sqlite3.Connection, folder: str) -> list[int]:
+    """The ids of the songs in `folder` itself (a path under the root), by name."""
+    return [i for (i,) in c.execute(
+        "SELECT id FROM song WHERE folder = ? ORDER BY name_key, path", (folder,)
+    )]  # fmt: skip
+
+
 def read_songs(
     root: str, paths: Sequence[str], pictures: Callable[[str], list[Any]] = read_pictures
 ) -> list[art.SongArt]:
@@ -405,6 +412,12 @@ class AlbumArt(QObject):
         """The Edit tags panel's cover: the album most of the songs edited are on, else them."""
         wanted = [int(i) for i in ids]
         self._open_on(lambda c: target_of_songs(c, wanted, title))
+
+    @Slot(str, str)
+    def openFolder(self, path: str, name: str) -> None:  # noqa: N802
+        """A folder of songs' Album art (R2.9.7): the album most of its songs are on, else them
+        (named `name`)."""
+        self._open_on(lambda c: target_of_songs(c, songs_in(c, path), name))
 
     @Slot(int, "QVariantList")
     def dropOnAlbum(self, album_id: int, urls: list[Any]) -> None:  # noqa: N802
