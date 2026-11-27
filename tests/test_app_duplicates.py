@@ -13,7 +13,7 @@ import dataclasses
 import json
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import mutagen.id3
@@ -151,6 +151,24 @@ def test_the_bar_the_question_and_the_message_name_what_goes():
         "Moved 0 of 1 song to the trash: b.mp3 isn't there any more"
     )
     assert moved_text(0, []) == "Nothing was moved to the trash"
+    # what was done after the files went, when a step of it failed
+    assert moved_text(1, [], listed=True) == (
+        "Moved 1 song to the trash. It stays listed until the library's next scan. The copies"
+        " kept have their plays and rating; Undo can't take files out of the trash"
+    )
+    assert moved_text(2, [], listed=True, plays=False) == (
+        "Moved 2 songs to the trash. They stay listed until the library's next scan. The copies"
+        " kept have their rating, but moving their plays to them failed; Undo can't take files"
+        " out of the trash"
+    )
+    assert moved_text(2, [], rating=False) == (
+        "Moved 2 songs to the trash. The copies kept have their plays, but writing their rating"
+        " failed; Undo can't take files out of the trash"
+    )
+    assert moved_text(1, [], plays=False, rating=False) == (
+        "Moved 1 song to the trash. Moving their plays to the copies kept and writing their"
+        " rating failed; Undo can't take files out of the trash"
+    )
     assert undone_text(Outcome(), "Signal Fires", in_trash=1) == (
         "Undone: Signal Fires; 1 file moved to the trash stays there"
     )
@@ -493,7 +511,12 @@ def test_the_tour_opens_a_groups_review_and_its_question(root, tmp_path, qtbot):
     assert not d._available()
 
 
-def test_a_move_that_breaks_is_logged_and_its_message_says_so(root, tmp_path, qtbot, caplog):
+def test_a_move_whose_rows_cant_be_taken_out_says_the_files_went_and_gives_the_rest(
+    root, tmp_path, qtbot, caplog
+):
+    """The index failing after the files went to the trash: the message says they went and stay
+    listed until the next scan (scanner.scan takes out the songs whose file is gone), and the
+    copy kept still takes their plays and rating, in an entry Undo can reverse."""
     music, index, paths, rel, ids = root
 
     def broken(paths_):
@@ -504,11 +527,57 @@ def test_a_move_that_breaks_is_logged_and_its_message_says_so(root, tmp_path, qt
     try:
         with qtbot.waitSignal(d.history_.messageChanged, timeout=WAIT):
             ask_and_move(d, qtbot, about="all")
-        assert "weren't moved: the index is gone" in d.history_.property("message")["text"]
-        assert "moving copies to the trash failed" in caplog.text
+        message = d.history_.property("message")
+        assert message["text"] == (
+            "Moved 1 song to the trash. It stays listed until the library's next scan. The copies"
+            " kept have their plays and rating; Undo can't take files out of the trash"
+        )
+        assert message["undo"]
+        assert "couldn't be taken out of the library" in caplog.text
+        assert not os.path.exists(paths["rip"])
+        c = index.read()
+        assert c.execute("SELECT 1 FROM song WHERE path = ?", (rel["rip"],)).fetchone()
+        signal = ids[rel["signal"]]
+        assert rootfiles.totals(c, [signal]) == {signal: 7} and d.w_.kept(paths["signal"]) == 5
     finally:
         d.shut()
         d.history_.close()
+
+
+def test_a_move_whose_plays_or_rating_fail_says_so_and_the_files_still_went(root, tmp_path):
+    """Giving the plays failing (a job of rootfiles.Keeping that broke gives None; another way
+    raises) and the rating not written: the files went all the same, and Moved says which steps
+    didn't run, for the message."""
+    music, index, paths, rel, ids = root
+    exact, likely = sorted(duplicates.found(index.read()), key=lambda g: g.likely)
+    trash = Trash(str(tmp_path / "Trash"))
+
+    def broke(fn):
+        done = Future()
+        done.set_result(None)
+        return done
+
+    def raised(fn):
+        done = Future()
+        done.set_exception(OSError("the play counts are closed"))
+        return done
+
+    def refused(job):
+        raise tags_core.WriteError(job.path, "it is read-only")
+
+    w = ratings.Writing(music, index, write_file, True, FakeClock(NOW))
+    remove = copies_app.remover(music, index)
+    plan = duplicates.plan(likely, ids[rel["moon"]], {ids[rel["radio"]]})
+    out = copies_app.move(music, [plan], trash, remove, refused, None, broke)
+    assert [c.path for c in out.trashed] == [rel["radio"]] and not os.path.exists(paths["radio"])
+    assert out.plays_left and out.plays == 0 and len(out.outcome.failed) == 1
+    mine = {e.path: e.count for e in rootfiles.own(index.read(), ME)}
+    assert (mine[rel["moon"]], mine[rel["radio"]]) == (3, 4)  # the plays where they were
+    assert w.kept(paths["moon"]) == 2
+    plan = duplicates.plan(exact, ids[rel["signal"]], {ids[rel["rip"]]})
+    out = copies_app.move(music, [plan], trash, remove, w, None, raised)
+    assert out.plays_left and not out.outcome.failed and w.kept(paths["signal"]) == 5
+    assert not out.listed
 
 
 def test_plays_are_given_back_only_for_this_computers_entries(root):
