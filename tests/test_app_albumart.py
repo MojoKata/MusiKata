@@ -129,12 +129,12 @@ def test_an_image_that_cant_be_used_is_prepared_with_why_never_an_error(qapp, da
     assert ready.forms is None and ready.thumb.isNull() and ready.problem.startswith(why)
 
 
-# The dialog's thread decodes while a cover is decoded on another thread holding the GIL, as
-# QML's pixmap reader does in covers.Covers (QImage.fromData keeps the GIL while it decodes):
-# Qt's reader takes a mutex of its own to find the image's handler, so a decode there that
-# called into Python (a Python-made QBuffer's methods take the GIL) waited on the GIL while the
-# other waited on that mutex, and neither ever ran again. In a process of its own, as a deadlock
-# can't be ended from inside it.
+# The dialog's thread decodes while a cover is decoded on another thread, as QML's pixmap reader
+# does in covers.Covers: Qt's reader takes a mutex of its own to find the image's handler, so a
+# decode there that called into Python (a Python-made QBuffer's methods take the GIL) waited on
+# the GIL while a cover decoded with the GIL held (QImage.fromData, as covers.thumbnail once did)
+# waited on that mutex, and neither ever ran again. In a process of its own, as a deadlock can't
+# be ended from inside it. (test_app_covers.py has the other side: a decode that holds the GIL.)
 CROSSED = """
 import sys, threading
 from PySide6.QtGui import QGuiApplication

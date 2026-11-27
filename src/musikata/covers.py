@@ -29,8 +29,8 @@ import sqlite3
 import tempfile
 from collections.abc import Callable, Collection
 
-from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QByteArray, QDataStream, QRect, QSize, Qt
+from PySide6.QtGui import QImage, QImageReader, QPainter
 from PySide6.QtQuick import QQuickImageProvider
 
 from musikata_core import art, folders, tags
@@ -117,7 +117,9 @@ def gap_for(side: int) -> int:
 def draw_mosaic(pieces: list[QImage], side: int) -> QImage:
     """A square mosaic `side` pixels wide of up to four pictures in R5.8's layout, each a centre
     crop with a transparent gap between them; a piece that is empty leaves its place empty, and
-    with none to draw the image is empty."""
+    with none to draw the image is empty. Scaling and painting hold the GIL while Qt works (a few
+    milliseconds at most), but take no lock a thread waiting on the GIL can hold (coding.md,
+    "Threads and processes")."""
     if not any(not p.isNull() for p in pieces):
         return QImage()
     image = QImage(side, side, QImage.Format.Format_ARGB32_Premultiplied)
@@ -149,20 +151,36 @@ def side_for(requested: QSize) -> int:
     return next((s for s in SIZES if s >= want), SIZES[-1])
 
 
+def decoded(data: bytes, scaled: QSize | None = None) -> QImage:
+    """`data`, an image in any format Qt reads, decoded (at `scaled` when given, smoothly); an
+    empty image when it can't be. Safe on any thread: Qt decodes, and scales, inside
+    QImageReader.read, which PySide runs with the GIL released, from a buffer Qt made itself
+    (QDataStream's), so nothing in it calls into Python (coding.md, "Threads and processes")."""
+    stream = QDataStream(QByteArray(data))  # its QBuffer is Qt's own: no call on it runs Python
+    reader = QImageReader(stream.device())
+    if scaled is not None:
+        reader.setScaledSize(scaled)
+    image = reader.read()
+    del reader  # before the stream, whose buffer it reads
+    return image
+
+
 def thumbnail(data: bytes, side: int) -> QImage:
     """`data`, an image in any format Qt reads, scaled so its shorter side is `side` (never up);
-    an empty image when it can't be decoded."""
-    image = QImage.fromData(data)
-    if image.isNull():
-        return QImage()
-    if min(image.width(), image.height()) > side:
-        image = image.scaled(
-            side,
-            side,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-    return image
+    an empty image when it can't be decoded. Scaled as it is decoded (`decoded`), to the size its
+    header gives (art.sniff); an image of another kind (GIF, BMP…) is decoded whole first for its
+    size."""
+    info = art.sniff(data)
+    if info is not None:
+        size = QSize(info.width, info.height)
+    else:
+        whole = decoded(data)
+        if whole.isNull() or min(whole.width(), whole.height()) <= side:
+            return whole
+        size = whole.size()
+    if min(size.width(), size.height()) <= side:
+        return decoded(data)
+    return decoded(data, size.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatioByExpanding))
 
 
 class Covers(QQuickImageProvider):
@@ -244,7 +262,7 @@ class Covers(QQuickImageProvider):
         for ext in (".jpg", ".png"):
             path = os.path.join(self._cache, f"{name}-{side}{ext}")
             if os.path.exists(path):
-                cached = QImage(path)
+                cached = QImage(path)  # Qt's own file, with the GIL released
                 if not cached.isNull():
                     return cached
         return None
@@ -270,7 +288,8 @@ class Covers(QQuickImageProvider):
             os.makedirs(self._cache, exist_ok=True)
             fd, tmp = tempfile.mkstemp(suffix=ext, dir=self._cache)
             os.close(fd)
-            # PySide6 takes the format as str, though its stubs say bytes (bytes raise ValueError)
+            # to a path: Qt's own file, with the GIL released. PySide6 takes the format as str,
+            # though its stubs say bytes (bytes raise ValueError)
             if image.save(tmp, fmt, 88):  # type: ignore[call-overload]
                 os.replace(tmp, os.path.join(self._cache, f"{name}-{side}{ext}"))
             else:

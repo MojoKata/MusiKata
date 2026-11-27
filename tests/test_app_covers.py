@@ -9,6 +9,8 @@ and a thumbnail made again on every scroll would keep the disk busy for nothing.
 import logging
 import os
 import shutil
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -20,6 +22,8 @@ from PySide6.QtGui import QColor, QImage
 from musikata import bridges, covers
 from musikata_core import albums, art, db, scanner
 from musikata_core.tags import Picture, TagReadError
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
 def encoded(w, h, fmt="JPEG", color="#3366cc", alpha=False):
@@ -54,6 +58,64 @@ def test_a_small_cover_is_kept_at_its_size_and_a_tall_one_scaled_by_its_width(qa
 def test_what_isnt_an_image_gives_an_empty_one(qapp):
     assert covers.thumbnail(b"", 256).isNull()
     assert covers.thumbnail(b"\xff\xd8\xff not really a jpeg", 256).isNull()
+
+
+@pytest.mark.parametrize("fmt", ["BMP", "PPM"])
+def test_a_cover_of_a_kind_whose_header_isnt_read_is_scaled_too(qapp, fmt):
+    image = covers.thumbnail(encoded(1200, 800, fmt), 256)
+    assert (image.width(), image.height()) == (384, 256)
+    assert covers.thumbnail(encoded(100, 60, fmt), 256).size() == QSize(100, 60)
+
+
+# A cover is decoded while another thread holds one of the locks Qt takes as it decodes and waits
+# on the GIL. So it is in the app: QML's garbage collector, on the GUI thread, disconnects from a
+# Python-made object holding Qt's connection lock, and PySide takes the GIL there
+# (disconnectNotify); the probe that finds a PNG's handler connects a QTextStream of its own,
+# under that lock. Here the lock held is the image loader's, which every decode takes, so the
+# test never depends on which of the connection lock's buckets two objects fall in: a reader on a
+# Python-made QBuffer holds it while it calls into Python. A decode that kept the GIL while Qt
+# worked (QImage.fromData) waited on that lock holding the GIL, and neither thread ran again. In
+# a process of its own, as a deadlock can't be ended from inside it.
+HELD = """
+import sys, threading
+from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtGui import QGuiApplication, QImageReader
+from musikata import albumart, covers
+app = QGuiApplication([])
+data = open(sys.argv[1], "rb").read()
+inside = threading.Event()
+def holder():
+    device = QBuffer()  # made in Python: each call Qt's reader makes on it takes the GIL
+    device.setData(data)
+    device.open(QIODevice.OpenModeFlag.ReadOnly)
+    reader = QImageReader(device)
+    inside.set()
+    reader.read()  # the GIL let go, the loader's lock held while the probes call the device
+holding = threading.Thread(target=holder)
+holding.start()
+inside.wait()
+sum(range(4_000_000))  # the GIL held in one C call, so the holder comes to wait on it
+{decode}
+holding.join()
+"""
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("decode", ["covers.thumbnail(data, 256)", "albumart.decode(data)"])
+def test_a_cover_decoded_while_another_thread_holds_qts_lock_and_waits_on_the_gil_never_deadlocks(
+    tmp_path, decode
+):
+    path = tmp_path / "cover.png"
+    path.write_bytes(encoded(600, 400, "PNG"))
+    src = os.pathsep.join(p for p in (os.path.join(ROOT, "src"), os.environ.get("PYTHONPATH")) if p)
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PYTHONPATH=src)
+    script = HELD.replace("{decode}", decode)
+    try:
+        done = subprocess.run([sys.executable, "-c", script, str(path)], env=env,
+                              capture_output=True, text=True, timeout=30)  # fmt: skip
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{decode} deadlocked with the thread holding Qt's lock")
+    assert done.returncode == 0, done.stderr
 
 
 @pytest.fixture

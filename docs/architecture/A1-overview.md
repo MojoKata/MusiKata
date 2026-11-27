@@ -151,7 +151,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.selection` | app | A song list's selection, by song id, with its anchor and current row: clicks and keys as the lists take them, without Qt (R2.6, R7.1) |
 | `musikata.firstrun` | app | The first start: the root dropped, chosen or the platform's music folder (R2.1, X01-first-run) |
 | `musikata.folders` | app | The Folders view: its model, the open folder, the selection (R2.9, A2.7) |
-| `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |
+| `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7), and how an image is decoded off the GUI thread (`decoded`, which the Album art dialog uses too) |
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
 | `musikata.edittags` | app | The Edit tags panel in the running app: what it edits and follows, its fields, suggestions, saving through the batch with progress, Cancel and Retry, and one song's file (R4.2 to R4.4, R4.6 to R4.8) |
