@@ -12,7 +12,10 @@ import "."
 // Edit tags and Infer from path. Its songs are dragged (R8.5, R6.10), the selection when the row is
 // in it: within it to reorder, with the insertion line where they land, onto a playlist or the
 // queue, or out as their files; Ctrl+Shift+↑ / ↓ moves the songs selected (R6.9, R18.2). A file
-// manager's files dropped on it are added at its end.
+// manager's files dropped on it are added at its end. A smart playlist's (R8.9) says "SMART
+// PLAYLIST", shows its rule in words under the line and Edit rule beside Export…; its rows have no
+// drag handles, nothing dropped on it is taken (the message says why), and Remove from playlist
+// isn't offered.
 Item {
     id: page
     required property var library
@@ -22,6 +25,7 @@ Item {
     property var infer: null
     property var playlists: null
     property var dragging: null       // drag and drop (musikata.dragging): reordering, dropping
+    property var smart: null          // Edit rule (musikata.smart, R8.9)
     readonly property var playlist: library.playlistPage
     readonly property var songs: playlist.songs
     focus: true
@@ -68,7 +72,7 @@ Item {
         header: Item {
             id: head
             width: list.width
-            height: art.y + art.height + 24 + 34
+            height: Math.max(art.y + art.height, buttons.y + buttons.height) + 24 + 34
 
             Mosaic {
                 id: art
@@ -112,9 +116,23 @@ Item {
                 color: Theme.muted
                 font { family: Theme.sans; pixelSize: 13 }
             }
-            Row {
+            Text {  // a smart playlist's rule in words (R8.9)
+                id: rule
+                objectName: "playlistRule"
                 x: kicker.x
                 anchors.top: detail.bottom
+                anchors.topMargin: 4
+                width: head.width - x - 12
+                visible: text !== ""
+                elide: Text.ElideRight
+                text: page.playlist.rule
+                color: Theme.accentHi
+                font { family: Theme.sans; pixelSize: 13; weight: Font.DemiBold }
+            }
+            Row {
+                id: buttons
+                x: kicker.x
+                anchors.top: rule.visible ? rule.bottom : detail.bottom
                 anchors.topMargin: 14
                 spacing: 10
                 Btn {
@@ -140,6 +158,14 @@ Item {
                     visible: page.playlists !== null
                     onClicked: page.playlists.openExport(page.playlist.id)
                 }
+                Btn {  // Edit rule (R8.9): its dialog, the rule's conditions, limit and order
+                    objectName: "editRule"
+                    label: qsTr("Edit rule")
+                    icon: "wand"
+                    visible: page.smart !== null && page.playlist.rule !== ""
+                    later: page.playlist.ruleLater
+                    onClicked: page.smart.openEdit(page.playlist.id)
+                }
             }
             Repeater {
                 model: [["#", 1], [qsTr("TITLE"), 2], [qsTr("ALBUM"), 3], [qsTr("GENRE"), 4], [qsTr("RATING"), 5], [qsTr("TIME"), 6]]
@@ -164,6 +190,7 @@ Item {
             width: list.width
             columns: page.columns
             focused: page.activeFocus
+            smart: page.playlist.smart
             onTapped: (modifiers) => page.tapped(index, modifiers)
             onActivated: page.player.playFrom(page.songs, index)
             onMenu: songMenu.openFor(page.songs, index)
@@ -205,7 +232,7 @@ Item {
         anchors.fill: list
         radius: 10
         color: "transparent"
-        border.color: Theme.accent
+        border.color: page.dragging !== null && page.dragging.refused ? Theme.err : Theme.accent
         border.width: 2
         visible: page.dragging !== null && page.dragging.target === "page:" + page.playlist.id && page.dragging.line < 0
     }
@@ -239,7 +266,7 @@ Item {
         infer: page.infer
         playlists: page.playlists
         playlistList: page.library.playlists
-        inPlaylist: true
+        inPlaylist: !page.playlist.smart
     }
     SelectionBar {
         objectName: "playlistSelectionBar"

@@ -535,12 +535,15 @@ def write_batch(
     batch: list[Read],
     moves: dict[str, str],
     images: Mapping[str, list[art.Image]] | None = None,
+    added: float | None = None,
 ) -> Result:
     """One batch into the index, in the writer's transaction: each file's row added or replaced,
     or, for a new path whose audio hash a gone row has (`moves`: hash -> old path), that row moved
     here (A2.2, step 4); and the albums and artists those songs left or joined summarized again
     (R2.5), with `images`, each folder's images, for their covers, then the folders they left or
-    joined and those above them (A2.7)."""
+    joined and those above them (A2.7). A song new to the index is added (`song.added`, R8.9) at
+    `added` (a scan's time), or at its file's modification time when that is None; a row kept,
+    moved here included, keeps its own, and one that has none gets its file's."""
     res = Result()
     touched = albums.Touched()
     places: set[str] = set()
@@ -550,9 +553,11 @@ def write_batch(
         old = moves.pop(r.audio_hash, None) if r.audio_hash else None
         row = c.execute("SELECT id FROM song WHERE path = ?", (old or r.seen.path,)).fetchone()
         places.update(albums.folder_of(p) for p in (old or r.seen.path, r.seen.path))
+        modified = r.seen.mtime_ns / 1e9
         if row:
             sets = ", ".join(f"{k} = :{k}" for k in values)
-            c.execute(f"UPDATE song SET {sets} WHERE id = :id", {**values, "id": row[0]})
+            c.execute(f"UPDATE song SET {sets}, added = coalesce(added, :added) WHERE id = :id",
+                      {**values, "id": row[0], "added": modified})  # fmt: skip
             song_id = row[0]
             if old:
                 rootfiles.moved(c, song_id)  # its plays go with it (A2.8)
@@ -560,6 +565,7 @@ def write_batch(
             else:
                 res.changed += 1
         else:
+            values["added"] = added if added is not None else modified
             cols = ", ".join(values)
             c.execute(
                 f"INSERT INTO song ({cols}) VALUES ({', '.join(':' + k for k in values)})", values
@@ -794,6 +800,9 @@ def scan(
         unreachable=set(tree.unreachable),
     )
     copies = dict(copied or {})
+    # songs new to the index were added now (R8.9); on a library's first scan, when its files were
+    first = c.execute("SELECT 1 FROM song LIMIT 1").fetchone() is None
+    when = None if first else now
     for i in range(0, len(work.read), BATCH):
         batch = list(
             workers.map(read_one, [root] * len(work.read[i : i + BATCH]), work.read[i : i + BATCH])
@@ -802,7 +811,7 @@ def scan(
             copies.update(_elsewhere(c, root, batch, indexed, moves))
 
         def write(c: sqlite3.Connection, b: list[Read] = batch) -> Result:
-            return write_batch(c, b, moves, images)
+            return write_batch(c, b, moves, images, when)
 
         res = index.write(write).result()
         for k in ("added", "changed", "moved", "unreadable"):

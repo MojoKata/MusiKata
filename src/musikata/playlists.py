@@ -11,7 +11,9 @@ page, and what changes them.
   genre, rating and length, a drag handle for reordering (R8.5). An entry no song is at shows
   dimmed with "Missing" and the path it names, and Find (R8.7). Its rows are selected as a list of
   songs' are (R2.6); Delete, or Remove from playlist, takes the entries selected out without
-  asking (R8.6).
+  asking (R8.6). A smart playlist's page (R8.9) says so over its name and shows its rule in words
+  (musikata.smart); its entries aren't moved or removed by hand, saying why, and Remove from
+  playlist isn't offered.
 - **What changes them** (`Playlists`): + and New playlist from selection (R8.3), Add to playlist
   in the selection bars and menus and songs dropped on one (R8.5), its message saying those there
   already and offering Undo, which takes them back out (`offer`: the playlist's own undo, its
@@ -51,6 +53,7 @@ from PySide6.QtCore import (
 from musikata_core import art
 from musikata_core import attention as core_attention
 from musikata_core import playlists as core
+from musikata_core import smart as core_smart
 from musikata_core.playlists import Candidate, ExportDone, PlaylistError, Store
 
 from .models import (
@@ -64,6 +67,7 @@ from .models import (
     time_text,
     title_of,
 )
+from .smart import NEWER_LATER, reading_text
 
 if TYPE_CHECKING:
     from .bridges import Library
@@ -84,6 +88,7 @@ ACTIONS = [
     {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"},
     {"label": "Infer from path", "icon": "wand", "later": "", "action": "infer"},
 ]
+SMART_ACTIONS = ACTIONS[1:]  # a smart playlist's: its rule chooses its songs (R8.9)
 EXPORT_MODES = (
     (core.ABSOLUTE, "A playlist naming the songs where they are",
      "An .m3u8 with each song's whole path, for players on this computer"),
@@ -118,9 +123,14 @@ def detail_text(entries: int, seconds: float, path: str, absolute: int, missing:
     return " · ".join(p for p in parts if p)
 
 
-def kicker_text(kind: str) -> str:
-    """Over a playlist's name (P01): Playlist · M3U8."""
-    return f"Playlist · {kind.upper()}"
+def kicker_text(kind: str, smart: bool = False) -> str:
+    """Over a playlist's name (P01): Playlist · M3U8, or Smart playlist · M3U8 (R8.9)."""
+    return f"{'Smart playlist' if smart else 'Playlist'} · {kind.upper()}"
+
+
+def smart_text(name: str) -> str:
+    """Why a smart playlist's songs aren't changed by hand (R8.9)."""
+    return f"{name} is a smart playlist: its rule chooses its songs"
 
 
 def note_of(path: str | None) -> str:
@@ -253,12 +263,20 @@ def move_key(key: int, modifiers: int) -> int:
 # ---------- the sidebar's list (R6.3) ----------
 
 
+def is_smart(rule: str | None) -> bool:
+    """Whether a playlist of the rule text `rule` (the index's) is a smart one, its songs not
+    changed by hand (R8.9): a rule kept current or a newer MusiKata's; a broken one is a plain
+    list."""
+    reading = core_smart.reading_of(rule)
+    return reading is not None and reading.smart
+
+
 class PlaylistList(QAbstractListModel):
     """The sidebar's Playlists (R6.3): every playlist by name (R2.13's sort key), each with its id
-    (playlistId), name and count of entries. Read whole: a library has tens of playlists, not
-    thousands."""
+    (playlistId), name, count of entries and whether it is a smart one (R8.9: nothing is added to
+    it by hand). Read whole: a library has tens of playlists, not thousands."""
 
-    roles = ("playlistId", "name", "count")
+    roles = ("playlistId", "name", "count", "smart")
     countChanged = Signal()
 
     def __init__(self, read: Callable[[], sqlite3.Connection], parent: QObject | None = None):
@@ -269,10 +287,10 @@ class PlaylistList(QAbstractListModel):
     def refresh(self) -> None:
         """The playlists read again (after a scan or a change)."""
         rows = [
-            {"playlistId": int(i), "name": str(n), "count": f"{int(k):,}"}
-            for i, n, k in self._read().execute(
+            {"playlistId": int(i), "name": str(n), "count": f"{int(k):,}", "smart": is_smart(r)}
+            for i, n, k, r in self._read().execute(
                 "SELECT id, name, (SELECT COUNT(*) FROM playlist_entry WHERE playlist_id ="
-                " playlist.id) FROM playlist ORDER BY name_key, path"
+                " playlist.id), rule FROM playlist ORDER BY name_key, path"
             )
         ]
         if rows == self._rows:
@@ -356,6 +374,7 @@ class EntriesModel(SongsModel):
     ) -> None:
         super().__init__(read, "artist", parent, "playlist_entry.playlist_id = ?", (-1,), searcher)
         self._songs: dict[int, int] = {}  # entry id -> its song's id
+        self.smart = False  # a smart playlist's (R8.9): its entries aren't moved or removed
 
     def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
         return ENTRY_COLUMNS, ENTRY_TABLE, self._where, self._params, "playlist_entry.position"
@@ -477,8 +496,8 @@ class EntriesModel(SongsModel):
 
 class PlaylistPage(QObject):
     """A playlist's page (R8.2, P01-playlist-drag): its mosaic of four covers, kicker, name and
-    the line under it (`detail_text`), and its entries (`EntriesModel`). Its id is the
-    playlist's."""
+    the line under it (`detail_text`), a smart playlist's rule in words (R8.9; `ruleLater` why a
+    newer MusiKata's isn't edited), and its entries (`EntriesModel`). Its id is the playlist's."""
 
     changed = Signal()
 
@@ -500,12 +519,14 @@ class PlaylistPage(QObject):
         c = self._read()
         r = c.execute(
             "SELECT name, path, kind, absolute, (SELECT COUNT(*) FROM playlist_entry WHERE"
-            " playlist_id = playlist.id) FROM playlist WHERE id = ?",
+            " playlist_id = playlist.id), rule FROM playlist WHERE id = ?",
             (playlist,),
         ).fetchone()
         if r is None:
             return False
-        name, path, kind, absolute, entries = r
+        name, path, kind, absolute, entries, rule = r
+        reading = core_smart.reading_of(rule)
+        smart = reading is not None and reading.smart
         seconds, missing = c.execute(
             "SELECT coalesce(SUM(song.length), 0), SUM(song.id IS NULL) FROM playlist_entry LEFT"
             " JOIN song ON song.path = playlist_entry.path WHERE playlist_id = ?",
@@ -520,27 +541,41 @@ class PlaylistPage(QObject):
                 (playlist,),
             )
         ]
-        if search is not None:
-            self._songs.search_next(search)
-        if playlist == self._id:
-            self._songs.refresh()
-        else:
-            self._id = playlist
-            self._songs.clearSelection()
-            self._songs.for_playlist(playlist)
+        again = playlist == self._id
+        self._id = playlist
         self._songs.source = str(name)
+        self._songs.smart = smart
+        empty = (
+            "No song matches its rule yet"
+            if smart
+            else "No songs yet: add some with Add to playlist"
+        )
         self._values = {
             "name": str(name),
             "path": str(path),
-            "kicker": kicker_text(str(kind)),
+            "kicker": kicker_text(str(kind), smart),
+            "smart": smart,
+            "rule": reading_text(reading) if reading is not None else "",
+            "ruleLater": NEWER_LATER
+            if reading is not None and reading.kind == core_smart.NEWER
+            else "",
             "detail": detail_text(
                 int(entries), float(seconds or 0), str(path), int(absolute), int(missing or 0)
             ),  # fmt: skip
             "tiles": tiles(thumbs),
-            "empty": "" if entries else "No songs yet: add some with Add to playlist",
+            "empty": "" if entries else empty,
             "playable": int(entries) > int(missing or 0),
         }
+        # the header first, then the rows: a smart playlist's rule line makes the header taller
+        # (R8.9), and rows laid out under the old one would be left where they were
         self.changed.emit()
+        if search is not None:
+            self._songs.search_next(search)
+        if again:
+            self._songs.refresh()
+        else:
+            self._songs.clearSelection()
+            self._songs.for_playlist(playlist)
         return True
 
     def set_search(self, text: str) -> None:
@@ -560,8 +595,13 @@ class PlaylistPage(QObject):
     tiles = QtProperty(list, lambda self: self._values.get("tiles", []), notify=changed)
     emptyText = QtProperty(str, lambda self: self._values.get("empty", ""), notify=changed)
     playable = QtProperty(bool, lambda self: bool(self._values.get("playable")), notify=changed)
+    smart = QtProperty(bool, lambda self: bool(self._values.get("smart")), notify=changed)
+    rule = QtProperty(str, lambda self: self._values.get("rule", ""), notify=changed)  # R8.9
+    ruleLater = QtProperty(str, lambda self: self._values.get("ruleLater", ""), notify=changed)
     songs = QtProperty(QObject, lambda self: self._songs, constant=True)
-    actions = QtProperty(list, lambda self: ACTIONS, constant=True)
+    actions = QtProperty(
+        list, lambda self: SMART_ACTIONS if self._values.get("smart") else ACTIONS, notify=changed
+    )
 
 
 # ---------- what changes them (R8.3, R8.4, R8.6 to R8.8) ----------
@@ -779,7 +819,7 @@ class Playlists(QObject):
     def move_entries(self, model: QObject, entries: Sequence[int], before: int) -> None:
         """Entries of a playlist's page dragged within it (R8.5): moved, in their order, above
         the entry at place `before` (past the last: to the end), where the insertion line was."""
-        if not isinstance(model, EntriesModel) or not entries:
+        if not isinstance(model, EntriesModel) or not entries or self._refused(model):
             return
         store, playlist = self._store, model.playlist()
         self._reorder(model, lambda: store.move(playlist, entries, before))
@@ -792,7 +832,7 @@ class Playlists(QObject):
         if not by or not isinstance(model, EntriesModel):
             return False
         entries = model.selected_entries()
-        if entries:
+        if entries and not self._refused(model):
             store, playlist = self._store, model.playlist()
             self._reorder(model, lambda: store.nudge(playlist, entries, by))
         return True
@@ -863,8 +903,16 @@ class Playlists(QObject):
 
     # ---------- removing entries (R8.6) ----------
 
+    def _refused(self, model: EntriesModel) -> bool:
+        """A smart playlist's entries aren't moved or removed by hand (R8.9): said why."""
+        if model.smart:
+            self._say(smart_text(model.source))
+        return model.smart
+
     def _remove(self, model: QObject, entries: list[int]) -> None:
-        if not isinstance(model, EntriesModel) or not entries or not self._can():
+        if not isinstance(model, EntriesModel) or not entries or self._refused(model):
+            return
+        if not self._can():
             return
         store, playlist = self._store, model.playlist()
         model.clearSelection()

@@ -7,7 +7,8 @@ import "."
 // (+, New playlist from selection, Rename; R8.3, R8.4) the name is a text box with the name
 // selected: Enter, or a click elsewhere, keeps what was typed; Esc the name it had. While a drag is
 // over it (R8.5, P01-playlist-drag) it is outlined and named under the drag's card ("Add to Evening
-// Focus"); the tour, holding a drag still, shows the card itself there.
+// Focus"), or, a smart playlist refusing it (R8.9), outlined in red and saying why; the tour,
+// holding a drag still, shows the card itself there.
 Item {
     id: item
     signal clicked()
@@ -19,6 +20,7 @@ Item {
     property bool active
     property bool editing: false
     property bool targeted: false     // a drag is over it (R8.5): highlighted, and named under it
+    property bool refused: false      // a smart playlist refusing the drag over it (R8.9)
     property string dropText: ""      // what dropping does: "Add to Evening Focus"
     property var card: null           // the drag's card, shown under it while the tour holds one
     height: 32
@@ -51,8 +53,8 @@ Item {
         width: item.width - 20
         height: item.height
         radius: 8
-        color: Theme.accentSoft
-        border.color: Theme.accent
+        color: item.refused ? Theme.errSoft : Theme.accentSoft
+        border.color: item.refused ? Theme.err : Theme.accent
         border.width: 2
         visible: item.targeted
     }

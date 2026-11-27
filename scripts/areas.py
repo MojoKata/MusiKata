@@ -68,7 +68,7 @@ CODE = {
     # A3, R4, R5, R17: what is written into the files: tags, encodings, covers, lyrics
     "tags": _core("tags", "encodings", "art", "genres", "lyrics"),
     # R3, R8, R12, A3.5: how files are named, listed, moved and renamed, and Undo
-    "files": _core("patterns", "playlists", "organize", "history"),
+    "files": _core("patterns", "playlists", "smart", "organize", "history"),
     # A4: decoding, joins, gain, the equalizer and the limiter, the queue
     "playback": _core("audio"),
     # A5: waveforms and spectra

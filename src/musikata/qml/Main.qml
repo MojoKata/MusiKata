@@ -28,10 +28,11 @@ import "."
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2). A playlist of the sidebar opens its page (R8.2, P01-playlist-drag); Delete
 // playlist asks first, over the window (R8.4, R6.8); Find (R8.7) and Export… (R8.8) open their
-// dialogs over the whole window. Songs, albums, artists, genres, folders and a playlist's entries
-// are dragged from every view (R6.10) onto a playlist in the sidebar, within a playlist's page, onto
-// Up next or the queue button, and out of MusiKata as their files; the drag's picture is a card
-// kept off the window (DragCard), and files from another app dropped anywhere else are R12.5's.
+// dialogs over the whole window, as New smart playlist… and Edit rule (R8.9) do. Songs, albums,
+// artists, genres, folders and a playlist's entries are dragged from every view (R6.10) onto a
+// playlist in the sidebar, within a playlist's page, onto Up next or the queue button, and out of
+// MusiKata as their files; the drag's picture is a card kept off the window (DragCard), and files
+// from another app dropped anywhere else are R12.5's.
 Window {
     id: win
     required property var library
@@ -48,6 +49,7 @@ Window {
     required property var infer
     required property var playlists
     required property var dragging
+    required property var smart
     width: 1280
     height: 800
     minimumWidth: 960
@@ -59,7 +61,7 @@ Window {
                                   || win.names.opened || win.copies.opened
                                   || win.copies.question.title !== undefined
                                   || win.encodings.opened || win.infer.opened
-                                  || win.playlists.opened
+                                  || win.playlists.opened || win.smart.opened
 
     DropArea {  // files from another app dropped anywhere else (R6.10): R12.5's, a later version
         objectName: "windowDrop"
@@ -84,6 +86,7 @@ Window {
         library: win.library
         playlists: win.playlists
         dragging: win.dragging
+        smart: win.smart
     }
     ViewHeader {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -201,7 +204,7 @@ Window {
     Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
     Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
-    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; smart: win.smart } }
 
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -268,6 +271,11 @@ Window {
         objectName: "exportOverlay"
         anchors.fill: parent
         playlists: win.playlists
+    }
+    SmartRuleDialog {  // New smart playlist… and Edit rule (R8.9)
+        objectName: "smartOverlay"
+        anchors.fill: parent
+        smart: win.smart
     }
     CopiesQuestion {  // Delete playlist's question (R8.4, R6.8)
         objectName: "playlistQuestion"

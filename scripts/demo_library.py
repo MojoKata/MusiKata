@@ -814,7 +814,34 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
             f.write(end.join(lines) + end)
     history(music, lib)
     root_settings(music)
+    smart_playlist(music)
     return lib
+
+
+def smart_playlist(music: str) -> str:
+    """P02's Four stars and up (R8.9): a smart playlist of the songs rated four stars and up,
+    highest first, made as MusiKata makes one, its songs those its rule picks from the library
+    scanned into an index of its own, as the tour's will be; so the tour, whose root can't be
+    written, finds it current. Its path."""
+    import tempfile
+    from concurrent.futures import ThreadPoolExecutor
+
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+    from musikata_core import db, playlists, scanner, smart
+
+    rule = smart.Rule(rating=4, order="rating")
+    with tempfile.TemporaryDirectory() as tmp:
+        index = db.Index(os.path.join(tmp, "musikata.db"))
+        try:
+            with ThreadPoolExecutor(4) as pool:
+                scanner.scan(music, index, pool, hold=False)
+            paths = smart.songs(index.read(), rule, 0.0)
+            made = playlists.Store(music, index).create_smart(
+                rule, paths, smart.suggested_name(rule)
+            )
+            return os.path.join(music, playlists.FOLDER, made.name + ".m3u8")
+        finally:
+            index.close()
 
 
 def root_settings(music: str, settings: dict = ROOT_SETTINGS) -> str:

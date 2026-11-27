@@ -1,11 +1,12 @@
 import QtQuick
 import "."
 
-// A song of a playlist's page (R8.2, P01-playlist-drag): its drag handle (the row is dragged by it,
-// or anywhere on it, R8.5), its number, cover, title over artist, album, genre, rating and length;
-// the song playing has its title in the accent. An entry no song is at (R8.7) is dimmed, says
-// "Missing" (or "Not in your music folder") and the path it names, and has Find. A click selects
-// it (Ctrl/⌘ and Shift as everywhere, R2.6), selected it is highlighted, the current row outlined
+// A song of a playlist's page (R8.2, P01-playlist-drag): its drag handle (the row is dragged by
+// it, or anywhere on it, R8.5; none on a smart playlist's, R8.9), its number, cover, title over
+// artist, album, genre, rating and length; the song playing has its title in the accent. An entry
+// no song is at (R8.7) is dimmed, says "Missing" (or "Not in your music folder") and the path it
+// names, and has Find (but on a smart playlist, whose rule keeps it current). A click selects it
+// (Ctrl/⌘ and Shift as everywhere, R2.6), selected it is highlighted, the current row outlined
 // while the list has the focus (R6.9); a double click plays it, a right click opens its menu
 // (SongMenu).
 Rectangle {
@@ -31,6 +32,7 @@ Rectangle {
     required property string note
     required property string where
     property bool focused: false
+    property bool smart: false         // a smart playlist's (R8.9): no drag handle, no Find
     readonly property bool ringed: current && focused
     height: 44
     radius: 8
@@ -67,6 +69,7 @@ Rectangle {
         name: "drag"
         size: 14
         color: Theme.faint
+        visible: !row.smart
     }
     Cell { column: 1; text: row.number; color: Theme.muted; horizontalAlignment: Text.AlignRight }
     Cover {
@@ -128,7 +131,7 @@ Rectangle {
         x: row.columns[3][0]
         anchors.verticalCenter: parent.verticalCenter
         height: 30
-        visible: row.missing
+        visible: row.missing && !row.smart
         label: qsTr("Find…")
         icon: "search"
         onClicked: row.find()

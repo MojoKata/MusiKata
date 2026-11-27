@@ -12,8 +12,10 @@
   entries moved to the insertion line (R8.5, `Playlists.move_entries`); onto Up next or the queue
   button, played next (R7.2); files from a file manager onto a playlist, added when under the
   root (`Playlists.add_files`), and onto the window, which R12.5 (a later version) will add to
-  the library. Each target, while a drag is over it, is highlighted and named (`target_text`:
-  "Add to Evening Focus"), and a reorder draws its insertion line (`line`).
+  the library. A smart playlist refuses what is dropped on it, its rule choosing its songs, and
+  its own page moves none of its entries (R8.9). Each target, while a drag is over it, is
+  highlighted and named (`target_text`: "Add to Evening Focus", or why a smart playlist refuses),
+  and a reorder draws its insertion line (`line`).
 - **The bridge** (`Dragging`): what QML calls as a drag starts (`carry…`, `start`) and as one
   moves over a target, leaves it or is dropped (`enter`, `over`, `leave`, `drop`), and what it
   binds to (`card`, `target`, `targetText`, `line`, `busy`). The platform's drag (QDrag) runs here,
@@ -42,7 +44,7 @@ from .edittags import target_at
 from .folders import FolderModel
 from .models import SongsModel, plural, song_order
 from .nowplaying import read_songs
-from .playlists import OUTSIDE_LATER, EntriesModel
+from .playlists import OUTSIDE_LATER, EntriesModel, is_smart, smart_text
 
 if TYPE_CHECKING:
     from .bridges import Library, Player
@@ -59,8 +61,9 @@ IN_LIBRARY = "Those files are in your library already"
 # the targets: a playlist in the sidebar, the open playlist's page, Up next or the queue button,
 # and the window anywhere else
 PLAYLIST, PAGE, QUEUE, WINDOW = "playlist", "page", "queue", "window"
-# what a drop does
+# what a drop does; REFUSE: onto a smart playlist, whose rule chooses its songs (R8.9)
 ADD, MOVE, PLAY_NEXT, FILES, NONE = "add", "move", "play-next", "files", "none"
+REFUSE = "refuse"
 
 
 # ---------- what a drag carries ----------
@@ -155,7 +158,8 @@ def local_paths(urls: Sequence[Any]) -> list[str]:
 @dataclass(frozen=True)
 class Drop:
     """What a drop does: ADD the songs to a playlist, MOVE a playlist's entries within it,
-    PLAY_NEXT the songs, take FILES from outside, or NONE (not taken)."""
+    PLAY_NEXT the songs, take FILES from outside, REFUSE them (a smart playlist), or NONE (not
+    taken)."""
 
     what: str
     songs: tuple[int, ...] = ()
@@ -163,12 +167,20 @@ class Drop:
     paths: tuple[str, ...] = ()
 
 
-def drop_of(kind: str, key: int, carried: Carried | None, paths: Sequence[str]) -> Drop:
-    """What a drop on the target `kind` (`key`: its playlist) does, of what MusiKata dragged
-    (`carried`) or of the files another app did (`paths`): MusiKata's songs onto a playlist are
-    added (R8.5), a playlist's own entries within its page moved (R8.5), songs onto the queue
-    played next (R7.2); files from outside onto any target are taken as files (R8.5, R12.5).
-    MusiKata's songs dropped elsewhere on the window do nothing."""
+def drop_of(
+    kind: str, key: int, carried: Carried | None, paths: Sequence[str], smart: bool = False
+) -> Drop:
+    """What a drop on the target `kind` (`key`: its playlist, `smart` when it is a smart one)
+    does, of what MusiKata dragged (`carried`) or of the files another app did (`paths`):
+    MusiKata's songs onto a playlist are added (R8.5), a playlist's own entries within its page
+    moved (R8.5), songs onto the queue played next (R7.2); files from outside onto any target are
+    taken as files (R8.5, R12.5). Songs or files onto a smart playlist are refused, saying why
+    (R8.9), and its own entries within its page aren't moved. MusiKata's songs dropped elsewhere
+    on the window do nothing."""
+    if smart and kind in (PLAYLIST, PAGE):
+        if carried is not None and carried.playlist == key and kind == PAGE:
+            return Drop(NONE)
+        return Drop(REFUSE) if (carried is not None and carried.songs) or paths else Drop(NONE)
     if carried is not None:
         if kind == PAGE and carried.playlist == key and carried.entries:
             return Drop(MOVE, carried.songs, carried.entries)
@@ -188,6 +200,8 @@ def target_text(what: str, kind: str, name: str) -> str:
     window."""
     if kind in (PLAYLIST, PAGE) and what in (ADD, FILES):
         return f"Add to {name}"
+    if kind in (PLAYLIST, PAGE) and what == REFUSE:
+        return smart_text(name)
     if kind == QUEUE and what in (PLAY_NEXT, FILES):
         return "Play next"
     return ""
@@ -409,9 +423,16 @@ class Dragging(QObject):
         r = self._read().execute("SELECT name FROM playlist WHERE id = ?", (playlist,)).fetchone()
         return str(r[0]) if r else ""
 
+    def _smart(self, kind: str, playlist: int) -> bool:
+        if kind not in (PLAYLIST, PAGE):
+            return False
+        r = self._read().execute("SELECT rule FROM playlist WHERE id = ?", (playlist,)).fetchone()
+        return r is not None and is_smart(r[0])
+
     def _drop_of(self, kind: str, key: int, text: str, urls: Sequence[Any]) -> Drop:
         carried = decode(text, self._root) if text else None
-        return drop_of(kind, key, carried, local_paths(urls) if carried is None else [])
+        paths = local_paths(urls) if carried is None else []
+        return drop_of(kind, key, carried, paths, self._smart(kind, key))
 
     @Slot(str, int, str, list, result=bool)
     def enter(self, kind: str, key: int, text: str, urls: list[Any]) -> bool:
@@ -453,6 +474,9 @@ class Dragging(QObject):
         d = self._drop_of(kind, key, text, urls)
         line = self._line
         self._clear()
+        if d.what == REFUSE:
+            self._say(smart_text(self._name(key)))
+            return False
         if d.what == ADD and self._playlists is not None:
             self._playlists.add_songs(key, d.songs)
         elif d.what == MOVE and self._playlists is not None:
@@ -540,5 +564,6 @@ class Dragging(QObject):
     held = QtProperty(bool, lambda self: self._held, notify=changed)
     card = QtProperty(dict, _get_card, notify=changed)  # head, names, cover; {} when none
     target = QtProperty(str, lambda self: self._target, notify=changed)  # "playlist:12"
+    refused = QtProperty(bool, lambda self: self._what == REFUSE, notify=changed)  # R8.9
     targetText = QtProperty(str, lambda self: self._text, notify=changed)
     line = QtProperty(int, lambda self: self._line, notify=changed)  # -1: none

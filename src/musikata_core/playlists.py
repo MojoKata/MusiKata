@@ -5,7 +5,8 @@ written as R8.1 says, and kept in the index's `playlist` and `playlist_entry` ta
   mark, and UTF-16's, read as such), then the system's legacy encoding for an `.m3u` that isn't
   valid UTF-8 (`legacy_encoding`); lines ended by LF, CRLF or CR; `#EXTM3U` optional, `#EXTINF`
   before an entry or not, other comments and blank lines passed by, the comments before the first
-  entry kept (`Playlist.header`: `#PLAYLIST:`, and R8.9's `#MUSIKATA-RULE:` when it comes).
+  entry kept (`Playlist.header`: `#PLAYLIST:`, and a smart playlist's `#MUSIKATA-RULE:`, R8.9,
+  whose rule smart.py reads).
 - **Where an entry is** (`resolve`): relative to the playlist's own folder, or absolute; with `/`
   or `\\` between folders; a `file://` URL; a Windows path with its drive. An entry under the root
   is its path under the root (with `/`), as the index holds a song; one elsewhere, or an address on
@@ -29,7 +30,9 @@ written as R8.1 says, and kept in the index's `playlist` and `playlist_entry` ta
   file read again first, changed, written and indexed, one at a time; and `Store.repoint`, which
   points every playlist naming a file moved at its new path: what R2.12's Move the others to the
   trash calls for the copies it removed, and what Organize files (R12.4) calls when it moves
-  files."""
+  files. A smart playlist (R8.9) is made with its rule and its songs (`create_smart`), its rule
+  edited (`set_rule`) and its songs kept current (`refill`, written only when they differ); a
+  change by hand to one is refused, its rule choosing its songs."""
 
 from __future__ import annotations
 
@@ -49,7 +52,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from urllib.parse import unquote, urlsplit
 
-from . import db, duplicates, folders, sortnames
+from . import db, duplicates, folders, smart, sortnames
 from .tags.safe import tmp_path
 
 log = logging.getLogger(__name__)
@@ -59,7 +62,7 @@ FOLDER = "Playlists"  # the playlists folder under the root, by default (R8.1, R
 NEW_NAME = "New playlist"  # R8.3
 HEADER = "#EXTM3U"
 EXTINF = "#EXTINF:"
-RULE = "#MUSIKATA-RULE:"  # a smart playlist's rule (R8.9)
+RULE = smart.RULE  # a smart playlist's rule (R8.9)
 UNKNOWN = -1  # #EXTINF's seconds when the length isn't known
 ABSOLUTE = "absolute"  # Export's two ways (R8.8): an .m3u8 naming the songs where they are,
 COPIES = "copies"  # or the songs copied, numbered, beside an .m3u8 naming them
@@ -662,10 +665,6 @@ def export(
 # ---------- the index (A2.1) ----------
 
 
-def _rule(header: Sequence[str]) -> str | None:
-    return next((h[len(RULE) :].strip() for h in header if h.upper().startswith(RULE)), None)
-
-
 def index_file(
     c: sqlite3.Connection,
     root: str,
@@ -684,7 +683,7 @@ def index_file(
     name = name_of(path)
     absolute = sum(not is_relative(e.location) for e in p.entries)
     values = (path, name, sortnames.key_of(name), kind, size, mtime_ns, p.encoding, absolute,
-              _rule(p.header))  # fmt: skip
+              smart.rule_text_of(p.header))  # fmt: skip
     row = c.execute("SELECT id FROM playlist WHERE path = ?", (path,)).fetchone()
     if row is None:
         c.execute(
@@ -896,10 +895,18 @@ class Store:
             lambda c: index_file(c, root, path, data, st.st_size, st.st_mtime_ns, legacy)
         ).result()
 
+    @staticmethod
+    def _plain(path: str, p: Playlist) -> None:
+        """Refuses a change by hand to a smart playlist (R8.9): its rule chooses its songs."""
+        reading = smart.reading_of(smart.rule_text_of(p.header))
+        if reading is not None and reading.smart:
+            raise PlaylistError(f"{name_of(path)} is a smart playlist: its rule chooses its songs")
+
     def _change(self, playlist: int, plan: Callable[[Playlist, str], Playlist]) -> int:
         with self._lock:
             path, kind = self._row(playlist)
             p = self._read(path)
+            self._plain(path, p)
             return self._write(path, plan(p, path.rpartition("/")[0]), kind)
 
     def _new_path(self, name: str, folder: str) -> str:
@@ -920,6 +927,54 @@ class Store:
             paths = self.paths_of(songs)
             playlist = self._write(path, added(Playlist(), paths, self.folder), "m3u8")
             return Changed(playlist, name_of(path), len(paths))
+
+    def create_smart(self, rule: smart.Rule, paths: Sequence[str], name: str) -> Changed:
+        """A new smart playlist (R8.9) in the playlists folder: `name`, numbered when taken, its
+        rule in its `#MUSIKATA-RULE:` line, holding `paths` (under the root: the rule's songs)."""
+        with self._lock:
+            try:
+                os.makedirs(full_path(self.root, self.folder), exist_ok=True)
+            except OSError as e:
+                why = f"The playlists folder couldn't be made: {e.strerror or e}"
+                raise PlaylistError(why) from e
+            path = self._new_path(name, self.folder)
+            made = added(Playlist(header=(smart.rule_line(rule),)), paths, self.folder)
+            playlist = self._write(path, made, "m3u8")
+            return Changed(playlist, name_of(path), len(paths))
+
+    def set_rule(self, playlist: int, rule: smart.Rule, paths: Sequence[str]) -> Changed:
+        """Edit rule (R8.9): the playlist's rule made `rule`, and its songs `paths` (the rule's);
+        a plain playlist given a rule becomes a smart one. A newer MusiKata's rule is refused."""
+        with self._lock:
+            path, kind = self._row(playlist)
+            p = self._read(path)
+            reading = smart.reading_of(smart.rule_text_of(p.header))
+            if reading is not None and reading.kind == smart.NEWER:
+                raise PlaylistError(f"{name_of(path)}'s rule is a newer MusiKata's: update to"
+                                    " change it")  # fmt: skip
+            folder = path.rpartition("/")[0]
+            made = added(replace(p, entries=(), header=smart.with_rule(p.header, rule)), paths,
+                         folder)  # fmt: skip
+            written = self._write(path, made, kind)
+            return Changed(written, name_of(path), len(paths))
+
+    def refill(self, playlist: int, text: str, paths: Sequence[str]) -> bool:
+        """A smart playlist kept current (R8.9): its entries made `paths` (under the root), when
+        its file still holds the rule `text` (one changed since is the scan's to read again) and
+        its entries name other songs, or the same in another order; never written when they
+        don't. Whether it was written."""
+        with self._lock:
+            path, kind = self._row(playlist)
+            p = self._read(path)
+            if smart.rule_text_of(p.header) != text.strip():
+                return False
+            folder = path.rpartition("/")[0]
+            there = [resolve(e.location, folder, self.root) for e in p.entries]
+            if not smart.changed(there, paths):
+                return False
+            self._write(path, added(replace(p, entries=()), paths, folder), kind)
+            log.info("kept the smart playlist %s current: %d songs", path, len(paths))
+            return True
 
     def add(self, playlist: int, songs: Sequence[int]) -> Changed:
         """`songs` (by id) added at the playlist's end (R8.5: Add to playlist, and songs dropped
@@ -983,6 +1038,7 @@ class Store:
         with self._lock:
             path, kind = self._row(playlist)
             p = self._read(path)
+            self._plain(path, p)
             there = self._still(p, rows)
             new = order(len(p.entries), there)
             places = places_of(new, there)

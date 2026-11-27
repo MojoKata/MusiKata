@@ -7,11 +7,11 @@
 #
 # The demo library (scripts/demo_library.py) is made in build/demo when it isn't there, or has no
 # change history (R4.9), root's settings (R9.5's same genres, R3.3's pattern of the user's own),
-# album in one file (R2.8), copy of Signal Fires (R2.12), album in the wrong encoding (R4.10) or
-# P01's playlists (R8) yet. It is the home's Music folder in the container, so the screens show ~/Music, as on a new user's
-# computer. The tour runs three times, once in each state it has screens for
-# (src/musikata/tour.py): the library; the same root unmounted (X02, R2.10); a first start with
-# nothing configured (X01, R2.1).
+# album in one file (R2.8), copy of Signal Fires (R2.12), album in the wrong encoding (R4.10),
+# P01's playlists (R8) or P02's smart playlist (R8.9) yet. It is the home's Music folder in the
+# container, so the screens show ~/Music, as on a new user's computer. The tour runs three times,
+# once in each state it has screens for (src/musikata/tour.py): the library; the same root
+# unmounted (X02, R2.10); a first start with nothing configured (X01, R2.1).
 #   scripts/test-tour.sh [--tour-only NAMES]
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,7 +27,8 @@ if [ ! -d "$DEMO/Music/.musikata/history" ] ||
     [ ! -f "$DEMO/Music/Mara Okafor/Live at the Lantern/Live at the Lantern.cue" ] ||
     [ ! -f "$DEMO/Music/_Incoming/new rips/Signal Fires.flac" ] ||
     [ ! -d "$DEMO/Music/Ñåâåðíûé Âåòåð/Òèõàÿ Ãàâàíü" ] ||
-    [ ! -f "$DEMO/Music/Playlists/Evening Focus.m3u8" ]; then
+    [ ! -f "$DEMO/Music/Playlists/Evening Focus.m3u8" ] ||
+    [ ! -f "$DEMO/Music/Playlists/Four stars and up.m3u8" ]; then
     # made before it had its history, its settings, its album in one file, its copies, its tags
     # in the wrong encoding or its playlists: anew
     echo "== the demo library, in $DEMO" >&2
