@@ -429,8 +429,10 @@ def test_review_shows_the_merges_preview_and_saves_it_as_one_entry_undo_puts_bac
         ]
         with qtbot.waitSignal(h.messageChanged, timeout=WAIT):
             h.undoMessage()
-        qtbot.waitUntil(lambda: genres_of(paths)[0] == ("Electronica",), timeout=WAIT)
-        assert genres_of(paths)[1] == ("electronic",)
+        # Undo writes the files one at a time: waited for until both are back
+        qtbot.waitUntil(
+            lambda: genres_of(paths)[:2] == [("Electronica",), ("electronic",)], timeout=WAIT
+        )
     finally:
         g.shut()
         g.history_.close()
