@@ -22,6 +22,8 @@ import "."
 // path-match state beneath it (R2.9.5: a dot on its cover, a chip on its card and its List row),
 // each file its path-match chip (R3.9), and a folder of songs whose files differ from their path
 // says how in a line under its strip (R2.9.7).
+// A folder or file dragged, in every mode, carries its songs, or the selection's when it is in
+// it, and gives a file manager the folders and files themselves (R2.9.6, R6.10).
 Item {
     id: view
     required property var library
@@ -31,6 +33,7 @@ Item {
     property var art: null      // the Album art dialog's bridge (R5.2)
     property var infer: null    // Infer from path's dialog (R3)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
+    property var dragging: null  // folders and files dragged: the selection when the row is in it
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
     readonly property string mode: folders.mode
@@ -361,6 +364,7 @@ Item {
                     onActivated: view.folders.activate(cell.index)
                     onToggled: view.rowsModel.toggle(cell.index)
                     onPlay: view.folders.playRow(cell.index)
+                    DragSource { dragging: view.dragging; onCarry: view.dragging.carry(view.rowsModel, cell.index) }
                 }
             }
             Component {
@@ -375,6 +379,7 @@ Item {
                     onTapped: (modifiers) => view.tapped(cell.index, modifiers)
                     onActivated: view.folders.activate(cell.index)
                     onToggled: view.rowsModel.toggle(cell.index)
+                    DragSource { dragging: view.dragging; onCarry: view.dragging.carry(view.rowsModel, cell.index) }
                 }
             }
             Component {
@@ -399,6 +404,7 @@ Item {
                     onToggled: view.rowsModel.toggle(cell.index)
                     onMenu: songMenu.openFor(view.rowsModel, cell.index)
                     onRated: (star) => { if (view.ratings) view.ratings.rateRow(view.rowsModel, cell.index, star) }
+                    DragSource { dragging: view.dragging; onCarry: view.dragging.carry(view.rowsModel, cell.index) }
                 }
             }
             Component {
@@ -422,6 +428,7 @@ Item {
                     onTapped: (modifiers) => view.tapped(cell.index, modifiers)
                     onActivated: view.folders.activate(cell.index)
                     onMenu: songMenu.openFor(view.rowsModel, cell.index)
+                    DragSource { dragging: view.dragging; onCarry: view.dragging.carry(view.rowsModel, cell.index) }
                 }
             }
         }

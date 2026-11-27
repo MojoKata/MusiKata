@@ -28,7 +28,10 @@ import "."
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2). A playlist of the sidebar opens its page (R8.2, P01-playlist-drag); Delete
 // playlist asks first, over the window (R8.4, R6.8); Find (R8.7) and Export… (R8.8) open their
-// dialogs over the whole window.
+// dialogs over the whole window. Songs, albums, artists, genres, folders and a playlist's entries
+// are dragged from every view (R6.10) onto a playlist in the sidebar, within a playlist's page, onto
+// Up next or the queue button, and out of MusiKata as their files; the drag's picture is a card
+// kept off the window (DragCard), and files from another app dropped anywhere else are R12.5's.
 Window {
     id: win
     required property var library
@@ -44,6 +47,7 @@ Window {
     required property var encodings
     required property var infer
     required property var playlists
+    required property var dragging
     width: 1280
     height: 800
     minimumWidth: 960
@@ -57,12 +61,29 @@ Window {
                                   || win.encodings.opened || win.infer.opened
                                   || win.playlists.opened
 
+    DropArea {  // files from another app dropped anywhere else (R6.10): R12.5's, a later version
+        objectName: "windowDrop"
+        anchors.fill: parent
+        enabled: !win.modal
+        onEntered: (drag) => drag.accepted = win.dragging.enter("window", -1, drag.getDataAsString(win.dragging.mime), drag.urls)
+        onExited: win.dragging.leave("window", -1)
+        onDropped: (drop) => { if (win.dragging.drop("window", -1, drop.getDataAsString(win.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
+    }
+    DragCard {  // the drag's picture (musikata.dragging grabs it), off the window
+        id: dragCard
+        objectName: "dragCard"
+        x: -width - 40
+        Accessible.ignored: true  // a picture for the platform's drag, never seen in the window
+        card: win.dragging.card
+        Component.onCompleted: win.dragging.setCard(dragCard)
+    }
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
         id: sidebar
         anchors { left: parent.left; top: parent.top; bottom: bar.top }
         library: win.library
         playlists: win.playlists
+        dragging: win.dragging
     }
     ViewHeader {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -171,16 +192,16 @@ Window {
             playlist: playlist
         })[win.library.view]
     }
-    Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists } }
-    Component { id: artists; ArtistsView { library: win.library } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists } }
-    Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres } }
-    Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists } }
-    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists } }
+    Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art; dragging: win.dragging } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: artists; ArtistsView { library: win.library; dragging: win.dragging } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres; dragging: win.dragging } }
+    Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists } }
-    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
 
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -190,6 +211,7 @@ Window {
         height: Math.max(200, bar.y - 12 - 76)
         visible: win.player.upNextOpen
         player: win.player
+        dragging: win.dragging
     }
     MessageBar {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -205,6 +227,7 @@ Window {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         player: win.player
         ratings: win.ratings
+        dragging: win.dragging
     }
     ToolDialog {
         objectName: "toolOverlay"

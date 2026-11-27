@@ -8,15 +8,19 @@ page, and what changes them.
 - **A playlist's page** (`PlaylistPage`, `EntriesModel`, R8.2): a mosaic of four of its covers,
   its name, its count, length, file and whether it names its songs by relative paths; Play,
   Shuffle and Export…; then its entries, each with its number, cover, title and artist, album,
-  genre, rating and length, a drag handle for reordering (R8.5's, the next piece's). An entry no
-  song is at shows dimmed with "Missing" and the path it names, and Find (R8.7). Its rows are
-  selected as a list of songs' are (R2.6); Delete, or Remove from playlist, takes the entries
-  selected out without asking (R8.6).
+  genre, rating and length, a drag handle for reordering (R8.5). An entry no song is at shows
+  dimmed with "Missing" and the path it names, and Find (R8.7). Its rows are selected as a list of
+  songs' are (R2.6); Delete, or Remove from playlist, takes the entries selected out without
+  asking (R8.6).
 - **What changes them** (`Playlists`): + and New playlist from selection (R8.3), Add to playlist
-  in the selection bars and menus, renaming, duplicating and deleting (R8.4), removing entries
-  (R8.6), Find and its choice (R8.7, from the page or Needs attention), and Export… (R8.8), each
-  run on a thread of its own through musikata_core.playlists.Store, the views read again after,
-  and a message saying what was done (R6.7).
+  in the selection bars and menus and songs dropped on one (R8.5), its message saying those there
+  already and offering Undo, which takes them back out (`offer`: the playlist's own undo, its
+  change being no save of the change history, R4.9); a file manager's files dropped on one (those
+  outside the root wait for R12.5); renaming, duplicating and deleting (R8.4); moving entries,
+  dragged within the page or by Ctrl+Shift+↑ / ↓ (R8.5, R6.9, R18.2), and removing them (R8.6);
+  Find and its choice (R8.7, from the page or Needs attention), and Export… (R8.8), each run on a
+  thread of its own through musikata_core.playlists.Store, the views read again after, and a
+  message saying what was done (R6.7).
 
 What each says is decided here as text (`detail_text`, `why_text`, …), tested without a window;
 what a change does to a playlist is musikata_core.playlists'."""
@@ -67,6 +71,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 NOT_THERE = "Playlists can't be changed while the music folder isn't available"  # R2.10
+# files dropped from outside the root are R12.5's: copied or moved into the library, a later piece
+OUTSIDE_LATER = "Adding files from outside the music folder comes in a later version"
 MISSING = "Missing"
 OUTSIDE = "Not in your music folder"
 REMOVE = {"label": "Remove from playlist", "icon": "close", "later": "", "action": "remove"}
@@ -128,8 +134,36 @@ def songs_text(n: int) -> str:
     return plural(n, "song")
 
 
-def added_text(n: int, name: str) -> str:
-    return f"Added {songs_text(n)} to {name}" if n else f"Nothing was added to {name}"
+def added_text(n: int, name: str, already: int = 0) -> str:
+    """The message after songs are added to a playlist (R8.5): how many, and how many of them it
+    held already, added again all the same."""
+    if not n:
+        return f"Nothing was added to {name}"
+    said = f"Added {songs_text(n)} to {name}"
+    if already and n == 1:
+        return f"{said} (it was there already)"
+    if already:
+        return f"{said} ({already:,} {'was' if already == 1 else 'were'} there already)"
+    return said
+
+
+def took_back_text(n: int, wanted: int, name: str) -> str:
+    """The message after R8.5's Undo took an addition back out: how many, and those that had
+    moved since and stay."""
+    if not n:
+        return f"Nothing was taken out of {name}: it had changed since"
+    said = f"Took {songs_text(n)} back out of {name}"
+    if n < wanted:
+        said += f"; {wanted - n:,} had moved since and stay"
+    return said
+
+
+def dropped_text(outside: int, found: int) -> str:
+    """What a drop of files says when it adds none of them, or not all: those from outside the
+    music folder wait for R12.5 (a later version), and those under it that aren't songs."""
+    if outside:
+        return OUTSIDE_LATER
+    return "" if found else "Nothing dropped is a song in your library"
 
 
 def made_text(name: str, n: int) -> str:
@@ -203,6 +237,17 @@ def local_path(url: str) -> str:
     """A folder chosen in the platform's dialog, a file: URL or a path, as a whole path."""
     path = QUrl(url).toLocalFile() if url.startswith("file:") else url
     return os.path.abspath(os.path.expanduser(path)) if path else ""
+
+
+def move_key(key: int, modifiers: int) -> int:
+    """Ctrl+Shift+↑ / ↓ (R6.9, R18.2; ⇧⌘ on macOS, which Qt gives as Ctrl): -1 or 1, the way the
+    entries selected move; 0 for any other key."""
+    mods = Qt.KeyboardModifier(modifiers)
+    both = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+    others = Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
+    if (mods & both) != both or mods & others:
+        return 0
+    return {int(Qt.Key.Key_Up): -1, int(Qt.Key.Key_Down): 1}.get(int(key), 0)
 
 
 # ---------- the sidebar's list (R6.3) ----------
@@ -376,6 +421,43 @@ class EntriesModel(SongsModel):
             return [], self.source
         return self._songs_of((self._ids or [])[row:]), self.source
 
+    def position_at(self, row: int) -> int:
+        """The place in the playlist of row `row`'s entry (from 0); past the rows, the end."""
+        r = self.row(row) if 0 <= row < self.rowCount() else None
+        if r is None:
+            return self.entry_count()
+        return int(r["number"]) - 1
+
+    def entry_count(self) -> int:
+        """How many entries the playlist has, whatever a search leaves."""
+        r = (
+            self._read()
+            .execute(
+                "SELECT COUNT(*) FROM playlist_entry WHERE playlist_id = ?", (self.playlist(),)
+            )
+            .fetchone()
+        )
+        return int(r[0])
+
+    def select_positions(self, positions: Sequence[int]) -> None:
+        """The entries at `positions` (places, from 0) selected, once the rows read again have
+        come: those a reorder moved, where they are now."""
+        wanted = list(positions)
+        found = [
+            int(i)
+            for (i,) in self._read().execute(
+                "SELECT id FROM playlist_entry WHERE playlist_id = ? AND position IN"
+                f" ({', '.join('?' * len(wanted))}) ORDER BY position",
+                (self.playlist(), *wanted),
+            )
+        ] if wanted else []  # fmt: skip
+        self.select_songs(found)
+
+    def select_rows(self, rows: Sequence[int]) -> None:
+        """The entries of rows `rows` selected: as the tour shows a drag of them (P01)."""
+        ids = self._ids or []
+        self.select_songs([ids[r] for r in rows if 0 <= r < len(ids)])
+
     def missing_at(self, row: int) -> bool:
         return self._id_at(row) is not None and self.song_at(row) is None
 
@@ -511,6 +593,7 @@ class Playlists(QObject):
         library: Library,
         read: Callable[[], sqlite3.Connection],
         say: Callable[[str], object] | None = None,
+        offer: Callable[[str, Callable[[], object]], object] | None = None,
         trash: art.Trash = art.to_trash,
         available: Callable[[], bool] = lambda: True,
         home: str = "",
@@ -518,7 +601,7 @@ class Playlists(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._store, self._read, self._say_to = store, read, say
+        self._store, self._read, self._say_to, self._offer_to = store, read, say, offer
         self._library: Library | None = library
         self._trash, self._available, self._home = trash, available, home
         self._executor = executor
@@ -541,6 +624,13 @@ class Playlists(QObject):
     def _say(self, text: str) -> None:
         if self._say_to is not None:
             self._say_to(text)
+
+    def _offer(self, text: str, undo: Callable[[], object]) -> None:
+        """A message with Undo (R8.5); said without it when there is none to offer it."""
+        if self._offer_to is not None:
+            self._offer_to(text, undo)
+        else:
+            self._say(text)
 
     def _run(self, job: Callable[[], Any], then: Callable[[Any], None]) -> None:
         """job() on the playlists' thread; then(its result, or the PlaylistError or error it
@@ -623,16 +713,89 @@ class Playlists(QObject):
     def addTo(self, playlist: int, model: QObject, row: int = -1) -> None:  # noqa: N802
         """Add to playlist (R2.9.6, L03): the songs of the selection (row -1), or of the row
         right-clicked, added at the playlist's end."""
-        songs = songs_of(model, row)
+        self.add_songs(playlist, songs_of(model, row))
+
+    def add_songs(self, playlist: int, songs: Sequence[int], note: str = "") -> None:
+        """`songs` (by id) added at the playlist's end (R8.5): from Add to playlist, or dropped on
+        it. The message says how many, and how many it held already, added again all the same,
+        then `note`; its Undo takes them back out (`take_back`)."""
         if not songs or not self._can():
             return
         store = self._store
 
         def then(done: core.Changed) -> None:
             self._reload()
-            self._say(added_text(done.count, done.name))
+            text = added_text(done.count, done.name, done.already)
+            text = f"{text}; {note}" if note else text
+            if done.count and done.playlist is not None:
+                self._offer(text, lambda: self._take_back(playlist, done))
+            else:
+                self._say(text)
 
         self._run(lambda: store.add(playlist, songs), then)
+
+    def _take_back(self, playlist: int, done: core.Changed) -> None:
+        """R8.5's Undo: the songs an addition (`done`) put at the playlist's end taken back out."""
+        if not self._can():
+            return
+        store = self._store
+
+        def then(back: core.Changed) -> None:
+            self._reload()
+            self._say(took_back_text(back.count, len(done.positions), back.name))
+
+        self._run(lambda: store.take_back(playlist, done.positions, done.paths), then)
+
+    def add_files(self, playlist: int, paths: Sequence[str]) -> None:
+        """Files and folders a file manager dropped on the playlist (R8.5), by their whole paths:
+        the songs of those under the root added; those outside it wait for R12.5 (a later
+        version), which the message says."""
+        if not self._can():
+            return
+        inside, outside = core.dropped(paths, self._store.root)
+        songs = core.songs_dropped(self._read(), inside)
+        note = dropped_text(len(outside), len(songs))
+        if songs:
+            self.add_songs(playlist, songs, note if outside else "")
+        elif note:
+            self._say(note)
+
+    # ---------- reordering (R8.5, R6.9, R18.2) ----------
+
+    def _reorder(self, model: EntriesModel, job: Callable[[], core.Changed]) -> None:
+        """A reorder run on the playlists' thread; then its entries, where they are now, stay
+        selected, so Ctrl+Shift+↑ / ↓ goes on moving them."""
+        if not self._can():
+            return
+        playlist = model.playlist()
+
+        def then(done: core.Changed) -> None:
+            self._reload()
+            if model.playlist() == playlist and done.positions:
+                model.select_positions(done.positions)
+
+        self._run(job, then)
+
+    def move_entries(self, model: QObject, entries: Sequence[int], before: int) -> None:
+        """Entries of a playlist's page dragged within it (R8.5): moved, in their order, above
+        the entry at place `before` (past the last: to the end), where the insertion line was."""
+        if not isinstance(model, EntriesModel) or not entries:
+            return
+        store, playlist = self._store, model.playlist()
+        self._reorder(model, lambda: store.move(playlist, entries, before))
+
+    @Slot(QObject, int, int, result=bool)
+    def pressMove(self, model: QObject, key: int, modifiers: int) -> bool:  # noqa: N802
+        """A key on a playlist's page: Ctrl+Shift+↑ / ↓ (⇧⌘ on macOS) moves the entries selected
+        one place up or down (R6.9, R18.2); False for any other key, which goes on to the list."""
+        by = move_key(key, modifiers)
+        if not by or not isinstance(model, EntriesModel):
+            return False
+        entries = model.selected_entries()
+        if entries:
+            store, playlist = self._store, model.playlist()
+            self._reorder(model, lambda: store.nudge(playlist, entries, by))
+        return True
 
     def _edit(self, playlist: int) -> None:
         self._editing = playlist

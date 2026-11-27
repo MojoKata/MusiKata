@@ -325,10 +325,10 @@ def test_new_playlist_from_selection_holds_the_selection_and_add_to_playlist_add
     assert lists.property("editing") >= 0
     road = ids_of(index, "Road Trip")
     lists.addTo(road, songs, 2)  # the row is in the selection: all of it
-    assert done(lists, qtbot) == "Added 3 songs to Road Trip"
+    assert done(lists, qtbot) == "Added 3 songs to Road Trip (2 were there already)"  # R8.5
     songs.clearSelection()
     lists.addTo(road, songs, 0)
-    assert done(lists, qtbot) == "Added 1 song to Road Trip"
+    assert done(lists, qtbot) == "Added 1 song to Road Trip (it was there already)"
     with open(os.path.join(music, "Playlists", "Road Trip.m3u8"), encoding="utf-8") as f:
         text = f.read()
     assert text.count("#EXTINF:") == 8 and text.startswith("#EXTM3U\n#EXTINF:200,Lumen Drift")
@@ -570,6 +570,127 @@ def test_the_tour_opens_export_or_find_on_the_playlist_shown(lists, root, qtbot)
     lists.closeFind()
     lists.go({"export": True})
     assert lists.property("exportOpen")
+
+
+# ---------- adding with Undo, files dropped, reordering (R8.5, R18.2) ----------
+
+
+def test_the_messages_of_r8_5_say_what_was_there_already_what_was_taken_back_and_what_waits():
+    assert (
+        added_text(3, "Evening Focus", 1) == "Added 3 songs to Evening Focus (1 was there already)"
+    )
+    assert added_text(3, "Evening Focus", 2).endswith("(2 were there already)")
+    assert added_text(1, "Evening Focus", 1).endswith("(it was there already)")
+    assert lists_app.took_back_text(3, 3, "Road Trip") == "Took 3 songs back out of Road Trip"
+    assert lists_app.took_back_text(1, 3, "Road Trip").endswith("; 2 had moved since and stay")
+    assert lists_app.took_back_text(0, 3, "Road Trip").startswith("Nothing was taken out")
+    assert lists_app.dropped_text(2, 0) == lists_app.OUTSIDE_LATER
+    assert lists_app.dropped_text(0, 0) == "Nothing dropped is a song in your library"
+    assert lists_app.dropped_text(0, 4) == ""
+
+
+def test_ctrl_shift_up_and_down_are_the_keys_that_move_songs_in_a_playlist():
+    """R6.9, R18.2 (⇧⌘ on macOS, which Qt gives as Ctrl)."""
+    ctrl, shift = Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.ShiftModifier
+    up, down = int(Qt.Key.Key_Up), int(Qt.Key.Key_Down)
+    assert lists_app.move_key(up, (ctrl | shift).value) == -1
+    assert lists_app.move_key(down, (ctrl | shift).value) == 1
+    assert lists_app.move_key(down, shift.value) == 0  # Shift+↓ extends the selection
+    assert lists_app.move_key(down, (ctrl | shift | Qt.KeyboardModifier.AltModifier).value) == 0
+    assert lists_app.move_key(int(Qt.Key.Key_Left), (ctrl | shift).value) == 0
+
+
+@pytest.fixture
+def offering(root):
+    """Playlists whose messages may offer Undo (R8.5), each kept with it."""
+    music, index, library = root
+    said = Said()
+    offered = []
+
+    def offer(text, undo):
+        offered.append(undo)
+        said.append(text)
+
+    p = Playlists(Store(music, index), library, index.read, say=said, offer=offer)
+    p.said, p.offered = said, offered
+    yield p
+    p.shut()
+
+
+def test_songs_added_say_those_there_already_and_undo_takes_the_addition_back_out(
+    offering, root, qtbot
+):
+    """R8.5: added at its end anyway, the message says so, and Undo takes them back out."""
+    music, index, library = root
+    road = ids_of(index, "Road Trip")
+    alpha, beta = (index.read().execute("SELECT id FROM song WHERE title = ?", (t,)).fetchone()[0]
+                   for t in ("Alpha", "Beta"))  # fmt: skip
+    offering.add_songs(road, [beta, alpha])
+    assert done(offering, qtbot, 0) == "Added 2 songs to Road Trip (1 was there already)"
+    assert library.property("playlists").items()[1]["count"] == "6"
+    offering.offered[-1]()  # the message's Undo
+    assert done(offering, qtbot) == "Took 2 songs back out of Road Trip"
+    with open(os.path.join(music, "Playlists", "Road Trip.m3u8"), encoding="utf-8") as f:
+        assert f.read().count("#EXTINF") == 4
+    n = len(offering.said)
+    offering.add_songs(road, [])  # nothing: nothing said
+    assert len(offering.said) == n
+
+
+def test_a_file_managers_files_dropped_on_a_playlist_are_added_and_those_outside_wait(
+    offering, root, qtbot, tmp_path
+):
+    """R8.5: files and folders under the root added, their songs; those outside it are R12.5's,
+    a later version, which the message says."""
+    music, index, library = root
+    evening = ids_of(index, "Evening")
+    offering.add_files(evening, [os.path.join(music, "A"), "/elsewhere/x.mp3"])
+    said = done(offering, qtbot, 0)
+    assert said == f"Added 2 songs to Evening; {lists_app.OUTSIDE_LATER}"
+    offering.add_files(evening, ["/elsewhere/x.mp3"])
+    assert offering.said[-1] == lists_app.OUTSIDE_LATER
+    offering.add_files(evening, [os.path.join(music, "A", "cover.jpg")])
+    assert offering.said[-1] == "Nothing dropped is a song in your library"
+    offering.add_files(evening, [os.path.join(music, "B", "Gamma.mp3")])
+    assert done(offering, qtbot, len(offering.said)) == (
+        "Added 1 song to Evening (it was there already)"
+    )
+
+
+def test_a_playlists_songs_are_moved_by_dragging_and_by_keys_and_stay_selected(lists, root, qtbot):
+    """R8.5, R6.9, R18.2: dragged above the line, or Ctrl+Shift+↑ / ↓; the songs moved stay
+    selected where they now are, so the keys go on moving them."""
+    music, index, library = root
+    library.openPlaylist(ids_of(index, "Road Trip"))
+    model = library.property("playlistPage").property("songs")
+
+    def titles():
+        return [model.row(i)["title"] for i in range(model.rowCount())]
+
+    assert titles() == ["Alpha", "Gamma", "gone", "Alpha"]
+    assert model.position_at(1) == 1 and model.position_at(9) == 4
+    lists.move_entries(model, model.entries_at(0), model.position_at(3))  # above the 4th row
+    qtbot.waitUntil(lambda: titles() == ["Gamma", "gone", "Alpha", "Alpha"], timeout=WAIT)
+
+    def selected(row):
+        return len(model.selected_entries()) == 1 and model.selected_entries() == model.entries_at(
+            row
+        )
+
+    qtbot.waitUntil(lambda: selected(2), timeout=WAIT)
+    ctrl_shift = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier).value
+    assert lists.pressMove(model, int(Qt.Key.Key_Up), ctrl_shift)
+    qtbot.waitUntil(lambda: titles() == ["Gamma", "Alpha", "gone", "Alpha"], timeout=WAIT)
+    qtbot.waitUntil(lambda: selected(1), timeout=WAIT)
+    assert not lists.pressMove(model, int(Qt.Key.Key_Up), 0)  # the list's own key
+    model.clearSelection()
+    assert lists.pressMove(model, int(Qt.Key.Key_Down), ctrl_shift)  # nothing selected: taken
+    assert not lists.pressMove(library.property("songs"), int(Qt.Key.Key_Up), ctrl_shift)
+    lists.move_entries(library.property("songs"), [1], 0)  # not a playlist's: nothing
+    with open(os.path.join(music, "Playlists", "Road Trip.m3u8"), encoding="utf-8") as f:
+        assert [x for x in f.read().splitlines() if not x.startswith("#")] == [
+            "../B/Gamma.mp3", "../A/01 Alpha.flac", "../A/gone.flac", "../A/01 Alpha.flac"
+        ]  # fmt: skip
 
 
 # ---------- in the window ----------

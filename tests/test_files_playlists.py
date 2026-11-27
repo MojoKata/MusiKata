@@ -286,6 +286,79 @@ def test_a_missing_entry_found_names_its_file_wherever_it_was_listed():
     assert locations(out) == ["../found/it.mp3", "../b.mp3", "../found/it.mp3"]
 
 
+def test_songs_already_there_are_counted_and_an_addition_is_taken_back_only_where_it_still_is():
+    """R8.5: a song already in the playlist is added again, and the message says how many were;
+    Undo takes the addition back out, each entry only while it is still where it went naming its
+    song."""
+    p = Playlist((Entry("../a.mp3"), Entry("/music/b/c.mp3")))
+    assert (
+        playlists.already_in(p, ["a.mp3", "b/c.mp3", "a.mp3", "d.mp3"], "Playlists", "/music") == 3
+    )
+    more = playlists.added(p, ["a.mp3", "d.mp3"], "Playlists")
+    back, n = playlists.taken_back(more, [2, 3], ["a.mp3", "d.mp3"], "Playlists", "/music")
+    assert (back, n) == (p, 2)
+    moved = playlists.reordered(more, [3, 0, 1, 2])  # d.mp3 moved to the top since
+    back, n = playlists.taken_back(moved, [2, 3], ["a.mp3", "d.mp3"], "Playlists", "/music")
+    assert n == 0 and back == moved
+    assert playlists.taken_back(p, [5], ["a.mp3"], "Playlists", "/music") == (p, 0)
+
+
+def test_a_reorder_puts_the_entries_dragged_above_the_line_in_their_order():
+    """R8.5: several at once, wherever they were, land together where the insertion line is."""
+    assert playlists.move_order(6, {1, 3}, 5) == [0, 2, 4, 1, 3, 5]
+    assert playlists.move_order(6, {4, 1}, 0) == [1, 4, 0, 2, 3, 5]
+    assert playlists.move_order(6, {1, 2}, 6) == [0, 3, 4, 5, 1, 2]
+    assert playlists.move_order(6, {1, 2}, 2) == list(range(6))  # onto themselves: no change
+    assert playlists.move_order(3, {7, -1}, 0) == [0, 1, 2]
+    assert playlists.places_of([0, 2, 4, 1, 3, 5], {1, 3}) == (3, 4)
+    p = Playlist(tuple(Entry(f"{n}.mp3") for n in range(3)))
+    assert locations(playlists.reordered(p, [2, 0, 1])) == ["2.mp3", "0.mp3", "1.mp3"]
+
+
+def test_ctrl_shift_arrows_move_each_entry_a_place_a_run_together_and_hold_at_the_ends():
+    """R6.9, R18.2: Ctrl+Shift+↑ / ↓ move the songs selected one place; at the top (or the
+    bottom) one stays, holding back those right behind it."""
+    assert playlists.nudge_order(5, {2}, -1) == [0, 2, 1, 3, 4]
+    assert playlists.nudge_order(5, {1, 2}, -1) == [1, 2, 0, 3, 4]
+    assert playlists.nudge_order(5, {0, 1, 3}, -1) == [0, 1, 3, 2, 4]
+    assert playlists.nudge_order(5, {1, 3}, 1) == [0, 2, 1, 4, 3]
+    assert playlists.nudge_order(5, {3, 4}, 1) == [0, 1, 2, 3, 4]
+    assert playlists.nudge_order(0, set(), 1) == []
+
+
+@given(
+    st.integers(0, 12).flatmap(
+        lambda n: st.tuples(st.just(n), st.sets(st.integers(0, max(0, n - 1))),
+                            st.integers(0, n), st.sampled_from([-1, 1]))
+    )
+)  # fmt: skip
+def test_every_reorder_keeps_every_entry_and_the_order_of_those_moved_and_of_the_rest(case):
+    """Whatever is dragged where, or nudged, no entry is lost or doubled, those moved keep their
+    order among themselves, and so do the others."""
+    n, chosen, before, by = case
+    chosen = {c for c in chosen if c < n}
+    for order in (playlists.move_order(n, chosen, before), playlists.nudge_order(n, chosen, by)):
+        assert sorted(order) == list(range(n))
+        assert [o for o in order if o in chosen] == sorted(chosen)
+        assert [o for o in order if o not in chosen] == sorted(set(range(n)) - chosen)
+    moved = playlists.move_order(n, chosen, before)
+    places = playlists.places_of(moved, chosen)
+    assert list(places) == list(range(places[0], places[0] + len(chosen))) if chosen else True
+
+
+def test_files_dropped_are_those_under_the_root_by_their_paths_and_those_outside_as_given():
+    """R8.5, R12.5: a file manager's files under the root are the library's; the rest wait."""
+    inside, outside = playlists.dropped(
+        ["/music/A/a.mp3", "/music/B", "/elsewhere/x.mp3", "/music/../up.mp3", ""], "/music"
+    )
+    assert inside == ["A/a.mp3", "B"]
+    assert outside == ["/elsewhere/x.mp3", "/music/../up.mp3", ""]
+    assert playlists.dropped(["C:/Music/A/a.mp3", "D:/x.mp3"], "c:\\music") == (
+        ["A/a.mp3"],
+        ["D:/x.mp3"],
+    )
+
+
 def test_files_moved_are_named_anew_and_a_playlist_naming_none_of_them_is_left_alone():
     p = Playlist((Entry("/music/a.mp3"), Entry("../b.mp3", 3, "B")))
     out = playlists.repointed(p, "Playlists", "/music", {"a.mp3": "x/a.mp3"})
@@ -757,3 +830,69 @@ def test_a_missing_entrys_dismissal_keeps_its_playlist_its_place_and_the_playlis
     d = attention.dismissal_of(e, datetime(2026, 11, 27, tzinfo=UTC).isoformat())
     assert (d.kind, d.about, d.modified, d.hash) == (attention.MISSING, "P/a.m3u8\tx.mp3", 5.0,
                                                      None)  # fmt: skip
+
+
+def test_adding_says_where_the_songs_went_and_how_many_were_there_and_undo_takes_them_back(
+    root, tmp_path
+):
+    """R8.5: added at the end, those there already added again; Undo takes the addition back out,
+    leaving what another program added since, and says nothing was taken once they have moved."""
+    music, index = root
+    store = store_of(root)
+    made = store.create(song_ids(index, "A/a.mp3"))
+    done = store.add(made.playlist, song_ids(index, "A/a.mp3", "B/c.mp3"))
+    assert (done.count, done.positions, done.paths, done.already) == (
+        2, (1, 2), ("A/a.mp3", "B/c.mp3"), 1
+    )  # fmt: skip
+    path = tmp_path / "Music" / "Playlists" / "New playlist.m3u8"
+    path.write_text(path.read_text() + "../A/b.mp3\n")  # another program, since
+    back = store.take_back(made.playlist, done.positions, done.paths)
+    assert back.count == 2 and back.name == "New playlist"
+    assert [r[2] for r in entries_of(index, "Playlists/New playlist.m3u8")] == [
+        "A/a.mp3",
+        "A/b.mp3",
+    ]
+    assert store.take_back(made.playlist, done.positions, done.paths).count == 0
+
+
+def test_entries_are_moved_by_dragging_and_by_keys_and_a_move_onto_themselves_writes_nothing(
+    root, tmp_path
+):
+    """R8.5, R18.2: the entries chosen move, in their order, where the line was, or a place up or
+    down; each matched to the file again, so one another program changed since stays; a move
+    that changes nothing leaves the file as it was (R8.1.2)."""
+    music, index = root
+    store = store_of(root)
+    made = store.create(song_ids(index, "A/a.mp3", "A/b.mp3", "B/c.mp3"))
+
+    def ids():
+        return [r[0] for r in index.read().execute(
+            "SELECT id FROM playlist_entry ORDER BY position")]  # fmt: skip
+
+    def paths():
+        return [r[2] for r in entries_of(index, "Playlists/New playlist.m3u8")]
+
+    done = store.move(made.playlist, [ids()[0], ids()[1]], 3)
+    assert paths() == ["B/c.mp3", "A/a.mp3", "A/b.mp3"] and done.positions == (1, 2)
+    done = store.nudge(made.playlist, [ids()[0]], 1)
+    assert paths() == ["A/a.mp3", "B/c.mp3", "A/b.mp3"] and done.positions == (1,)
+    path = tmp_path / "Music" / "Playlists" / "New playlist.m3u8"
+    before = path.stat().st_mtime_ns, path.read_bytes()
+    done = store.nudge(made.playlist, [ids()[0]], -1)  # at the top already
+    assert done.positions == (0,) and (path.stat().st_mtime_ns, path.read_bytes()) == before
+    stale = ids()
+    path.write_text("../A/b.mp3\n../A/a.mp3\n../B/c.mp3\n")  # another program, since
+    done = store.move(made.playlist, [stale[0]], 3)  # its place names another song now
+    assert done.count == 0 and path.read_text() == "../A/b.mp3\n../A/a.mp3\n../B/c.mp3\n"
+
+
+def test_the_songs_dropped_are_a_files_and_those_beneath_a_folder_each_once_in_the_order_dropped(
+    root,
+):
+    """R8.5, R2.9.6: a folder dropped stands for every song beneath it; a file that isn't a song
+    of the library (a cover, one not scanned yet) is passed by."""
+    _music, index = root
+    a, b, c = song_ids(index, "A/a.mp3", "A/b.mp3", "B/c.mp3")
+    found = playlists.songs_dropped(index.read(), ["B/c.mp3", "A", "A/a.mp3", "A/cover.jpg", "Z"])
+    assert found == [c, a, b]
+    assert playlists.songs_dropped(index.read(), []) == []

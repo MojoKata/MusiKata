@@ -10,13 +10,15 @@ import "."
 // its drag handle, to reorder the songs to come, and its ×, to take it out; a double click plays it.
 // Its rows are selected as every song list's are (R2.6), clicks and keys forwarded to the model:
 // Enter plays the first song selected, Delete takes the selection out of the queue. Esc clears the
-// selection, or with none closes it, as the × at the top does. Songs dropped onto it from other
-// views (R6.10) come with drag and drop.
+// selection, or with none closes it, as the × at the top does. Songs dragged onto it from the views,
+// or files from a file manager, play next (R6.10), the panel outlined and saying so while they are
+// over it; its own rows are still moved by their handles, within it.
 Rectangle {
     id: panel
     required property var player
     readonly property var model: player.upNext
     property int dropRow: -1           // where a dragged row would land, while one is dragged
+    property var dragging: null        // songs dragged from the views onto it (musikata.dragging)
     radius: 14
     color: Theme.surface
     border.color: Theme.borderStrong
@@ -231,6 +233,41 @@ Rectangle {
         height: 2
         color: Theme.accent
         y: target ? rows.y + target.y - rows.contentY + (panel.dropRow >= rows.count ? target.height : target.headed) : 0
+    }
+    DropArea {  // songs dragged from a view, or files from a file manager: played next (R6.10)
+        objectName: "upNextDrop"
+        anchors.fill: parent
+        enabled: panel.dragging !== null
+        onEntered: (drag) => drag.accepted = panel.dragging.enter("queue", 1, drag.getDataAsString(panel.dragging.mime), drag.urls)
+        onExited: panel.dragging.leave("queue", 1)
+        onDropped: (drop) => { if (panel.dragging.drop("queue", 1, drop.getDataAsString(panel.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
+    }
+    Rectangle {  // a drag over it: outlined, and named
+        anchors.fill: parent
+        radius: panel.radius
+        color: "transparent"
+        border.color: Theme.accent
+        border.width: 2
+        visible: panel.dragging !== null && panel.dragging.target === "queue:1"
+        Rectangle {
+            objectName: "upNextDropLabel"
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 76
+            width: Math.min(dropLabel.implicitWidth + 24, parent.width - 40)
+            height: 30
+            radius: 6
+            color: Theme.bar
+            Text {
+                id: dropLabel
+                x: 12
+                width: parent.width - 24
+                anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                text: panel.dragging !== null ? panel.dragging.targetText : ""
+                color: Theme.text
+                font { family: Theme.sans; pixelSize: 13; weight: Font.DemiBold }
+            }
+        }
     }
     Text {
         anchors.centerIn: rows

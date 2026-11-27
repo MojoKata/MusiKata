@@ -16,17 +16,20 @@ written as R8.1 says, and kept in the index's `playlist` and `playlist_entry` ta
   A file is written whole through a temporary file beside it and `os.replace` (`write_file`,
   A2.8), never half. A playlist read from elsewhere is rewritten only when it changes in MusiKata
   (`Store`); an `.m3u` keeps the legacy encoding it was read in when its text fits it.
-- **The plans** (`added`, `removed`, `fixed`, `repointed`), the names (`file_name`, `unique`,
-  `copy_name`), Find's matching (`candidates`) and Export's plan (`export_plan`) are plain
-  functions over plain data, tested without a file.
+- **The plans** (`added`, `removed`, `fixed`, `repointed`; R8.5's `already_in`, `taken_back`,
+  `move_order` and `nudge_order`), the names (`file_name`, `unique`, `copy_name`), Find's
+  matching (`candidates`), Export's plan (`export_plan`) and the files a file manager dropped
+  (`dropped`) are plain functions over plain data, tested without a file.
 - **The index** (`index_file`, `refresh`): the scan finds `.m3u` and `.m3u8` files anywhere under
   the root (scanner.walk) and reads those whose size or modification time changed, so one another
   program changes is read again when the watcher sees it (R8.1.3, R2.4).
 - **MusiKata's own changes** (`Store`): making, renaming, duplicating and removing a playlist
-  (R8.3, R8.4), adding and removing entries (R8.6), fixing a missing one (R8.7), each the file read
-  again first, changed, written and indexed, one at a time; and `Store.repoint`, which points every
-  playlist naming a file moved at its new path: what R2.12's Move the others to the trash calls for
-  the copies it removed, and what Organize files (R12.4) calls when it moves files."""
+  (R8.3, R8.4), adding entries and taking an addition back out (R8.5's Undo), moving them by
+  dragging or by keys (R8.5, R18.2), removing them (R8.6), fixing a missing one (R8.7), each the
+  file read again first, changed, written and indexed, one at a time; and `Store.repoint`, which
+  points every playlist naming a file moved at its new path: what R2.12's Move the others to the
+  trash calls for the copies it removed, and what Organize files (R12.4) calls when it moves
+  files."""
 
 from __future__ import annotations
 
@@ -46,7 +49,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from urllib.parse import unquote, urlsplit
 
-from . import db, duplicates, sortnames
+from . import db, duplicates, folders, sortnames
 from .tags.safe import tmp_path
 
 log = logging.getLogger(__name__)
@@ -384,6 +387,92 @@ def repointed(p: Playlist, folder: str, root: str, moves: Mapping[str, str]) -> 
     return replace(p, entries=tuple(out)) if changed else None
 
 
+def already_in(p: Playlist, paths: Sequence[str], folder: str, root: str) -> int:
+    """How many of `paths` (under the root) the playlist in `folder` names already: what R8.5's
+    message says of songs added again."""
+    there = {resolve(e.location, folder, root) for e in p.entries}
+    return sum(1 for x in paths if x in there)
+
+
+def taken_back(
+    p: Playlist, positions: Sequence[int], paths: Sequence[str], folder: str, root: str
+) -> tuple[Playlist, int]:
+    """R8.5's Undo of an addition: the entries it put at `positions` taken out again, each only
+    while it is still there naming its song (`paths`, the same order); the playlist, and how many
+    were taken out. One moved or changed since stays."""
+    gone = {
+        n for n, path in zip(positions, paths, strict=False)
+        if 0 <= n < len(p.entries) and resolve(p.entries[n].location, folder, root) == path
+    }  # fmt: skip
+    return removed(p, gone), len(gone)
+
+
+def move_order(count: int, positions: Collection[int], before: int) -> list[int]:
+    """A reorder by dragging (R8.5): the entries at `positions` (from 0, of `count`) moved, in
+    their order, to land above the entry at `before` (`count`: at the end), where the insertion
+    line is. The new order, as the old places in it."""
+    moving = sorted(n for n in set(positions) if 0 <= n < count)
+    kept = [n for n in range(count) if n not in set(moving)]
+    at = sum(1 for n in kept if n < before)
+    return kept[:at] + moving + kept[at:]
+
+
+def nudge_order(count: int, positions: Collection[int], by: int) -> list[int]:
+    """Ctrl+Shift+↑ / ↓ (R6.9, R18.2): each entry at `positions` moved one place up (`by` -1) or
+    down (1), past the entry beside it that isn't moving; a run of them moves together, and one
+    at the end it moves towards stays, holding back those behind it. The new order, as the old
+    places in it."""
+    order = list(range(count))
+    chosen = set(positions)
+    step = -1 if by < 0 else 1
+    for i in range(count) if step < 0 else range(count - 1, -1, -1):
+        j = i + step
+        if order[i] in chosen and 0 <= j < count and order[j] not in chosen:
+            order[i], order[j] = order[j], order[i]
+    return order
+
+
+def reordered(p: Playlist, order: Sequence[int]) -> Playlist:
+    """The playlist's entries in `order` (their old places, from 0)."""
+    return replace(p, entries=tuple(p.entries[n] for n in order))
+
+
+def places_of(order: Sequence[int], positions: Collection[int]) -> tuple[int, ...]:
+    """Where the entries at `positions` are in `order` (a reorder's): their new places."""
+    wanted = set(positions)
+    return tuple(n for n, old in enumerate(order) if old in wanted)
+
+
+# ---------- files dropped from outside (R8.5, R6.10) ----------
+
+
+def dropped(paths: Iterable[str], root: str) -> tuple[list[str], list[str]]:
+    """Files and folders a file manager dropped, by their whole paths: those under the root, as
+    their paths under it (with `/`), and those outside it, which R12.5 adds (later), as given."""
+    inside, outside = [], []
+    for path in paths:
+        under = resolve(path, "", root) if path else None
+        if under is None:
+            outside.append(path)
+        else:
+            inside.append(under)
+    return inside, outside
+
+
+def songs_dropped(c: sqlite3.Connection, paths: Sequence[str]) -> list[int]:
+    """The songs files and folders dropped stand for (their paths under the root), in the order
+    dropped: a file's song, a folder's songs beneath it as Folders lists them (R2.9.6); each once,
+    and what isn't a song of the index (a cover, a file not scanned yet) passed by."""
+    out: dict[int, None] = {}
+    for path in paths:
+        r = c.execute("SELECT id FROM song WHERE path = ?", (path,)).fetchone()
+        if r is not None:
+            out[int(r[0])] = None
+        elif c.execute("SELECT 1 FROM folder WHERE path = ?", (path,)).fetchone() is not None:
+            out.update(dict.fromkeys(folders.songs_beneath(c, path)))
+    return list(out)
+
+
 # ---------- Find (R8.7) ----------
 
 
@@ -703,11 +792,17 @@ class PlaylistError(Exception):
 @dataclass(frozen=True)
 class Changed:
     """A change made: the playlist's id and name (None and the old name for one removed), and
-    how many entries it added, removed or fixed."""
+    how many entries it added, removed, fixed or moved. An addition says where its entries went
+    (`positions`), the songs they name (`paths`, under the root), and how many of those the
+    playlist named already (`already`, R8.5); a reorder where the entries moved now
+    (`positions`)."""
 
     playlist: int | None
     name: str
     count: int = 0
+    positions: tuple[int, ...] = ()
+    paths: tuple[str, ...] = ()
+    already: int = 0
 
 
 class Store:
@@ -827,27 +922,84 @@ class Store:
             return Changed(playlist, name_of(path), len(paths))
 
     def add(self, playlist: int, songs: Sequence[int]) -> Changed:
-        """`songs` (by id) added at the playlist's end (R8.5's Add to playlist)."""
+        """`songs` (by id) added at the playlist's end (R8.5: Add to playlist, and songs dropped
+        on it), those it names already added again; where they went and how many were there
+        already, for the message and its Undo (`take_back`)."""
         paths = self.paths_of(songs)
-        written = self._change(playlist, lambda p, folder: added(p, paths, folder))
-        return Changed(written, self.name(written), len(paths))
+        seen: dict[str, int] = {}
+
+        def plan(p: Playlist, folder: str) -> Playlist:
+            seen["start"] = len(p.entries)
+            seen["already"] = already_in(p, paths, folder, self.root)
+            return added(p, paths, folder)
+
+        written = self._change(playlist, plan)
+        start = seen["start"]
+        return Changed(written, self.name(written), len(paths),
+                       tuple(range(start, start + len(paths))), tuple(paths),
+                       seen["already"])  # fmt: skip
+
+    def take_back(self, playlist: int, positions: Sequence[int], paths: Sequence[str]) -> Changed:
+        """R8.5's Undo of an addition (`add`'s `positions` and `paths`): those entries taken out
+        again, each while it is still where it went naming its song; how many were."""
+        taken: dict[str, int] = {}
+
+        def plan(p: Playlist, folder: str) -> Playlist:
+            out, taken["n"] = taken_back(p, positions, paths, folder, self.root)
+            return out
+
+        written = self._change(playlist, plan)
+        return Changed(written, self.name(written), taken["n"])
+
+    def _places(self, playlist: int, entries: Collection[int]) -> dict[int, str]:
+        """The entries `entries` (ids in the index) by their place, with what each names as
+        written: what a change matches the file against again."""
+        if not entries:
+            return {}
+        c = self.index.read()
+        return {int(p): str(w) for p, w in c.execute(
+            "SELECT position, written FROM playlist_entry WHERE playlist_id = ? AND id IN"
+            f" ({', '.join('?' * len(entries))})", (playlist, *entries)
+        )}  # fmt: skip
+
+    @staticmethod
+    def _still(p: Playlist, rows: Mapping[int, str]) -> set[int]:
+        return {n for n, w in rows.items() if n < len(p.entries) and p.entries[n].location == w}
 
     def remove(self, playlist: int, entries: Collection[int]) -> Changed:
         """The entries `entries` (their ids in the index) taken out (R8.6); each is matched to the
         file again by its place and what it names, so one another program moved since stays."""
-        c = self.index.read()
-        rows = {int(p): str(w) for p, w in c.execute(
-            "SELECT position, written FROM playlist_entry WHERE playlist_id = ? AND id IN"
-            f" ({', '.join('?' * len(entries))})", (playlist, *entries)
-        )} if entries else {}  # fmt: skip
-
-        def plan(p: Playlist, _folder: str) -> Playlist:
-            gone = {n for n, w in rows.items()
-                    if n < len(p.entries) and p.entries[n].location == w}  # fmt: skip
-            return removed(p, gone)
-
-        written = self._change(playlist, plan)
+        rows = self._places(playlist, entries)
+        written = self._change(playlist, lambda p, _folder: removed(p, self._still(p, rows)))
         return Changed(written, self.name(written), len(rows))
+
+    def _reorder(
+        self, playlist: int, entries: Collection[int], order: Callable[[int, set[int]], list[int]]
+    ) -> Changed:
+        """The entries `entries` put in the order `order` makes of the playlist's length and their
+        places (those still there, as `remove` matches them); a playlist that order leaves as it
+        is isn't written (R8.1.2: one read from elsewhere keeps its form)."""
+        rows = self._places(playlist, entries)
+        with self._lock:
+            path, kind = self._row(playlist)
+            p = self._read(path)
+            there = self._still(p, rows)
+            new = order(len(p.entries), there)
+            places = places_of(new, there)
+            if new != list(range(len(p.entries))):
+                playlist = self._write(path, reordered(p, new), kind)
+        return Changed(playlist, self.name(playlist), len(places), places)
+
+    def move(self, playlist: int, entries: Collection[int], before: int) -> Changed:
+        """The entries `entries` (ids in the index) moved, in their order, above the entry at
+        place `before` (from 0; past the last: to the end), where the insertion line was (R8.5);
+        each matched to the file again as `remove` does. Where they are now."""
+        return self._reorder(playlist, entries, lambda n, there: move_order(n, there, before))
+
+    def nudge(self, playlist: int, entries: Collection[int], by: int) -> Changed:
+        """The entries `entries` moved one place up (`by` -1) or down (1): Ctrl+Shift+↑ / ↓
+        (R6.9, R18.2). Where they are now."""
+        return self._reorder(playlist, entries, lambda n, there: nudge_order(n, there, by))
 
     def fix(self, playlist: int, location: str, song: int) -> Changed:
         """Each entry naming `location` made to name `song` (by id) instead (R8.7's Find)."""

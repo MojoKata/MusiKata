@@ -13,6 +13,7 @@ import "."
 // opens its menu (R7.2). Its songs are selected as the Songs list's are (R2.6), clicks and keys
 // forwarded to the model; Enter plays the selection from its first song, the rest of the album after
 // it (R7.1), and the menu acts on the selection when the row is in it.
+// A song dragged carries it, or the selection when it is in it (R6.10, DragSource).
 Item {
     id: page
     required property var library
@@ -22,6 +23,7 @@ Item {
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // the Album art dialog (R5.2)
     property var infer: null  // Infer from path's dialog (R3.1)
+    property var dragging: null  // a song dragged: the selection when it is in it (R6.10)
     readonly property var album: library.album
     readonly property var tracks: album.songs
     readonly property bool loading: art.loading
@@ -237,6 +239,7 @@ Item {
                 onActivated: page.player.playFrom(page.tracks, index)
                 onMenu: songMenu.openFor(page.tracks, index)
                 onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.tracks, index, star) }
+                DragSource { dragging: page.dragging; onCarry: page.dragging.carry(page.tracks, index) }
             }
             ScrollBar.vertical: ScrollBar { }
         }

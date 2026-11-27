@@ -289,6 +289,31 @@ def test_nothing_to_undo_says_so(changes, qtbot):
     assert not changes.property("busy")
 
 
+def test_a_message_can_offer_an_undo_of_its_own_which_undo_and_ctrl_z_do_while_it_shows(
+    changes, qtbot
+):
+    """R8.5, R6.7: a playlist's songs added say so with Undo, which is the playlist's own (its
+    change isn't a save of the history, R4.9); Ctrl+Z does it while the message shows; once the
+    message has gone, or another has taken its place, it is the history's again."""
+    started(changes, qtbot)
+    done = []
+    changes.offer("Added 3 songs to Road Trip", lambda: done.append("taken back"))
+    assert changes.property("message") == {"text": "Added 3 songs to Road Trip", "undo": "offered"}
+    changes.undoMessage()
+    assert done == ["taken back"] and changes.property("message") == {}
+    changes.offer("Added 1 song to Road Trip", lambda: done.append("by Ctrl+Z"))
+    changes.undoLast()
+    assert done == ["taken back", "by Ctrl+Z"]
+    changes.offer("Added 1 song to Road Trip", lambda: done.append("never"))
+    changes.say("Something else")
+    changes.undoMessage()
+    changes.offer("Added 1 song to Road Trip", lambda: done.append("never"))
+    changes.dismiss()
+    changes.undoLast()  # the history's: nothing in it
+    assert done == ["taken back", "by Ctrl+Z"]
+    assert changes.property("message")["text"] == "Nothing to undo"
+
+
 def test_while_the_root_isnt_there_undo_changes_no_file_and_says_why(root, qapp, qtbot):
     """R2.10: while the root can't be reached, every change to files is unavailable, saying why:
     Undo too, from Ctrl+Z, the panel or a file's own undo."""

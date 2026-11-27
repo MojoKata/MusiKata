@@ -4,13 +4,15 @@ import "."
 
 // The sidebar (R6.3): the app's icon and name, the library's views (Albums, Artists, Songs,
 // Genres, Folders, and Needs attention with its count, R2.8), Playlists with + (R8.3) and each
-// playlist with its count, its right-click menu Rename, Duplicate and Delete playlist… (R8.4), and
+// playlist with its count, its right-click menu Rename, Duplicate and Delete playlist… (R8.4), taking
+// songs and files dropped on it, highlighted and named while a drag is over it (R8.5), and
 // the music root's card at the bottom (R2.1.1): its path, its line, and its dot, red with the card
 // when the root isn't there (R2.10).
 Rectangle {
     id: side
     required property var library
     property var playlists: null      // what changes them (musikata.playlists)
+    property var dragging: null       // drag and drop (musikata.dragging): songs dropped on one
     width: 232
     color: Theme.side
 
@@ -110,15 +112,28 @@ Rectangle {
         boundsBehavior: Flickable.StopAtBounds
         model: side.library.playlists
         delegate: PlaylistItem {
+            id: entry
             required property int playlistId
             objectName: "side-playlist"
             width: playlistsList.width
+            z: entry.targeted ? 2 : 0  // its card and label over the playlists after it
             active: side.library.view === "playlist" && side.library.playlistPage.id === playlistId
             editing: side.playlists !== null && side.playlists.editing === playlistId
+            targeted: side.dragging !== null && side.dragging.target === "playlist:" + playlistId
+            dropText: entry.targeted ? side.dragging.targetText : ""
+            card: entry.targeted && side.dragging.held ? side.dragging.card : null
             onClicked: side.library.openPlaylist(playlistId)
             onMenu: playlistMenu.openFor(playlistId, this)
             onRenamed: (text) => side.playlists.rename(playlistId, text)
             onCancelled: side.playlists.cancelRename()
+            DropArea {  // songs dragged onto it are added at its end; a file manager's files too (R8.5)
+                objectName: "playlistDrop"
+                anchors.fill: parent
+                enabled: side.dragging !== null
+                onEntered: (drag) => drag.accepted = side.dragging.enter("playlist", entry.playlistId, drag.getDataAsString(side.dragging.mime), drag.urls)
+                onExited: side.dragging.leave("playlist", entry.playlistId)
+                onDropped: (drop) => { if (side.dragging.drop("playlist", entry.playlistId, drop.getDataAsString(side.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
+            }
         }
         ScrollBar.vertical: ScrollBar { }
     }

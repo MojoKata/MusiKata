@@ -14,6 +14,7 @@ import "."
 // selection bar counts it and offers Play next and Edit tags, which the menu and Ctrl+E open too (R4.2),
 // Infer from path (R3.1), which the menu has too, and Add to playlist (R8), which the menu has too
 // with New playlist from selection (R8.3).
+// A row dragged carries its song, or the selection when it is in it (R6.10, DragSource).
 Item {
     id: view
     required property var library
@@ -22,6 +23,7 @@ Item {
     property var edit: null
     property var infer: null    // Infer from path's dialog (R3)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
+    property var dragging: null  // a row dragged: the selection when it is in it (R6.10)
     readonly property var songs: library.songs
     focus: true
 
@@ -139,6 +141,7 @@ Item {
                 onActivated: view.player.playFrom(view.songs, index)
                 onMenu: songMenu.openFor(view.songs, index)
                 onRated: (star) => { if (view.ratings) view.ratings.rateRow(view.songs, index, star) }
+                DragSource { dragging: view.dragging; onCarry: view.dragging.carry(view.songs, index) }
             }
             ScrollBar.vertical: ScrollBar { }
         }

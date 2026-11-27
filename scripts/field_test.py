@@ -81,6 +81,13 @@ CHECKS = [
         None,
     ),
     (
+        "drag",
+        "Songs dragged from a playlist onto {files} are copied there and stay in the music "
+        "folder; songs dragged from each view onto a playlist in the sidebar, within a playlist "
+        "and onto Up next land where the drag showed they would (R6.10, R8.5).",
+        None,
+    ),
+    (
         "organize",
         "Organize files moves the demo library into its layout, and Undo puts every file back "
         "(R12, R4.9).",

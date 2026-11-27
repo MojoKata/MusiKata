@@ -3,7 +3,9 @@ index at start (the old ones removed first, A3.5) and again when the watcher see
 folder change, another computer's included; ⋮ › **Change history**, a panel docked on the right
 (as L03's Edit tags panel) listing the entries by day, each with the files it touched and the
 computer that saved it, undoing any entry, or any file of it; Ctrl+Z / ⌘Z undoing the most recent
-entry still in effect; and the message that follows a save or an undo, with **Undo** (R6.7).
+entry still in effect; and the message that follows a save or an undo, with **Undo** (R6.7). A
+change kept outside the history, a playlist's songs added (R8.5), offers an Undo of its own in the
+message (`offer`), which Ctrl+Z does too while the message shows.
 
 Undo reads the entry and plans it on a thread of its own (history.plan): a file changed since
 (R4.9.1) stops it for the question, which says what undoing would lose, file by file, and takes
@@ -54,6 +56,7 @@ NAMES = "names"  # an artist's or an album's names merged, from Needs attention 
 COPIES = "copies"  # a song's other copies moved to the trash (R2.12)
 ENCODING = "encoding"  # text in the wrong encoding written as Unicode (R4.10)
 INFER = "infer"  # tags filled or corrected from the files' paths (R3.8)
+OFFERED = "offered"  # a message's Undo that isn't an entry's: the change's own (`offer`)
 ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
            ART: "Album art", GENRE: "Genres", NAMES: "Names merged",
            COPIES: "Copies moved to the trash", ENCODING: "Encoding fixed",
@@ -291,6 +294,7 @@ class ChangeHistory(QObject):
         self._plan: Plan | None = None  # waiting on the question's answer
         self._question: dict[str, object] = {}
         self._message: dict[str, object] = {}
+        self._offered: Callable[[], object] | None = None  # the message's own Undo (`offer`)
         self._closed = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -401,7 +405,12 @@ class ChangeHistory(QObject):
 
     @Slot()
     def undoLast(self) -> None:  # noqa: N802
-        """Ctrl+Z / ⌘Z (R4.9, R6.9): the most recent entry still in effect undone."""
+        """Ctrl+Z / ⌘Z (R4.9, R6.9): the most recent entry still in effect undone; while the
+        message of a change kept outside the history offers its own Undo (`offer`), that one,
+        the change being the most recent."""
+        if self._offered is not None:
+            self.undoMessage()
+            return
         name = history.last(self._index.read())
         if name is None:
             self.say("Nothing to undo")
@@ -509,6 +518,7 @@ class ChangeHistory(QObject):
         self._own = self._own or own  # its entries named as this computer's from now on
         if out.saved and self._saved is not None:  # their rows, on this thread (Library.saved)
             self._saved(art.written_songs(out.saved))  # a cover.jpg's folder is rescanned
+        self._offered = None
         self._message = {"text": undone_text(out, what, skipped, in_trash),
                          "undo": out.entry or ""}  # fmt: skip
         self._timer.start()
@@ -520,6 +530,7 @@ class ChangeHistory(QObject):
     def after_save(self, outcome: Outcome[Written], text: str = "") -> None:
         """A save finished (the panel's, R3's, …): its message (`text`, else `saved_text`), with
         Undo when it made an entry."""
+        self._offered = None
         self._message = {"text": text or saved_text(outcome), "undo": outcome.entry or ""}
         self._timer.start()
         self.messageChanged.emit()
@@ -527,21 +538,36 @@ class ChangeHistory(QObject):
 
     def say(self, text: str) -> None:
         """A short-lived message (R6.7) with no Undo: why something can't be done now."""
+        self._offered = None
         self._message = {"text": text, "undo": ""}
+        self._timer.start()
+        self.messageChanged.emit()
+
+    def offer(self, text: str, undo: Callable[[], object]) -> None:
+        """A message (R6.7) whose Undo is `undo`: a change kept outside the history, a playlist's
+        songs added (R8.5), whose Undo is another change of its own. Ctrl+Z does it too while the
+        message shows."""
+        self._message = {"text": text, "undo": OFFERED}
+        self._offered = undo
         self._timer.start()
         self.messageChanged.emit()
 
     @Slot()
     def undoMessage(self) -> None:  # noqa: N802
-        """Undo in the message: the entry the save, or the undo, it follows made."""
+        """Undo in the message: the entry the save, or the undo, it follows made; or the undo
+        offered with it (`offer`)."""
         name = str(self._message.get("undo") or "")
+        offered = self._offered
         self.dismiss()
-        if name:
+        if offered is not None:
+            offered()
+        elif name:
             self.undo(name)
 
     @Slot()
     def dismiss(self) -> None:
         self._timer.stop()
+        self._offered = None
         if self._message:
             self._message = {}
             self.messageChanged.emit()
@@ -559,6 +585,7 @@ class ChangeHistory(QObject):
             self._executor = None
         self._plan = None
         self._saved = self._writer = self._look = self.plays = None
+        self._offered = None
 
     # ---------- what QML reads ----------
 

@@ -27,6 +27,7 @@ from . import layout
 from .albumart import AlbumArt
 from .attention import Attention
 from .bridges import Library, Player
+from .dragging import Dragging
 from .duplicates import Duplicates
 from .edittags import EditTags
 from .encodings import FixEncoding
@@ -59,8 +60,10 @@ SIZES = (SHOT, DESIGN)
 # after it, as its mockup draws it. L13 has no mockup: the Review… dialog of Signal Fires' copies
 # (R2.12) over it, drawn after T01's preview. T06 is Fix encoding… (R4.10) over it, on the demo
 # library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup draws it. P01 is Road
-# Trip's page (R8.2) with the sidebar's playlists (R6.3), as its mockup draws it but the drag, which
-# is R8.5's.
+# Trip's page (R8.2) with the sidebar's playlists (R6.3) and a drag held still (R8.5, R6.10), as
+# its mockup draws it: three of its songs selected and carried onto Evening Focus, highlighted and
+# named, the drag's card under it, and the insertion line a reorder would land on (Dragging.go:
+# offscreen, no platform drag can be held, so the targets' state is set directly).
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -131,7 +134,14 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         {"view": "attention", "attention": "copies", "review": "Signal Fires"},
     ),
     ("T06-fix-encoding", {"view": "attention", "attention": "copies", "fix": "Маяк"}),
-    ("P01-playlist-drag", {"view": "playlist", "playlist": "Road Trip"}),
+    (
+        "P01-playlist-drag",
+        {
+            "view": "playlist",
+            "playlist": "Road Trip",
+            "drag": {"rows": [1, 2, 3], "onto": "Evening Focus", "line": 5},
+        },
+    ),
     ("X03-change-history", {"view": "songs", "select": [], "history": True}),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
@@ -183,6 +193,7 @@ class Tour(QObject):
         copies: Duplicates | None = None,
         encodings: FixEncoding | None = None,
         infer: InferFromPath | None = None,
+        dragging: Dragging | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -194,7 +205,7 @@ class Tour(QObject):
         self.win, self.library, self.out, self.done = window, library, out, done
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
-        self.encodings, self.infer = encodings, infer
+        self.encodings, self.infer, self.dragging = encodings, infer, dragging
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -242,6 +253,8 @@ class Tour(QObject):
             self.encodings.go(step)
         if self.infer is not None and "view" in step:
             self.infer.go(step)
+        if self.dragging is not None and "view" in step:
+            self.dragging.go(step)
         self._size = 0
         self._at_size()
 

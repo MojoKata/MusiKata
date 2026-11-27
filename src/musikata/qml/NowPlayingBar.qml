@@ -14,6 +14,7 @@ Rectangle {
     id: bar
     required property var player
     property var ratings: null  // a star clicked rates the song shown (R10.2)
+    property var dragging: null  // songs dropped on the queue button play next (R6.10, R7.2)
     readonly property bool hasSong: player.path !== ""
     height: 88
     color: Theme.bar
@@ -259,6 +260,22 @@ Rectangle {
             on: bar.player.upNextOpen
             tint: Theme.muted
             onClicked: bar.player.toggleUpNext()
+            DropArea {  // songs dropped on it play next (R6.10, R7.2)
+                objectName: "queueDrop"
+                anchors.fill: parent
+                enabled: bar.dragging !== null
+                onEntered: (drag) => drag.accepted = bar.dragging.enter("queue", 0, drag.getDataAsString(bar.dragging.mime), drag.urls)
+                onExited: bar.dragging.leave("queue", 0)
+                onDropped: (drop) => { if (bar.dragging.drop("queue", 0, drop.getDataAsString(bar.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
+            }
+            Rectangle {  // a drag over it: outlined
+                anchors.fill: parent
+                radius: 8
+                color: "transparent"
+                border.color: Theme.accent
+                border.width: 2
+                visible: bar.dragging !== null && bar.dragging.target === "queue:0"
+            }
         }
         Item {
             width: 24

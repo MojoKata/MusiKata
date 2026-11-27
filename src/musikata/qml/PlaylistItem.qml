@@ -5,7 +5,9 @@ import "."
 // A playlist in the sidebar (R6.3, P01-playlist-drag): its icon, name and count, highlighted while
 // its page is open; a click opens it, a right click its menu (`menu`). While its name is edited
 // (+, New playlist from selection, Rename; R8.3, R8.4) the name is a text box with the name
-// selected: Enter, or a click elsewhere, keeps what was typed; Esc the name it had.
+// selected: Enter, or a click elsewhere, keeps what was typed; Esc the name it had. While a drag is
+// over it (R8.5, P01-playlist-drag) it is outlined and named under the drag's card ("Add to Evening
+// Focus"); the tour, holding a drag still, shows the card itself there.
 Item {
     id: item
     signal clicked()
@@ -16,6 +18,9 @@ Item {
     required property string count
     property bool active
     property bool editing: false
+    property bool targeted: false     // a drag is over it (R8.5): highlighted, and named under it
+    property string dropText: ""      // what dropping does: "Add to Evening Focus"
+    property var card: null           // the drag's card, shown under it while the tour holds one
     height: 32
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("%1, %2 songs").arg(item.name).arg(item.count)
@@ -39,6 +44,17 @@ Item {
         color: Theme.accentSoft
         visible: item.active
         Rectangle { y: 8; width: 3; height: 16; radius: 1.5; color: Theme.accent }
+    }
+    Rectangle {  // a drag over it (P01): outlined in the accent
+        objectName: "dropTarget"
+        x: 10
+        width: item.width - 20
+        height: item.height
+        radius: 8
+        color: Theme.accentSoft
+        border.color: Theme.accent
+        border.width: 2
+        visible: item.targeted
     }
     Icon {
         x: 32 - size / 2
@@ -89,5 +105,32 @@ Item {
         Keys.onEnterPressed: item.renamed(field.text)
         Keys.onEscapePressed: item.cancelled()
         onActiveFocusChanged: if (!activeFocus && item.editing) item.renamed(field.text)
+    }
+    DragCard {  // the drag held still by the tour (P01): its card under the playlist
+        objectName: "heldCard"
+        x: 12
+        y: item.height + 6
+        visible: item.card !== null
+        card: item.card || ({})
+    }
+    Rectangle {  // what dropping does, under where the drag's card is (P01)
+        objectName: "dropLabel"
+        x: 34
+        y: item.height + 70
+        width: Math.min(label.implicitWidth + 24, item.width - x - 10)
+        height: 30
+        radius: 6
+        color: Theme.bar
+        visible: item.targeted && item.dropText !== ""
+        Text {
+            id: label
+            x: 12
+            width: parent.width - 24
+            anchors.verticalCenter: parent.verticalCenter
+            elide: Text.ElideRight
+            text: item.dropText
+            color: Theme.text
+            font { family: Theme.sans; pixelSize: 13; weight: Font.DemiBold }
+        }
     }
 }

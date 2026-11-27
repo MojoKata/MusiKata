@@ -7,6 +7,7 @@ import "."
 // GUI thread (covers.py); `loading` says it hasn't arrived yet, for the tour to wait on. An album's
 // cover (`takesImages`) takes an image dropped on it, outlined while one is dragged over it, and
 // hands on the files' addresses (`imageDropped`): the album's art is set from it (R5.4, R6.10).
+// Songs dragged within MusiKata aren't taken.
 Item {
     id: cover
     property string source            // image://covers/<name>, or "" for none
@@ -86,6 +87,9 @@ Item {
         id: drop
         anchors.fill: parent
         enabled: cover.takesImages
+        // songs dragged within MusiKata (musikata.dragging.MIME) aren't an image: they go on to
+        // what is under the cover
+        onEntered: (drag) => drag.accepted = drag.formats.indexOf("application/x-musikata-songs") < 0
         onDropped: (event) => {
             if (event.hasUrls)
                 cover.imageDropped(event.urls)

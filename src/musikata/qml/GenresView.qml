@@ -7,11 +7,13 @@ import "."
 // by number of songs or by name as the header's sort says, worked out off the GUI thread
 // (musikata.genres). A tile opens the genre's page; its ⋯ opens its menu (R9.4). `loading` is what
 // the tour waits on: the banner still being worked out.
+// A genre dragged carries its songs (R6.10, DragSource).
 Item {
     id: view
     required property var library
     required property var player
     required property var genres
+    property var dragging: null  // a genre dragged: its songs (R6.10)
     readonly property bool loading: view.genres.reading
 
     Banner {
@@ -82,6 +84,7 @@ Item {
                 readonly property bool asked: view.genres.menuFor === cell.name
                 onAskedChanged: if (asked) genreMenu.openFor(cell.name, tile, tile.width - 30, 36)
                 Component.onCompleted: if (asked) genreMenu.openFor(cell.name, tile, tile.width - 30, 36)
+                DragSource { dragging: view.dragging; onCarry: view.dragging.carryGenre(cell.name) }
             }
         }
         ScrollBar.vertical: ScrollBar { }

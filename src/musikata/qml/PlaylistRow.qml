@@ -1,12 +1,13 @@
 import QtQuick
 import "."
 
-// A song of a playlist's page (R8.2, P01-playlist-drag): its drag handle (reordering by dragging is
-// R8.5's), its number, cover, title over artist, album, genre, rating and length; the song playing
-// has its title in the accent. An entry no song is at (R8.7) is dimmed, says "Missing" (or "Not in
-// your music folder") and the path it names, and has Find. A click selects it (Ctrl/⌘ and Shift as
-// everywhere, R2.6), selected it is highlighted, the current row outlined while the list has the
-// focus (R6.9); a double click plays it, a right click opens its menu (SongMenu).
+// A song of a playlist's page (R8.2, P01-playlist-drag): its drag handle (the row is dragged by it,
+// or anywhere on it, R8.5), its number, cover, title over artist, album, genre, rating and length;
+// the song playing has its title in the accent. An entry no song is at (R8.7) is dimmed, says
+// "Missing" (or "Not in your music folder") and the path it names, and has Find. A click selects
+// it (Ctrl/⌘ and Shift as everywhere, R2.6), selected it is highlighted, the current row outlined
+// while the list has the focus (R6.9); a double click plays it, a right click opens its menu
+// (SongMenu).
 Rectangle {
     id: row
     signal tapped(int modifiers)
@@ -60,7 +61,7 @@ Rectangle {
         font { family: Theme.sans; pixelSize: 13; features: { "tnum": 1 } }
     }
 
-    Icon {  // the drag handle (R8.5: dragging to reorder comes with it)
+    Icon {  // the drag handle (R8.5): the page's DragSource drags the row by it
         x: row.columns[0][0]
         anchors.verticalCenter: parent.verticalCenter
         name: "drag"
