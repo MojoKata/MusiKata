@@ -9,6 +9,8 @@ import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 
+from mutagen.id3 import TCON
+
 from .fields import Tags
 
 # a file's fields, by its own key: an ID3 frame id, an upper-cased Vorbis key, an MP4 atom
@@ -73,14 +75,27 @@ def id3v23_date(tyer: str | None, tdat: str | None) -> tuple[int | None, str | N
     return year, None
 
 
-def genres(values: Iterable[str]) -> tuple[str, ...]:
+_NUMBERED = re.compile(r"\(?\s*(\d{1,3})\s*\)?")  # ID3's numbered genres: "(13)", "13"
+
+
+def numbered_genre(name: str) -> str:
+    """A genre as ID3's numbered list names it, for a number of that list ("(13)" and "13" are
+    "Pop", R9.3); any other name as it is."""
+    m = _NUMBERED.fullmatch(name.strip())
+    if m and int(m.group(1)) < len(TCON.GENRES):
+        return str(TCON.GENRES[int(m.group(1))])
+    return name
+
+
+def genres(values: Iterable[str], numbered: bool = False) -> tuple[str, ...]:
     """Each genre once, in order, from values that may each hold several joined with ";" (R9.2's
     ID3v2.3 form, and what other programs write) or NUL. "/" is left alone: it is part of names
-    such as "R&B/Soul" more often than a separator."""
+    such as "R&B/Soul" more often than a separator. `numbered`: an ID3 tag's, whose numbered
+    genres are names (R9.3; Mutagen names those its own reading finds, not those after a ";")."""
     out: list[str] = []
     for v in values:
         for g in re.split(r"[;\x00]", v):
-            g = g.strip()
+            g = numbered_genre(g).strip() if numbered else g.strip()
             if g and g.casefold() not in (o.casefold() for o in out):
                 out.append(g)
     return tuple(out)
@@ -292,7 +307,7 @@ def from_id3(
         disctotal=disc_total,
         year=year,
         date=date,
-        genres=genres(get("TCON") or ()),
+        genres=genres(get("TCON") or (), numbered=True),
         comment=comment.strip() if comment else None,
         compilation=flag(text(get("TCMP"))),
         rating=popm_rating(popms),

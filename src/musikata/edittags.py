@@ -33,7 +33,19 @@ from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, Signal, Slot
 
 from musikata_core import albums, scanner, search, settings
-from musikata_core.tags import Batch, Failed, Job, Outcome, TagReadError, Tags, Written, edit, tools
+from musikata_core.genres import BUILT_IN as BUILT_IN_GENRES
+from musikata_core.tags import (
+    Batch,
+    Failed,
+    Job,
+    Outcome,
+    TagReadError,
+    Tags,
+    Written,
+    edit,
+    parse,
+    tools,
+)
 from musikata_core.tags import kept as kept_tags
 from musikata_core.tags import save as save_tags
 
@@ -42,6 +54,7 @@ from .bulktools import BulkTool, menu_of
 from .folders import FolderModel
 from .history import LABELS, ChangeHistory
 from .models import KINDS, Searcher, SongsModel, cover_url, plural, size_text, time_text, title_of
+from .preview import failed_text, progress_text
 
 log = logging.getLogger(__name__)
 
@@ -240,16 +253,6 @@ def unsaved_text(fields: int, songs: int) -> str:
     return f"Your changes to {plural(fields, 'field')} on {songs_text(songs)} aren't saved"
 
 
-def progress_text(done: int, total: int) -> str:
-    """A save's progress (R4.7): Saving 12 of 40 files…"""
-    return f"Saving {done:,} of {plural(total, 'file')}…"
-
-
-def failed_text(failed: int) -> str:
-    """The heading of the files a save couldn't write (R4.7)."""
-    return "1 file wasn't saved" if failed == 1 else f"{failed:,} files weren't saved"
-
-
 def failed_rows(failed: Sequence[Failed], root: str) -> list[dict[str, str]]:
     """The files a save couldn't write, each with why (R4.7): its name, its folder under the root,
     and the reason."""
@@ -284,8 +287,10 @@ def view_field(
 ) -> dict[str, Any]:
     """A field as QML lays it out: its label, the text it holds (what was typed, else what the
     songs share), the grey "Mixed" placeholder (R4.3), whether it is changed (R4.4: outlined, a
-    dot) or can't be written, the values in use for its ▾, and whether it suggests (R4.6)."""
+    dot) or can't be written, the values in use for its ▾, whether it suggests (R4.6), and for
+    Genre holding several genres, each as a chip (R9.2)."""
     text = field.text if typed is None else typed
+    held = parse.genres([text]) if field.name == "genres" else ()
     return {
         "name": field.name,
         "label": FIELD_LABELS.get(field.name, field.name),
@@ -299,6 +304,7 @@ def view_field(
             for v, n in field.values[:VALUES]
         ],
         "suggests": field.name in SUGGESTS,
+        "chips": list(held) if len(held) > 1 else [],
     }
 
 
@@ -371,6 +377,10 @@ class EditTags(QObject):
     ) -> None:
         super().__init__(parent)
         self._root, self._read, self._settings, self._home = root, read, tags_settings, home
+        # the genres suggested beside the library's (R9.6): the root's list, else the built-in
+        self._genre_list = (
+            tags_settings.genres if tags_settings.genres is not None else BUILT_IN_GENRES
+        )
         self._history, self._saved, self._available = history, saved, available
         self._write = write  # None: _save_one (never stored bound: a cycle, A1.3)
         self._executor = executor
@@ -472,8 +482,11 @@ class EditTags(QObject):
                 self.editFolder(folders)
                 return
         else:
-            model = {"songs": library.property("songs"),
-                     "artist": library.property("artist").property("others")}.get(view)  # fmt: skip
+            model = {
+                "songs": library.property("songs"),
+                "artist": library.property("artist").property("others"),
+                "genre": library.property("genrePage").property("songs"),
+            }.get(view)
         if model is None:
             self.edit_songs([], "")
             return
@@ -612,6 +625,12 @@ class EditTags(QObject):
         self._set(name, text)
         self._replan()
 
+    @Slot(str)
+    def removeGenre(self, genre: str) -> None:  # noqa: N802
+        """A genre chip's × (R9.2): that genre taken out of the Genre field."""
+        held = parse.genres([str(self._fields.get("genres", {}).get("text", ""))])
+        self.setText("genres", "; ".join(g for g in held if g != genre))
+
     @Slot(int)
     def rate(self, star: int) -> None:
         """A star of the rating clicked (R10.2): the songs' rating set to it, or cleared when it
@@ -673,7 +692,11 @@ class EditTags(QObject):
                 self._suggestions = found or []
                 self.suggestionsChanged.emit()
 
-        self._searcher.submit("suggest", lambda: search.suggestions(read(), name, word), then)
+        extra = self._genre_list if name == "genres" else ()  # R9.6: the built-in list too
+
+        self._searcher.submit(
+            "suggest", lambda: search.suggestions(read(), name, word, extra=extra), then
+        )
 
     @Slot()
     def clearSuggestions(self) -> None:  # noqa: N802

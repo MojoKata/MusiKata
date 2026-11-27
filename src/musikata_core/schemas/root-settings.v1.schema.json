@@ -36,7 +36,19 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "R9.6: the genre list suggested beside the library's; none: the built-in one"
+        },
+        "same_genres": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          },
+          "description": "R9.5: groups of genres the user has said are the same"
         },
         "articles": {
           "type": "array",

@@ -3,18 +3,20 @@ import "."
 
 // A banner across the view (X02-root-unavailable): its icon, a line in bold and one under it, and
 // its buttons at the right, in the tone of what it says: "err", red, for a root or a linked folder
-// that isn't there (R2.10); "warn", amber, for the question of songs gone (R2.10.1). What it says
-// is the library's.
+// that isn't there (R2.10); "warn", amber, for the question of songs gone (R2.10.1); "accent" for a
+// suggestion, genres that look like one (R9.5, G01-genres). What it says is the library's.
 Rectangle {
     id: banner
     property string tone: "err"
     property string title
     property string detail
+    property string icon: "attention"
     default property alias buttons: row.data
-    readonly property color toneColor: banner.tone === "err" ? Theme.err : Theme.warn
+    readonly property color toneColor: banner.tone === "err" ? Theme.err
+                                     : banner.tone === "accent" ? Theme.accent : Theme.warn
     height: 62
     radius: 12
-    color: banner.tone === "err" ? Theme.errSoft : Theme.warnSoft
+    color: banner.tone === "err" ? Theme.errSoft : banner.tone === "accent" ? Theme.accentSoft : Theme.warnSoft
     border.color: Qt.rgba(banner.toneColor.r, banner.toneColor.g, banner.toneColor.b, 0.45)
     Accessible.role: Accessible.AlertMessage
     Accessible.name: banner.title
@@ -23,8 +25,8 @@ Rectangle {
         x: 15
         anchors.verticalCenter: parent.verticalCenter
         size: 18
-        name: "attention"
-        color: banner.toneColor
+        name: banner.icon
+        color: banner.tone === "accent" ? Theme.accentHi : banner.toneColor
     }
     Text {
         id: titleText

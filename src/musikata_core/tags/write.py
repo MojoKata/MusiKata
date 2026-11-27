@@ -194,7 +194,7 @@ def _versions(tags: mutagen.id3.ID3, version: int) -> None:
         for f in extra:
             tags.add(f)
     if "TCON" in tags:  # R9.2: a value per genre in ID3v2.4, joined with "; " in ID3v2.3
-        genres = parse.genres(str(g) for g in tags["TCON"].genres)
+        genres = parse.genres((str(g) for g in tags["TCON"].genres), numbered=True)
         text = compose.id3v23_genres(genres) if version == 3 else list(genres)
         if text:
             tags["TCON"].text = text

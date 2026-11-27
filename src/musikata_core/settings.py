@@ -7,7 +7,8 @@ every field it doesn't know kept (A2.10); this computer's id (A2.8), made when i
 Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them; and
 shuffle and repeat (R7.3), written when the user changes them. Of the root's own `settings.json`,
 the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
-are read (`root_tags`). The rest of both files comes with Settings.
+are read (`root_tags`), with the genre list and the genres the user has said are the same (R9.5,
+R9.6). The rest of both files comes with Settings.
 
 A value it can't use is reported in the App log and its default used (R13.9); a file of a newer
 format is read for what it can and never written (A2.10)."""
@@ -344,8 +345,11 @@ class RootTags:
     modification times alone", off), and the change history's "Keep a history of tag changes"
     (`history`, on) and for how many days (`history_days`, 90) (R4.9); "Write ratings into the
     files" (`write_ratings`, on: off keeps every rating in ratings.json, R10.3) and "Rating scale
-    in files" (`rating_scale`, Windows Media's, or MusiKata's own POPM scale, R10.4.1); what
-    couldn't be used, for the log."""
+    in files" (`rating_scale`, Windows Media's, or MusiKata's own POPM scale, R10.4.1); the
+    Genre list (`genres`, R9.6: None until it is set, when the built-in one is suggested) and the
+    genres the user has said are the same (`same_genres`, R9.5: groups of names, each offered for
+    a merge whatever their spelling), both edited in Settings (R13.3); what couldn't be used, for
+    the log."""
 
     id3_version: str = "2.4"
     keep_modified_times: bool = False
@@ -354,6 +358,8 @@ class RootTags:
     write_ratings: bool = True
     rating_scale: str = "windows-media"
     problems: tuple[str, ...] = ()
+    genres: tuple[str, ...] | None = None
+    same_genres: tuple[tuple[str, ...], ...] = ()
 
 
 def _days(value: object) -> int | None:
@@ -368,14 +374,41 @@ def _days(value: object) -> int | None:
     return value if isinstance(value, int) and value >= 1 else None
 
 
+def _names(value: object) -> tuple[str, ...] | None:
+    """Genre names from `value`: a list of text, each without the spaces around it, the empty
+    ones left out; None when it isn't a list of text."""
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return None
+    return tuple(dict.fromkeys(v.strip() for v in value if v.strip()))
+
+
+def _same_genres(value: object, problems: list[str]) -> tuple[tuple[str, ...], ...]:
+    """tags.same_genres (R9.5): each group of two names or more; a group that isn't a list of
+    text, or names fewer than two, is left out and named in `problems`."""
+    if not isinstance(value, list):
+        problems.append(f"tags.same_genres isn't a list of groups of genres: {value!r}; none")
+        return ()
+    out = []
+    for group in value:
+        names = _names(group)
+        if names is None or len(names) < 2:
+            problems.append(
+                f"tags.same_genres has a group that isn't two genres or more: {group!r}"
+            )
+            continue
+        out.append(names)
+    return tuple(out)
+
+
 def root_path(root: str) -> str:
     """The root's own settings.json (R13.9), in its .musikata."""
     return os.path.join(root, ROOT_DIR, NAME)
 
 
 def parse_root_tags(text: str) -> RootTags:
-    """The `tags` group's id3_version, keep_modified_times, history, history_days, write_ratings
-    and rating_scale in the root's settings.json, `text`, whatever was written there (A2.10): what
+    """The `tags` group's id3_version, keep_modified_times, history, history_days, write_ratings,
+    rating_scale, genres and same_genres in the root's settings.json, `text`, whatever was written
+    there (A2.10): what
     can't be used is named in `problems` and takes its default (R13.9). A version written as a
     number (2.3) or with a "v" ("v2.3"), days written as text ("90") or 90.0, and a scale in
     another case or with a space or "_" ("Windows Media", "MUSIKATA") are read as meant; a newer
@@ -428,7 +461,17 @@ def parse_root_tags(text: str) -> RootTags:
             " windows-media"
         )
         scale = default.rating_scale
-    return RootTags(str(version), keep, history, days, write_ratings, str(scale), tuple(problems))
+    genres = None
+    if "genres" in group:
+        genres = _names(group["genres"])
+        if genres is None:
+            problems.append(
+                f"tags.genres isn't a list of genres: {group['genres']!r}; the built-in"
+            )
+    same = _same_genres(group.get("same_genres", []), problems)
+    return RootTags(
+        str(version), keep, history, days, write_ratings, str(scale), tuple(problems), genres, same
+    )
 
 
 def root_tags(root: str) -> RootTags:

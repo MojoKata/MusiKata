@@ -448,3 +448,38 @@ def test_a_roots_file_that_cant_be_read_or_with_problems_is_logged(tmp_path, cap
     found = settings.root_tags(str(tmp_path))
     assert (found.id3_version, found.keep_modified_times) == ("2.4", False) and found.problems
     assert "writing tags takes the defaults" in caplog.text
+
+
+def test_the_roots_own_settings_give_the_genre_list_and_the_genres_said_to_be_the_same():
+    """R9.5, R9.6, R13.3: the Genre list (None until set: the built-in one) and the groups of
+    genres the user has said are the same, as A2.10 names them."""
+    assert (settings.RootTags().genres, settings.RootTags().same_genres) == (None, ())
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": {
+        "genres": ["Jazz", " Soul ", "", "Jazz"],
+        "same_genres": [["Electronic", "Electronica"], [" Synthwave", "Retrowave", ""]],
+    }}))  # fmt: skip
+    assert found.genres == ("Jazz", "Soul") and found.problems == ()
+    assert found.same_genres == (("Electronic", "Electronica"), ("Synthwave", "Retrowave"))
+    assert settings.parse_root_tags('{"format": 1, "tags": {"genres": []}}').genres == ()
+
+
+@pytest.mark.parametrize(
+    "tags, problem",
+    [
+        ({"genres": "Jazz"}, "tags.genres isn't a list of genres"),
+        ({"genres": ["Jazz", 5]}, "tags.genres isn't a list of genres"),
+        ({"same_genres": {"Electronic": "Electronica"}}, "isn't a list of groups"),
+        ({"same_genres": [["Electronic"]]}, "a group that isn't two genres or more"),
+        ({"same_genres": [["Electronic", " "]]}, "a group that isn't two genres or more"),
+        ({"same_genres": ["Electronic", "Electronica"]}, "a group that isn't two genres or more"),
+        ({"same_genres": [["Electronic", None]]}, "a group that isn't two genres or more"),
+    ],
+)
+def test_the_genre_settings_broken_or_in_another_form(tags, problem):
+    """R13.9: a broken value is reported and its default used; a broken group alone is left out."""
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": tags}))
+    assert found.genres is None and found.same_genres == ()
+    assert [p for p in found.problems if problem in p]
+    kept = settings.parse_root_tags(json.dumps({"format": 1, "tags": {
+        "same_genres": [["Electronic"], ["Hip-Hop", "Rap"]]}}))  # fmt: skip
+    assert kept.same_genres == (("Hip-Hop", "Rap"),) and len(kept.problems) == 1

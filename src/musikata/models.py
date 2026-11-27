@@ -280,6 +280,26 @@ def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
+def average_of(total: int | None, rated: int) -> dict[str, object]:
+    """The average of an album's or artist's rated songs (R10.1), for its page: its stars,
+    rounded half up, and in words ("4.3 average of 9 rated songs"); {} when none is rated."""
+    if not rated or not total:
+        return {}
+    mean = total / rated
+    return {
+        "stars": max(1, min(5, int(mean + 0.5))),
+        "text": f"{mean:.1f} average of {plural(rated, 'rated song')}",
+    }
+
+
+def average_in(c: sqlite3.Connection, where: str, params: tuple[object, ...]) -> dict[str, object]:
+    """`average_of` the songs `where` picks."""
+    total, rated = c.execute(
+        f"SELECT SUM(rating), COUNT(*) FROM song WHERE rating > 0 AND ({where})", params
+    ).fetchone()
+    return average_of(total, rated)
+
+
 class Searcher(QObject):
     """The search thread (R2.7, A1.3): runs the newest piece of work each list sent it, on a
     thread of its own with its own reading connection, and hands each result back on the GUI
@@ -781,11 +801,19 @@ class SongsModel(PagedModel):
     laterActions = QtProperty(list, lambda self: SONG_LATER, constant=True)
 
 
+# the albums with a song of a genre (R9.1's page), its parameter the genre
+GENRE_ALBUMS = (
+    "id IN (SELECT song.album_id FROM song_genre JOIN song ON song.id = song_genre.song_id"
+    " WHERE song_genre.genre = ?)"
+)
+
+
 class AlbumsModel(PagedModel):
     """Albums (R2.6): every one by album artist and title, by their sort names (R2.13), or those
-    of one genre; or one artist's, by year. Each row: its id (albumId), title, artist, year, the
-    line under its cover ("Lumen Drift · 2019"), genre, songs, length and cover, and whether it is
-    playing."""
+    whose genre is one (Albums' chips); or one artist's, by year; or those with a song of a genre
+    (a genre's page, R9.1), by album artist and title. Each row: its id (albumId), title, artist,
+    year, the line under its cover ("Lumen Drift · 2019"), genre, songs, length and cover, and
+    whether it is playing."""
 
     roles = (
         "albumId", "title", "artist", "year", "line", "genre", "songs", "time", "cover", "playing"
@@ -803,6 +831,7 @@ class AlbumsModel(PagedModel):
         super().__init__(read, parent, searcher)
         self._artist_id = artist_id
         self._genre = ""
+        self._of_genre: str | None = None  # a genre's page's: the genre of their songs
         self._sort = "artist"
         self._playing = -1  # the id of the album playing
 
@@ -817,6 +846,8 @@ class AlbumsModel(PagedModel):
                 "year IS NULL, year, title_key, id",
             )
         order = ALBUM_SORTS[self._sort]
+        if self._of_genre is not None:
+            return cols, "album", GENRE_ALBUMS, (self._of_genre,), ALBUM_SORTS["artist"]
         if self._genre:
             return cols, "album", "genre = ?", (self._genre,), order
         return cols, "album", "", (), order
@@ -856,6 +887,12 @@ class AlbumsModel(PagedModel):
     def for_artist(self, artist_id: int) -> None:
         """Lists that artist's albums instead, and reads them."""
         self._artist_id = artist_id
+        self.reload()
+
+    def for_genre(self, genre: str) -> None:
+        """Lists the albums with a song of `genre` instead (a genre's page, R9.1), and reads
+        them."""
+        self._of_genre = genre
         self.reload()
 
     def filter_genre(self, genre: str) -> None:

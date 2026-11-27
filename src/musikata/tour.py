@@ -27,6 +27,7 @@ from . import layout
 from .albumart import AlbumArt
 from .bridges import Library, Player
 from .edittags import EditTags
+from .genres import Genres
 from .history import ChangeHistory
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
@@ -47,7 +48,8 @@ SIZES = (SHOT, DESIGN)
 # marked, with no sound to wait on (Player.go). X03 has no mockup: the Change history panel (R4.9)
 # over Songs, listing the demo library's saves (demo_library.HISTORY). T07 has no mockup either: a
 # bulk tool's preview (R4.5, R3.7), Number tracks over L03's four songs. T02 is the Album art dialog
-# (R5.2) over Glass Harbor's page, as its mockup draws it.
+# (R5.2) over Glass Harbor's page, as its mockup draws it. G01 is Genres (R9.1) with the banner of
+# the demo library's near duplicates (R9.5) and Electronic's ⋯ menu open, as its mockup draws it.
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -107,6 +109,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         },
     ),
     ("T02-album-art", {"view": "album", "album": "Glass Harbor", "art": True}),
+    ("G01-genres", {"view": "genres", "genreMenu": "Electronic"}),
     ("X03-change-history", {"view": "songs", "select": [], "history": True}),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
@@ -153,6 +156,7 @@ class Tour(QObject):
         history: ChangeHistory | None = None,
         edit: EditTags | None = None,
         art: AlbumArt | None = None,
+        genres: Genres | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -163,6 +167,7 @@ class Tour(QObject):
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
         self.player, self.history, self.edit, self.art = player, history, edit, art
+        self.genres = genres
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -200,6 +205,8 @@ class Tour(QObject):
             self.edit.go(step, self.library)
         if self.art is not None and self.library is not None and "view" in step:
             self.art.go(step, self.library)
+        if self.genres is not None and "view" in step:
+            self.genres.go(step)
         self._size = 0
         self._at_size()
 

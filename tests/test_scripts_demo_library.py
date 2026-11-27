@@ -6,9 +6,11 @@ view and every reader of tags is shown on. A plan that lost a fault, a kind or a
 would leave a screen with nothing to show and a reader untested on what other programs write."""
 
 import ast
+import json
 import os
 import sys
 
+import jsonschema
 import pytest
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -175,3 +177,15 @@ def test_the_history_is_made_by_musikatas_own_batch_and_undo(tmp_path):
     assert undo.undoes == made[1] and undo.computer == demo.COMPUTERS["Laptop"]
     plays = os.path.join(music, ".musikata", demo.COMPUTERS["Laptop"], "plays.json")
     assert os.path.exists(plays)
+
+
+def test_the_roots_settings_say_electronica_is_electronic_as_g01_offers_it(tmp_path):
+    """G01-genres' banner (R9.5): Tide Tables' Electronica is offered with Electronic because the
+    root's settings say they are the same, as a user would (R13.3); held to their schema."""
+    path = demo.root_settings(str(tmp_path / "Music"))
+    with open(path, encoding="utf-8") as f:
+        written = json.load(f)
+    schema = os.path.join(ROOT, "src", "musikata_core", "schemas", "root-settings.v1.schema.json")
+    with open(schema, encoding="utf-8") as f:
+        jsonschema.validate(written, json.load(f))
+    assert written["tags"]["same_genres"] == [["Electronic", "Electronica"]]
