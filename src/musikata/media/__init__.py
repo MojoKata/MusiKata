@@ -144,9 +144,23 @@ class MediaControls(QObject):
 
     @Slot()
     def _follow(self) -> None:
-        """Tells the backend what changed in the Player: the song, its state, a seek."""
+        """Tells the backend what changed in the Player: the song, its state, a seek. What the
+        backend raises stops the controls, said once, and MusiKata plays on without them (A4.5)."""
         if self.backend is None:
             return
+        try:
+            self._tell()
+        except Exception as e:  # a platform's module, any error: the controls go, not the app
+            backend, self.backend = self.backend, None
+            log.warning("the system's media controls stopped (%s: %s); MusiKata plays without "
+                        "them", type(e).__name__, str(e))  # fmt: skip
+            try:
+                backend.close()
+            except Exception as closing:  # already broken: said, and let go
+                log.info("the system's media controls didn't close (%s)", closing)
+
+    def _tell(self) -> None:
+        assert self.backend is not None
         now = now_of(self._player)
         seen = self._watch.look(now, self._clock.monotonic())
         song = song_of(now, seen.track, self._art_of(thumb_of(now.cover)))
