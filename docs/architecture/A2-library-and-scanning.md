@@ -313,7 +313,9 @@ old path when it moved (`from`), and, when the cover changed, its old cover by h
 trash (R2.12) names each file moved (`trashed`, true: Undo can't take it out, R2.11) and, on the
 copy kept, the plays it took from them on the computer that saved the entry (`plays_from`, each as
 `plays.json` names a song), which Undo gives back; the Undo's own entry names those it gave back
-(`plays_to`), which undoing it takes again:
+(`plays_to`), which undoing it takes again. Text an ID3 tag held as Latin-1 that a save wrote as
+Unicode (R4.10) is named in `latin1` (`["title", "artist"]`): its old value is those bytes, a
+character each (A3.6), and Undo writes them as Latin-1 again:
 
 ```json
 {

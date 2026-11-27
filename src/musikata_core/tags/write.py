@@ -3,10 +3,12 @@ this applies it to the file as Mutagen holds it, touching nothing else (R4.1.1).
 place, so safe.py hands it the copy beside the original (A3.4), never the song itself.
 
 MP3s are written as ID3v2.4, or ID3v2.3 (R4.7.2); an ID3v1 tag already there is updated to match,
-none added. What Mutagen would drop going from one version to the other is kept: the frames it
-doesn't know, made the other version's (compose.id3_frame_to), and in ID3v2.3 the ID3v2.4 frames
-other programs write there too (TSOP, TSOA, RVA2: iTunes, Picard). A WAV's RIFF INFO chunk, which
-Mutagen doesn't write, is kept in step as the copy is made (`copy`)."""
+none added. Text is written as Unicode (UTF-8, or UTF-16 in ID3v2.3), but what a change asks to
+hold as Latin-1 (compose.latin1_of: Undo's, A3.6). What Mutagen would drop going from one version
+to the other is kept: the frames it doesn't know, made the other version's (compose.id3_frame_to),
+and in ID3v2.3 the ID3v2.4 frames other programs write there too (TSOP, TSOA, RVA2: iTunes,
+Picard). A WAV's RIFF INFO chunk, which Mutagen doesn't write, is kept in step as the copy is made
+(`copy`)."""
 
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ from .read import open_song
 log = logging.getLogger(__name__)
 
 ID3_VERSIONS = {"2.4": 4, "2.3": 3}  # R4.7.2, R13.3's setting
+ID3_FIELDS = {frame: name for name, frame in parse.ID3.items()}  # a text frame's R4.1 field
 V23_SEP = None  # several values of a frame NUL-separated in ID3v2.3 too, so none is lost; TCON's
 # genres are joined with "; " instead (R9.2, compose.id3v23_genres)
 CHUNK = 1 << 20  # bytes copied at a time
@@ -83,16 +86,21 @@ def _id3(
     version: int,
     rating_scale: str = "windows-media",
 ) -> None:
+    latin1 = compose.latin1_of(change)  # Undo's: the bytes a save of R4.10 took (A3.6)
     for fid, texts in compose.id3(change, before).items():
         tags.delall(fid)
         if texts:
-            tags.add(getattr(mutagen.id3, fid)(encoding=3, text=texts))
+            encoding = 0 if ID3_FIELDS.get(fid) in latin1 else 3
+            tags.add(getattr(mutagen.id3, fid)(encoding=encoding, text=texts))
     if "comment" in change:
         for frame in tags.getall("COMM"):
             if parse.is_comment(frame.desc):
                 del tags[frame.HashKey]
         if change["comment"]:
-            tags.add(mutagen.id3.COMM(encoding=3, lang="eng", desc="", text=[change["comment"]]))
+            encoding = 0 if "comment" in latin1 else 3
+            tags.add(
+                mutagen.id3.COMM(encoding=encoding, lang="eng", desc="", text=[change["comment"]])
+            )
     if "rating" in change:
         stars = int(change["rating"])  # type: ignore[call-overload]
         if rating_scale == compose.MUSIKATA_SCALE:

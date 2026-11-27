@@ -1103,3 +1103,97 @@ def test_an_undo_of_a_move_to_the_trash_counts_the_files_it_can_undo():
         FileChange("c.m4a", H3, {}, trashed=True),
     ))  # fmt: skip
     assert history.description_of(e, 1) == "Undo: Moonpull"
+
+
+# ---------- text in the wrong encoding (R4.10): its old bytes back ----------
+
+
+def cp1251(text):
+    return text.encode("cp1251").decode("latin-1")
+
+
+def latin1_wav(path, frames):
+    """A WAV whose ID3v2.3 tag holds `frames` (id: text) marked Latin-1."""
+    import mutagen.id3
+    import mutagen.wave
+
+    wav(path, 4)
+    f = mutagen.wave.WAVE(str(path))
+    f.add_tags()
+    for fid, text in frames.items():
+        f.tags.add(getattr(mutagen.id3, fid)(encoding=0, text=text))
+    f.save(v2_version=3)
+    return str(path)
+
+
+def raw_frames(path):
+    """The file's text frames as their bytes: (encoding, the text as that encoding holds it)."""
+    import mutagen.wave
+
+    codecs = {0: "latin-1", 1: "utf-16", 2: "utf-16-be", 3: "utf-8"}
+    t = mutagen.wave.WAVE(path).tags
+    return {
+        f.FrameID: (int(f.encoding), str(f.text[0]).encode(codecs[int(f.encoding)]))
+        for f in t.values()
+        if f.FrameID in ("TIT2", "TPE1", "TALB")
+    }
+
+
+def test_a_fix_of_the_encoding_is_undone_with_the_old_bytes_and_redone_as_unicode(tmp_path):
+    """R4.10, A3.5: a save that wrote Latin-1 text as Unicode names those fields in its entry
+    (`latin1`); Undo writes their old values as Latin-1 again, so the file holds the very bytes it
+    held, each frame marked Latin-1; undoing the undo writes Unicode again."""
+    from musikata_core import encodings
+
+    root = tmp_path / "Music"
+    path = latin1_wav(root / "SV" / "08.wav", {"TIT2": cp1251("Маяк"),
+                                               "TPE1": cp1251("Северный Ветер")})  # fmt: skip
+    i = db.Index(str(tmp_path / "musikata.db"))
+    try:
+        before = raw_frames(path)
+        clock = FakeClock(WHEN)
+        t, _ = tags.read(path)
+        fixed, names = encodings.fixed(t, "cp1251")
+        out = save(str(root), clock, [path], {n: getattr(fixed, n) for n in names}, "Fix")
+        assert {k: v[0] for k, v in raw_frames(path).items()} == {"TIT2": 3, "TPE1": 3}  # UTF-8
+        folder = history.folder_of(str(root))
+        with open(os.path.join(folder, out.entry), encoding="utf-8") as f:
+            doc = json.load(f)
+        valid(doc)
+        assert doc["files"][0]["latin1"] == ["title", "artist"]
+        assert doc["files"][0]["fields"]["title"] == cp1251("Маяк")
+        _, undone = undo(str(root), i, clock, out.entry)
+        assert undone.failed == [] and raw_frames(path) == before
+        assert read(path).latin1 == ("title", "artist")
+        _, redone = undo(str(root), i, clock, undone.entry)
+        assert read(path).title == "Маяк" and read(path).latin1 == ()
+        with open(os.path.join(folder, undone.entry), encoding="utf-8") as f:
+            assert "latin1" not in json.load(f)["files"][0]  # it wrote Unicode over nothing
+    finally:
+        i.close()
+
+
+def test_shapes_of_latin1_in_an_entry_each_read_for_what_can_be_used(caplog):
+    """An entry's `latin1` (A2.10): text fields of its old values; not a list, or naming what
+    isn't one of them, is left out, and that value is put back as Unicode."""
+    one = {"path": "a.mp3", "fields": {"title": "Ìàÿê", "year": 2003}, "new": {"title": "Маяк"}}
+    for value, kept in (
+        (["title"], ("title",)),
+        ("title", ()),
+        (["title", "year", "album", 5], ("title",)),
+        (None, ()),
+    ):
+        found = parse(entry_doc(files=[{**one, "latin1": value}]))
+        assert found.files[0].latin1 == kept, value
+        assert bool(found.problems) == (value not in (["title"], None)), value
+    assert history.combined([
+        FileChange("a.mp3", None, {"title": "x"}, latin1=("title",)),
+        FileChange("a.mp3", None, {"artist": "y"}, latin1=("artist",)),
+    ])[0].latin1 == ("title", "artist")  # fmt: skip
+    job = history.jobs(history.Plan(
+        Entry(NAME, WHEN, ME, "encoding", "Fix", (FileChange("a.mp3", None, {"title": "Ìàÿê"},
+                                                             latin1=("title",)),)),
+        (history.FileUndo(FileChange("a.mp3", None, {"title": "Ìàÿê"}, latin1=("title",)),
+                          "a.mp3"),),
+    ), "/m", False)[0]  # fmt: skip
+    assert job.changes == {"title": "Ìàÿê", "latin1": ("title",)}

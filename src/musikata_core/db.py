@@ -229,8 +229,20 @@ def _v9(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
+def _v10(c: sqlite3.Connection) -> None:
+    """Text in the wrong encoding (R4.10, A3.6, A2.6): on each song, the text fields its ID3 tag
+    holds as Latin-1 beyond ASCII (`latin1`, by name, comma-separated; none: NULL) and the encoding
+    that reads them far better than as they are (`encoding`, a codec's name; none: NULL), indexed
+    for Needs attention's group. Both are worked out as the file is read (encodings.flag), so every
+    song is read again by the next scan, as for version 2."""
+    c.execute("ALTER TABLE song ADD COLUMN latin1 TEXT")
+    c.execute("ALTER TABLE song ADD COLUMN encoding TEXT")
+    c.execute("CREATE INDEX song_encoding ON song (path) WHERE encoding IS NOT NULL")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10,
 ]  # fmt: skip
 
 

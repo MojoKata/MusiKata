@@ -120,8 +120,8 @@ def test_a_wav_or_aiff_is_given_no_rating_its_ratings_live_in_ratings_json(audio
 @pytest.mark.slow
 def test_the_demo_librarys_files_of_every_kind_and_shape_are_written_and_read_back(audio, tmp_path):
     """Each kind and each way the demo library writes tags (ID3v2.3, ID3v1 too, TRCK "04",
-    lower-case Vorbis keys, embedded covers, compilations): one song of each, retitled, its genres
-    and track changed; the rest reads as it did."""
+    lower-case Vorbis keys, embedded covers, compilations, Windows-1251 in Latin-1 frames): one
+    song of each, retitled, its genres and track changed; the rest reads as it did."""
     seen = {}
     for song in demo.plan().songs:
         key = (song.kind, frozenset(song.shape), song.cover is not None, song.tags is None)
@@ -136,8 +136,11 @@ def test_the_demo_librarys_files_of_every_kind_and_shape_are_written_and_read_ba
         t, _ = tags.read(path)
         assert t == written.tags
         assert (t.title, t.genres, t.track) == ("Retitled", ("Jazz", "Soul"), 7), song.path
+        # the title written as Unicode: no longer held as Latin-1 (A3.6, the cp1251 shape)
+        latin1 = tuple(f for f in before.latin1 if f != "title")
         assert t.__dict__ == {
             **before.__dict__, "title": "Retitled", "genres": ("Jazz", "Soul"), "track": 7,
+            "latin1": latin1,
         }, song.path  # fmt: skip
         assert tags.pictures(path) == pictures
         if "id3v1-too" in song.shape:

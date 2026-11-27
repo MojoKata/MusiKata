@@ -210,10 +210,29 @@ def test_an_index_of_slice_6_gains_the_copies_key_and_its_songs_are_read_again(t
         step(c)
     c.execute("PRAGMA user_version = 8")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 10, 5)")
-    assert db.migrate(c) == len(db.MIGRATIONS) == 9
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT mtime_ns, copy_key FROM song").fetchall() == [(-1, None)]
     plan = c.execute(
         "EXPLAIN QUERY PLAN SELECT id FROM song WHERE copy_key = 'x' ORDER BY length"
     ).fetchall()
     assert any("song_copy_key" in str(row) for row in plan)
+    c.close()
+
+
+def test_an_index_of_slice_6_4_gains_the_text_encodings_and_its_songs_are_read_again(tmp_path):
+    """Version 10 (A2.6, A3.6, R4.10): the fields held as Latin-1 and the encoding that reads them
+    better are worked out as each file is read, so every song is read again; the songs flagged
+    are found through an index of their own."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:9]:
+        step(c)
+    c.execute("PRAGMA user_version = 9")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
+    assert db.migrate(c) == len(db.MIGRATIONS) == 10
+    assert c.execute("SELECT mtime_ns, latin1, encoding FROM song").fetchall() == [(-1, None, None)]
+    plan = c.execute(
+        "EXPLAIN QUERY PLAN SELECT id FROM song WHERE encoding IS NOT NULL ORDER BY path"
+    ).fetchall()
+    assert any("song_encoding" in str(row) for row in plan)
     c.close()

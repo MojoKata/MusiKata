@@ -42,16 +42,20 @@ class Song:
 @dataclass(frozen=True)
 class Planned:
     """What a tool would do: `columns`, the fields it fills, in the order its preview shows them;
-    `songs` (their tags as they are) and `new` (as they would be), in the order given."""
+    `songs` (their tags as they are) and `new` (as they would be), in the order given; and, for
+    each song, the fields written again even where their value stays (`rewritten`: R4.10's text
+    held as Latin-1, written as Unicode; none for a tool that changes values only)."""
 
     columns: tuple[str, ...]
     songs: tuple[Song, ...]
     new: tuple[Tags, ...]
+    rewritten: tuple[tuple[str, ...], ...] = ()
 
     def changed(self, i: int) -> tuple[str, ...]:
-        """The columns whose value song `i` would change."""
+        """The columns whose value song `i` would change, or that it writes again."""
         old, new = self.songs[i].tags, self.new[i]
-        return tuple(c for c in self.columns if value_of(c, old) != value_of(c, new))
+        again = self.rewritten[i] if i < len(self.rewritten) else ()
+        return tuple(c for c in self.columns if value_of(c, old) != value_of(c, new) or c in again)
 
     def jobs(self, chosen: Collection[int]) -> list[Job]:
         """The save of the songs at `chosen` (their places in `songs`) that would change: a job

@@ -6,8 +6,8 @@
 # (docs/process/ci.md, "The Pages site"). Extra args go to the tour (--tour-only L03-songs).
 #
 # The demo library (scripts/demo_library.py) is made in build/demo when it isn't there, or has no
-# change history (R4.9), root's settings (R9.5's same genres), album in one file (R2.8) or copy of
-# Signal Fires (R2.12) yet. It
+# change history (R4.9), root's settings (R9.5's same genres), album in one file (R2.8), copy of
+# Signal Fires (R2.12) or album in the wrong encoding (R4.10) yet. It
 # is the home's Music folder in the container, so the screens show ~/Music, as on a new user's
 # computer. The tour runs three times, once in each state it has screens for
 # (src/musikata/tour.py): the library; the same root unmounted (X02, R2.10); a first start with
@@ -24,8 +24,10 @@ OUT="$HERE/build/tour"
 mkdir -p "$DEMO"
 if [ ! -d "$DEMO/Music/.musikata/history" ] || [ ! -f "$DEMO/Music/.musikata/settings.json" ] ||
     [ ! -f "$DEMO/Music/Mara Okafor/Live at the Lantern/Live at the Lantern.cue" ] ||
-    [ ! -f "$DEMO/Music/_Incoming/new rips/Signal Fires.flac" ]; then
-    # made before it had its history, its settings, its album in one file or its copies: anew
+    [ ! -f "$DEMO/Music/_Incoming/new rips/Signal Fires.flac" ] ||
+    [ ! -d "$DEMO/Music/Ñåâåðíûé Âåòåð/Òèõàÿ Ãàâàíü" ]; then
+    # made before it had its history, its settings, its album in one file, its copies or its
+    # tags in the wrong encoding: anew
     echo "== the demo library, in $DEMO" >&2
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e PYTHONDONTWRITEBYTECODE=1 \
         -v "$HERE:/src:ro" -v "$SITE:/site:ro" -v "$DEMO:/demo" "$IMG" sh -c \

@@ -30,7 +30,19 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field, replace
 from typing import BinaryIO, Literal
 
-from . import albums, art, attention, db, duplicates, folders, ratings, rootfiles, search, sortnames
+from . import (
+    albums,
+    art,
+    attention,
+    db,
+    duplicates,
+    encodings,
+    folders,
+    ratings,
+    rootfiles,
+    search,
+    sortnames,
+)
 from .clock import Clock, SystemClock
 from .rootfiles import path_under as path_under  # A2.8's naming, here as ever
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover, pictures
@@ -42,6 +54,7 @@ BATCH = 200  # files read and written at a time (A2.2)
 HASHED = 64 * 1024  # bytes of audio at each end the audio hash reads (A2.3)
 IGNORE = ".musikataignore"  # a folder holding one is skipped (R2.3.1)
 ASK_OVER = 20  # more songs gone than this, and over a quarter, wait on the user (R2.10.1)
+NOT_SCORED = "?"  # a Read whose text's encoding wasn't scored on the worker
 # told of each folder a walk lists: its path under the root, its real path, its modification time
 Reached = Callable[[str, str, int], None]
 
@@ -67,7 +80,9 @@ class Plan:
 class Read:
     """A file read on a worker: its tags and audio, or why it couldn't be; and its embedded cover
     as the index keeps it (attention.cover_of: its hash and size; None: none), unless it isn't
-    known (`cover_known` False: a save that didn't change it, whose row keeps what it has)."""
+    known (`cover_known` False: a save that didn't change it, whose row keeps what it has); and
+    the encoding its Latin-1 text reads far better in (encodings.flag, A3.6), scored on the worker
+    as it is read (NOT_SCORED: not yet, scored as it is written)."""
 
     seen: Seen
     tags: Tags | None = None
@@ -76,6 +91,7 @@ class Read:
     error: str | None = None
     cover: tuple[str, int | None, int | None] | None = None
     cover_known: bool = True
+    encoding: str | None = NOT_SCORED
 
 
 @dataclass(frozen=True)
@@ -460,7 +476,8 @@ def read_one(root: str, seen: Seen) -> Read:
     try:
         t, info = read_tags(path)
         cover = attention.cover_of(pictures(path)) if t.has_cover else None
-        return Read(seen, t, info, audio_hash(path, info.kind), cover=cover)
+        return Read(seen, t, info, audio_hash(path, info.kind), cover=cover,
+                    encoding=encodings.flag(t))  # fmt: skip
     except TagReadError as e:
         return Read(seen, error=str(e))
     except OSError as e:
@@ -493,6 +510,9 @@ def _values(r: Read) -> dict[str, object]:
     row["albumartist_nk"] = attention.name_key(t.albumartist)
     row["album_nk"] = attention.album_pair(t.album, t.albumartist, t.artist)
     row["copy_key"] = duplicates.song_key(t.artist, t.title)  # likely copies' (R2.12)
+    # text held as Latin-1, and the encoding that reads it far better (A3.6, R4.10)
+    row["latin1"] = ",".join(t.latin1) or None
+    row["encoding"] = encodings.flag(t) if r.encoding == NOT_SCORED else r.encoding
     if r.cover_known:
         key, width, height = r.cover if r.cover is not None else (None, None, None)
         row.update(cover_key=key, cover_width=width, cover_height=height)
@@ -579,7 +599,7 @@ def wrote(c: sqlite3.Connection, root: str, written: Iterable[Written]) -> Resul
 # a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
 ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
        "error", *db.FIELDS, "file_rating", "artist_nk", "albumartist_nk", "album_nk", "cover_key",
-       "cover_width", "cover_height", "cue", "copy_key")  # fmt: skip
+       "cover_width", "cover_height", "cue", "copy_key", "latin1", "encoding")  # fmt: skip
 
 
 def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched) -> bool:

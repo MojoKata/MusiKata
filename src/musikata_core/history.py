@@ -14,7 +14,9 @@ kept once in `history/images/<sha256>`, however many entries name it
 R2.11) names each file moved (`trashed`), which Undo can't take out of the trash, and the plays
 the copy kept took from them, on the computer that saved the entry (`plays_from`, each as
 plays.json names a song; an Undo of it names them `plays_to`, given back), which Undo gives
-back (`plays`).
+back (`plays`). Text an ID3 tag held as Latin-1 (A3.6) that a save wrote as Unicode (R4.10's Fix
+encoding…) is named in `latin1`: its old value is that text's bytes exactly, a character a byte,
+and Undo writes it as Latin-1 again, so the old bytes are back.
 
 Recording is `Recording`, the tags.Recorder every save's batch is given (tags.batch): it is told
 each file as it is written, keeping its old cover then, and writes the entry at the end.
@@ -103,7 +105,9 @@ class FileChange:
     didn't say), and whether the cover changed (`cover`), with the old cover's hash and the new
     one's (None: none); when its other pictures changed, those it had (`others`) and the hashes of
     those written (`new_others`). An image file the save wrote (`image`: cover.jpg, R5.3) has
-    only its old and new bytes' hashes, as `old_cover` and `new_cover`."""
+    only its old and new bytes' hashes, as `old_cover` and `new_cover`. `latin1`: the text fields
+    of `old` its ID3 tag held as Latin-1 (A3.6), which Undo writes so again, its old bytes back
+    (R4.10)."""
 
     path: str
     hash: str | None
@@ -118,6 +122,7 @@ class FileChange:
     trashed: bool = False
     plays_from: tuple[Plays, ...] = ()
     plays_to: tuple[Plays, ...] = ()
+    latin1: tuple[str, ...] = ()
 
     def fields(self) -> list[str]:
         """The fields it changed, in compose.FIELDS' order, the cover and the other pictures
@@ -280,6 +285,8 @@ def document(entry: Entry) -> dict[str, object]:
             out["plays_to"] = [rootfiles.entry_document(e) for e in f.plays_to]
         if f.trashed:
             out["trashed"] = True
+        if f.latin1:
+            out["latin1"] = [ENTRY_NAMES[k] for k in f.latin1]
         files.append(out)
     doc: dict[str, object] = {
         "format": FORMAT,
@@ -425,11 +432,30 @@ def _file(value: object, problems: list[str]) -> FileChange | None:
     trashed = value.get("trashed") is True
     if "trashed" in value and not isinstance(value["trashed"], bool):
         problems.append(f"{path}: trashed isn't true or false: {value['trashed']!r}; false")
+    latin1 = _latin1(value.get("latin1"), old, f"{path}: latin1", problems)
     if not old and not cover and others is None and not plays_from and not plays_to and not trashed:
         problems.append(f"{path}: no field it can put back; left out")
         return None
     return FileChange(path, hash_, old, new, cover, old_cover, new_cover, others,
-                      new_others or (), False, trashed, plays_from, plays_to)  # fmt: skip
+                      new_others or (), False, trashed, plays_from, plays_to, latin1)  # fmt: skip
+
+
+def _latin1(
+    value: object, old: Mapping[str, object], where: str, problems: list[str]
+) -> tuple[str, ...]:
+    """An entry's `latin1`: the text fields of its old values held as Latin-1 (A3.6), by
+    compose.FIELDS' names; a name that isn't one of them left out (its value is put back as
+    Unicode)."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        problems.append(f"{where} isn't a list: {value!r}; left out")
+        return ()
+    names = {FIELD_OF.get(v) for v in value if isinstance(v, str)}
+    out = tuple(f for f in compose.TEXT if f in names and f in old)
+    if len(out) != len(value):
+        problems.append(f"{where}: a name isn't a text field it changed: {value!r}; left out")
+    return out
 
 
 def parse(name: str, text: str) -> Entry | Broken:
@@ -686,6 +712,7 @@ class Recording:
             return
         fields = [f for f in written.changed if f not in compose.PICTURES]
         old = {f: value_of(written.before, f) for f in fields}
+        latin1 = tuple(f for f in fields if f in written.before.latin1)
         new = {f: value_of(written.tags, f) for f in fields}
         cover = "cover" in written.changed
         old_cover = new_cover = None
@@ -705,11 +732,8 @@ class Recording:
                 for p in written.others_before
             )
         new_others = tuple(image_hash(p.data) for p in written.others_after or ())
-        self.files.append(
-            FileChange(
-                path, written.audio_hash, old, new, cover, old_cover, new_cover, others, new_others
-            )  # fmt: skip
-        )
+        self.files.append(FileChange(path, written.audio_hash, old, new, cover, old_cover,
+                                     new_cover, others, new_others, latin1=latin1))  # fmt: skip
 
     def _keep(self, data: bytes, path: str) -> str:
         try:
@@ -775,6 +799,7 @@ def combined(files: Sequence[FileChange]) -> list[FileChange]:
             new_cover=pictured.new_cover, others=others.others, new_others=others.new_others,
             trashed=had.trashed or f.trashed, plays_from=had.plays_from + f.plays_from,
             plays_to=had.plays_to + f.plays_to,
+            latin1=tuple(n for n in compose.TEXT if n in had.latin1 or n in f.latin1),
         )  # fmt: skip
     return list(out.values())
 
@@ -979,6 +1004,8 @@ def jobs(plan_: Plan, root: str, overwrite: bool) -> list[Job]:
             changes["cover"] = KeptCover(old) if old is not None else None
         if f.change.others is not None:
             changes["others"] = f.change.others
+        if f.change.latin1:  # its old bytes back (R4.10), not their text as Unicode
+            changes[compose.LATIN1] = f.change.latin1
         out.append(Job(scanner.full_path(root, f.path), changes))
     return out
 

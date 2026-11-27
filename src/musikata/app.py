@@ -41,6 +41,7 @@ from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .duplicates import Duplicates, plays_back, remover
 from .edittags import EditTags
+from .encodings import FixEncoding
 from .firstrun import FirstRun, music_folder
 from .genres import Genres
 from .history import ChangeHistory
@@ -156,6 +157,7 @@ class Shell:
     attention: Attention | None = None
     names: NameMerge | None = None
     copies: Duplicates | None = None
+    encodings: FixEncoding | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -165,7 +167,7 @@ class Shell:
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
-            self.copies,
+            self.copies, self.encodings,
         )  # fmt: skip
 
 
@@ -183,9 +185,11 @@ def close_bridges(
     attention: Attention | None = None,
     names: NameMerge | None = None,
     copies: Duplicates | None = None,
+    encodings: FixEncoding | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the Edit tags panel's, Album art's and the merges' saves (stopped before
+    playback thread, the Edit tags panel's, Album art's, the merges' and Fix encoding…'s saves
+    (stopped before
     their next file) and threads, Needs attention's dismissals and watching, the
     ratings' save and watching, the play counts (their file written), the change history's
     thread, the watcher, the scan's thread and the worker processes, and the index; then deletes
@@ -203,6 +207,8 @@ def close_bridges(
         names.shut()
     if copies is not None:
         copies.shut()
+    if encodings is not None:
+        encodings.shut()
     if attention is not None:
         attention.close()
     if ratings is not None:
@@ -214,8 +220,8 @@ def close_bridges(
     library.close()
     index.close()
     release(
-        controls, counts, edit, art, genres, names, copies, attention, ratings, changes, player,
-        library,
+        controls, counts, edit, art, genres, names, copies, encodings, attention, ratings, changes,
+        player, library,
     )  # fmt: skip
 
 
@@ -284,9 +290,14 @@ def load(
     changes = keep_history(
         library, root, index, shared, clock, make, missing, tags_settings, writing
     )
+    # Fix encoding… (R4.10), from Needs attention and the Edit tags panel
+    fix = FixEncoding(
+        root, index.read, writing, changes, saved=library.saved, undoable=tags_settings.history,
+        available=lambda: bool(library.property("available")), model=library.property("attention"),
+    )  # fmt: skip
     edit = EditTags(
         root, index.read, tags_settings, changes, saved=library.saved, write=writing,
-        home=home_of(env), available=lambda: bool(library.property("available")),
+        home=home_of(env), available=lambda: bool(library.property("available")), encodings=fix,
     )  # fmt: skip
     library.reloaded.connect(edit.refresh)  # a scan, a save or an undo changed the rows
     rating = rate_songs(library, player, root, index, writing, changes, clock, missing)
@@ -306,8 +317,10 @@ def load(
     library.reloaded.connect(genre_tools.refresh)  # R9.5's banner, after a scan or a save
     genre_tools.refresh()
     changes.plays = plays_back(counts.change if counts is not None else None, make)  # R2.12
-    needs, names, copies = attend(library, root, index, clock, edit, album_art, genre_tools,
-                                  writing, changes, tags_settings, missing, counts)  # fmt: skip
+    needs, names, copies = attend(
+        library, root, index, clock, edit, album_art, genre_tools, writing, changes, tags_settings,
+        missing, counts, fix,
+    )  # fmt: skip
     engine.setInitialProperties(
         {
             "library": library,
@@ -320,6 +333,7 @@ def load(
             "attention": needs,
             "names": names,
             "copies": copies,
+            "encodings": fix,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -329,14 +343,14 @@ def load(
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
                       art=album_art, genres=genre_tools, attention=needs, names=names,
-                      copies=copies)  # fmt: skip
+                      copies=copies, encodings=fix)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating, album_art, genre_tools, needs, names, copies,
+        changes, edit, rating, album_art, genre_tools, needs, names, copies, fix,
     )  # fmt: skip
 
 
@@ -353,12 +367,14 @@ def attend(
     tags_settings: settings.RootTags,
     missing: bool = False,
     counts: PlayCounts | None = None,
+    fix: FixEncoding | None = None,
 ) -> tuple[Attention, NameMerge, Duplicates]:
     """Needs attention (R2.8): its list (Library's) told the genres the user has said are the
     same (R9.5); its actions on the Edit tags panel, Album art, the genres' merge and the merge of
     an artist's or an album's names (saved by `writing`, kept in `changes`), and Review… and Move
     the others to the trash for the same song more than once (R2.12: the kept copy's rating
-    written by `writing`, its plays given on `counts`' rows, kept in `changes`); the root's
+    written by `writing`, its plays given on `counts`' rows, kept in `changes`), and Fix
+    encoding… on `fix` (R4.10); the root's
     ignored.json read into the index, off the GUI thread, and again when another computer changes
     it (A2.8). A root that isn't there (R2.10) lists what the index has."""
     model = library.property("attention")
@@ -373,7 +389,8 @@ def attend(
         saved=library.saved, available=lambda: bool(library.property("available")),
     )  # fmt: skip
     needs = Attention(root, index, model, clock, edit=edit, art=art, genres=genres, names=names,
-                      history=changes, copies=copies, watching=not missing)  # fmt: skip
+                      history=changes, copies=copies, encoding=fix,
+                      watching=not missing)  # fmt: skip
     if not missing:
         needs.start()
     else:
@@ -748,10 +765,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         genre_tools = session.shell.genres if session.shell is not None else None
         needs = session.shell.attention if session.shell is not None else None
         copies = session.shell.copies if session.shell is not None else None
+        fix = session.shell.encodings if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
-            copies=copies,
+            copies=copies, encodings=fix,
         ).start()  # fmt: skip
     else:
         session.window.show()

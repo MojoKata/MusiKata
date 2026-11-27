@@ -21,11 +21,13 @@ What each group holds:
   `.cue` sheet beside it that names it (`cued`); it plays as one song, splitting it is #3.
 - **The same song more than once** (`COPIES`, R2.12): a group of exact or likely copies
   (duplicates.found), an entry each, about its first copy by path.
+- **Tags in the wrong text encoding** (`ENCODING`, R4.10): a song whose text its ID3 tag holds as
+  Latin-1 another encoding reads far better (`song.encoding`, kept as it is read, A3.6), an entry
+  each, its title and artist as that encoding reads them.
 - **Files that couldn't be read** (`UNREADABLE`): `song.error`.
 
 The groups owned by later pieces (tags that differ from the path, R3; playlist entries whose file
-is missing, R8.7; text in the wrong encoding, R4.10; files whose tags say nothing, R16.6) join
-`KINDS` with their own finders.
+is missing, R8.7; files whose tags say nothing, R16.6) join `KINDS` with their own finders.
 
 **Ignore** (R2.8): an entry the user dismisses is kept in the root's `ignored.json`
 (rootfiles.Dismissal, A2.8) by its kind and what it is about (a song by its path and audio hash, an
@@ -46,7 +48,7 @@ import unicodedata
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from . import art, duplicates, genres
+from . import art, duplicates, encodings, genres
 from .rootfiles import Dismissal
 from .tags import Picture, Tags
 from .tags.tools import Planned, Song
@@ -62,12 +64,13 @@ NAMES_GENRE = "names-genre"
 ONE_FILE = "album-in-one-file"
 UNREADABLE = "unreadable"
 COPIES = "same-song"  # R2.12
+ENCODING = "wrong-encoding"  # R4.10
 # every kind this piece finds, in the order the view lists them
-KINDS = (COPIES, COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ALBUM_DIFFERS,
-         ONE_FILE, UNREADABLE)  # fmt: skip
+KINDS = (COPIES, COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ENCODING,
+         ALBUM_DIFFERS, ONE_FILE, UNREADABLE)  # fmt: skip
 NAMES = (NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE)
 # kinds about a song (a group of copies: its first by path): dismissed by its path and audio hash
-BY_SONG = (ONE_FILE, UNREADABLE, COPIES)
+BY_SONG = (ONE_FILE, UNREADABLE, COPIES, ENCODING)
 BY_ALBUM = (ALBUM_DIFFERS, COVER_NONE, COVER_SMALL)  # kinds about an album: by its folder
 FIELDS = ("album", "albumartist", "year", "genre", "cover")  # what an album's songs differ in
 MIN_SIDE = 500  # R5.6: a cover smaller than this a side needs attention
@@ -324,7 +327,10 @@ class Entry:
     cover's size; a name's spellings, the most used first, with how many songs have each, and the
     key they share; a song's path, its error or `.cue` sheet and length; a group of copies (R2.12),
     its copies, the one proposed to keep first, whether they are likely ones and why the first is
-    kept (duplicates.Group). `hash` and `modified` (the audio hash; the file's modification time,
+    kept (duplicates.Group); a song's text in the wrong encoding (R4.10), its title, artist and
+    album as the encoding `key` names reads them, the fields it holds so (`fields`) and its
+    album's title as read (`album_title`). `hash` and `modified` (the audio hash; the file's
+    modification time,
     in seconds, the newest of an album's songs or a group's copies) are what Ignore keeps, so a
     change brings it back."""
 
@@ -349,6 +355,7 @@ class Entry:
     copies: tuple[duplicates.Copy, ...] = ()
     likely: bool = False
     why: str = ""
+    album_title: str = ""
 
 
 def _seconds(mtime_ns: int | None) -> float | None:
@@ -489,6 +496,80 @@ def _copies(c: sqlite3.Connection) -> list[Entry]:
     return [copies_entry(g) for g in duplicates.found(c)]
 
 
+SONG_ORDER = (
+    "disc IS NULL, disc, track IS NULL, track, path"  # albums.ALBUM_ORDER (it imports this)
+)
+TEXT_COLUMNS = ("title", "artist", "album", "albumartist", "composer", "comment", "artistsort",
+                "albumartistsort", "albumsort")  # fmt: skip
+
+
+def _encoding(c: sqlite3.Connection) -> list[Entry]:
+    """Songs whose Latin-1 text another encoding reads far better (R4.10, A3.6), by path: each
+    named as that encoding reads it."""
+    out = []
+    for i, path, title, artist, album, album_id, latin1, codec, h, m, thumb in c.execute(
+        "SELECT song.id, song.path, song.title, song.artist, song.album, song.album_id,"
+        " song.latin1, song.encoding, song.audio_hash, song.mtime_ns, album.thumb FROM song"
+        " LEFT JOIN album ON album.id = song.album_id WHERE song.encoding IS NOT NULL"
+        " ORDER BY song.path"
+    ):
+        names = latin1_of(latin1)
+        t, _ = encodings.fixed(Tags(title=title, artist=artist, album=album, latin1=names), codec)
+        out.append(
+            Entry(
+                ENCODING,
+                path,
+                t.title or path.rpartition("/")[2],
+                t.artist or "",
+                album_id,
+                i,
+                thumb,
+                fields=names,
+                key=str(codec),
+                hash=h,
+                modified=_seconds(m),
+                album_title=t.album or "",
+            )  # fmt: skip
+        )
+    return out
+
+
+def latin1_of(column: object) -> tuple[str, ...]:
+    """A song's `latin1` column as Tags.latin1: the fields by name, NULL none."""
+    return tuple(f for f in str(column or "").split(",") if f in TEXT_COLUMNS)
+
+
+def encoded_songs(c: sqlite3.Connection, ids: Sequence[int]) -> list[tuple[int, str, Tags]]:
+    """The songs of `ids` the index has, in that order, each its id, path under the root and
+    text fields with those its ID3 tag holds as Latin-1 (Tags.latin1): what Fix encoding… plans
+    from (R4.10)."""
+    found: dict[int, tuple[int, str, Tags]] = {}
+    cols = ", ".join(TEXT_COLUMNS)
+    for part in _chunks([str(i) for i in ids]):
+        marks = ", ".join("?" * len(part))
+        for row in c.execute(
+            f"SELECT id, path, latin1, {cols} FROM song WHERE id IN ({marks})", part
+        ):
+            values = dict(zip(TEXT_COLUMNS, row[3:], strict=True))
+            tags = Tags(**values, latin1=latin1_of(row[2]))
+            found[int(row[0])] = (int(row[0]), str(row[1]), tags)
+    return [found[i] for i in ids if i in found]
+
+
+def album_songs(c: sqlite3.Connection, song: int) -> list[int]:
+    """The songs of the album song `song` is on, in the album's order (it alone when it is on
+    none): every song of the album at once (R4.10)."""
+    row = c.execute("SELECT album_id FROM song WHERE id = ?", (song,)).fetchone()
+    if row is None or row[0] is None:
+        return [song]
+    return [
+        int(i)
+        for (i,) in c.execute(
+            f"SELECT id FROM song WHERE album_id = ? ORDER BY {SONG_ORDER}", (row[0],)
+        )
+    ]
+
+
 def _unreadable(c: sqlite3.Connection) -> list[Entry]:
     return [
         Entry(UNREADABLE, path, path, song=i, error=error, hash=h, modified=_seconds(m))
@@ -513,6 +594,7 @@ def found(
         NAMES_ARTIST: _artist_names(c),
         NAMES_ALBUM: _album_names(c),
         NAMES_GENRE: _genre_names(c, same),
+        ENCODING: _encoding(c),
         ALBUM_DIFFERS: _albums_differ(c),
         ONE_FILE: _one_file(c),
         UNREADABLE: _unreadable(c),
