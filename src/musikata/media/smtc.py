@@ -87,6 +87,7 @@ class Smtc:
         # partial implementation (Wine's) lacks: the rest of the controls work without it, and the
         # timeline is never offered as seekable.
         self._can_seek = True
+        self._has_timeline = True  # its update is ISystemMediaTransportControls2's too
         try:
             self._tokens.append(
                 (
@@ -137,14 +138,22 @@ class Smtc:
         self._timeline(position)
 
     def _timeline(self, position: float) -> None:
-        """The song's length and the position, and where it can be sought to."""
+        """The song's length and the position, and where it can be sought to; nothing when the
+        controls refuse a timeline (Wine's: ISystemMediaTransportControls2 again), said once."""
+        if not self._has_timeline:
+            return
         length = self._song.length if self._song is not None else 0.0
         timeline = self._names.timeline()
         timeline.start_time = timeline.min_seek_time = timedelta(0)
         timeline.end_time = timedelta(seconds=length)
         timeline.max_seek_time = timedelta(seconds=length if self._seekable else 0.0)
         timeline.position = timedelta(seconds=min(max(0.0, position), length))
-        self._controls.update_timeline_properties(timeline)
+        try:
+            self._controls.update_timeline_properties(timeline)
+        except (AttributeError, OSError) as error:
+            self._has_timeline = False
+            log.warning("the system's media controls take no timeline (%s); the rest of them "
+                        "work", error)  # fmt: skip
 
     def close(self) -> None:
         for remove, token in self._tokens:
