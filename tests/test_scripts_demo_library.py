@@ -54,6 +54,21 @@ def test_the_plan_holds_every_kind_and_the_faults_needs_attention_shows():
     ]
 
 
+def test_live_at_the_lantern_is_an_album_in_one_file_with_its_cue_sheet():
+    """R2.8, A2.6, L09-needs-attention: one file over 20 minutes, a .cue sheet beside it naming
+    it and its eight tracks."""
+    lib = demo.plan()
+    folder = "Mara Okafor/Live at the Lantern"
+    songs = [s for s in lib.songs if s.path.startswith(folder + "/")]
+    assert [(s.path, s.seconds) for s in songs] == [
+        (f"{folder}/Live at the Lantern.mp3", demo.ONE_FILE_SECONDS)
+    ]
+    assert demo.ONE_FILE_SECONDS >= 20 * 60 and lib.covers[folder] == (151, 600)
+    sheet = lib.cues[f"{folder}/Live at the Lantern.cue"]
+    assert 'FILE "Live at the Lantern.mp3" MP3' in sheet and sheet.count("TRACK ") == 8
+    assert sheet.endswith("\r\n")
+
+
 def test_glass_harbor_has_t02s_art_its_cover_embedded_and_in_the_folder_and_back_covers():
     """T02 (R5.2): cover.jpg the same as the songs' cover at 1200 × 1200, back.png beside it, and
     a smaller back cover embedded in two of its songs."""

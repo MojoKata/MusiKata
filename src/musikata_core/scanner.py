@@ -30,10 +30,10 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field, replace
 from typing import BinaryIO, Literal
 
-from . import albums, art, db, folders, ratings, rootfiles, search, sortnames
+from . import albums, art, attention, db, folders, ratings, rootfiles, search, sortnames
 from .clock import Clock, SystemClock
 from .rootfiles import path_under as path_under  # A2.8's naming, here as ever
-from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover
+from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover, pictures
 from .tags import read as read_tags
 from .tags.safe import remove_stale
 
@@ -65,13 +65,17 @@ class Plan:
 
 @dataclass(frozen=True)
 class Read:
-    """A file read on a worker: its tags and audio, or why it couldn't be."""
+    """A file read on a worker: its tags and audio, or why it couldn't be; and its embedded cover
+    as the index keeps it (attention.cover_of: its hash and size; None: none), unless it isn't
+    known (`cover_known` False: a save that didn't change it, whose row keeps what it has)."""
 
     seen: Seen
     tags: Tags | None = None
     info: AudioInfo | None = None
     audio_hash: str | None = None
     error: str | None = None
+    cover: tuple[str, int | None, int | None] | None = None
+    cover_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,7 @@ def walk(
     tree: Tree | None = None,
     reached: Reached | None = None,
     now: float | None = None,
+    cues: dict[str, list[art.Image]] | None = None,
 ) -> Iterator[Seen]:
     """Every audio file under root (R2.2's kinds), skipping hidden files and folders, folders
     holding .musikataignore, the folders the settings skip (paths under the root), and the root's
@@ -163,7 +168,8 @@ def walk(
     are removed when they were last touched long enough before `now`, a time (none: kept). Links
     are followed like folders; one leading back to a folder already walked is skipped, and the
     log says so (R2.3.2). `images`, when given, gets each folder walked (with no images: an empty
-    list) and its images (R5.1's kinds), for its albums' covers.
+    list) and its images (R5.1's kinds), for its albums' covers; `cues`, likewise, its `.cue`
+    sheets, for an album in one file (A2.6).
 
     A partial scan (A2.4) walks from `start`, a folder under the root, and passes by the folders
     `known` under it; `tree`, when given, gets the folders walked and passed, and its real paths
@@ -196,6 +202,8 @@ def walk(
             reached(rel, real, listed)
         if images is not None:
             images.setdefault(rel, [])
+        if cues is not None:
+            cues.setdefault(rel, [])
         for entry in entries:
             path = f"{rel}/{entry.name}" if rel else entry.name
             if now is not None and is_leftover(entry.name) and not entry.is_dir():
@@ -216,6 +224,10 @@ def walk(
                     if images is not None:
                         st = entry.stat()
                         images[rel].append(art.Image(entry.name, st.st_size, st.st_mtime_ns))
+                elif entry.name.lower().endswith(attention.CUE):
+                    if cues is not None:
+                        st = entry.stat()
+                        cues[rel].append(art.Image(entry.name, st.st_size, st.st_mtime_ns))
                 elif _link(entry.path) and not os.path.exists(entry.path):
                     # a link to a folder whose drive isn't there: its songs are kept (R2.10)
                     tree.unreachable.add(path)
@@ -272,11 +284,12 @@ def walk_scope(
     tree: Tree | None = None,
     reached: Reached | None = None,
     now: float | None = None,
+    cues: dict[str, list[art.Image]] | None = None,
 ) -> Iterator[Seen]:
     """The audio files a partial scan sees (A2.4): each named folder's own files and those of the
     folders new under it, each named folder walked once, whether named or found new under another.
-    A named folder out of the library now (`outside`) is walked not at all. `reached` and `now`:
-    as for `walk`."""
+    A named folder out of the library now (`outside`) is walked not at all. `reached`, `now` and
+    `cues`: as for `walk`."""
     tree = tree if tree is not None else Tree()
     named = sorted(scope.folders)
     # the known folders count as walked (R2.3.2), but for the named ones, walked again here
@@ -289,8 +302,9 @@ def walk_scope(
         if folder in tree.folders or outside(root, folder, skip):
             continue
         yield from walk(
-            root, skip, images, start=folder, known=scope.known, tree=tree, reached=reached, now=now
-        )
+            root, skip, images, start=folder, known=scope.known, tree=tree, reached=reached,
+            now=now, cues=cues,
+        )  # fmt: skip
     tree.passed -= set(tree.folders)
 
 
@@ -445,7 +459,8 @@ def read_one(root: str, seen: Seen) -> Read:
     path = os.path.join(root, *seen.path.split("/"))
     try:
         t, info = read_tags(path)
-        return Read(seen, t, info, audio_hash(path, info.kind))
+        cover = attention.cover_of(pictures(path)) if t.has_cover else None
+        return Read(seen, t, info, audio_hash(path, info.kind), cover=cover)
     except TagReadError as e:
         return Read(seen, error=str(e))
     except OSError as e:
@@ -473,6 +488,13 @@ def _values(r: Read) -> dict[str, object]:
     }  # fmt: skip
     row.update({name: getattr(t, name) for name in db.FIELDS})
     row["file_rating"] = t.rating  # the file's; the rating shown is ratings.py's to work out
+    # Needs attention's (A2.6): the names, case and spacing aside, and the embedded cover
+    row["artist_nk"] = attention.name_key(t.artist)
+    row["albumartist_nk"] = attention.name_key(t.albumartist)
+    row["album_nk"] = attention.album_pair(t.album, t.albumartist, t.artist)
+    if r.cover_known:
+        key, width, height = r.cover if r.cover is not None else (None, None, None)
+        row.update(cover_key=key, cover_width=width, cover_height=height)
     return row
 
 
@@ -545,13 +567,18 @@ def wrote(c: sqlite3.Connection, root: str, written: Iterable[Written]) -> Resul
         if not ratings.in_file(w.info.kind, write_ratings):  # its rating is ratings.json's
             had = c.execute("SELECT file_rating FROM song WHERE path = ?", (rel,)).fetchone()
             t = replace(t, rating=had[0] if had is not None else None)
-        batch.append(Read(Seen(rel, w.size, w.mtime_ns), t, w.info, w.audio_hash))
+        # its cover as written, when the save changed it; else the row keeps the one it has
+        changed = "cover" in w.changed
+        cover = attention.cover_of([w.cover_after]) if changed and w.cover_after else None
+        batch.append(Read(Seen(rel, w.size, w.mtime_ns), t, w.info, w.audio_hash, cover=cover,
+                          cover_known=changed or not t.has_cover))  # fmt: skip
     return write_batch(c, batch, {})
 
 
 # a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
 ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
-       "error", *db.FIELDS, "file_rating")  # fmt: skip
+       "error", *db.FIELDS, "file_rating", "artist_nk", "albumartist_nk", "album_nk", "cover_key",
+       "cover_width", "cover_height", "cue")  # fmt: skip
 
 
 def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched) -> bool:
@@ -713,10 +740,12 @@ def scan(
         log.warning("didn't scan %s: it isn't there", root)
         return Result(missing=True)
     now = (clock or SystemClock()).now().timestamp()
+    cues: dict[str, list[art.Image]] = {}
     if scope is None:
-        seen = list(walk(root, skip, images, tree=tree, reached=reached, now=now))
+        seen = list(walk(root, skip, images, tree=tree, reached=reached, now=now, cues=cues))
     else:
-        seen = list(walk_scope(root, scope, skip, images, tree, reached, now))
+        seen = list(walk_scope(root, scope, skip, images, tree, reached, now, cues))
+    attention.measure(root, images, attention.known_sizes(c))  # the covers' sizes (R5.6)
     rows = _rows(c, scope, tree)
     indexed = {p: (s, m) for p, s, m, _h in rows}
     hashes = {p: h for p, _s, _m, h in rows if h is not None}
@@ -777,6 +806,9 @@ def scan(
         return len(removing)
 
     total.removed = index.write(delete).result()
+    # the songs a .cue sheet beside them names: an album in one file (A2.6)
+    found = attention.cued_in(root, cues, (s.path for s in seen))
+    index.write(lambda c: attention.set_cues(c, set(cues), found)).result()
     used = {hashes[p] for p in taken}
     total.copied = {h: p for h, p in copies.items() if h not in used and p not in gone}
     if scope is None:

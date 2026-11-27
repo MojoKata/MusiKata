@@ -36,6 +36,7 @@ from musikata_core.ratings import Writing, set_everything
 
 from . import garbage, media
 from .albumart import AlbumArt, ArtImages
+from .attention import Attention, NameMerge
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .edittags import EditTags
@@ -151,6 +152,8 @@ class Shell:
     ratings: Ratings | None = None
     art: AlbumArt | None = None
     genres: Genres | None = None
+    attention: Attention | None = None
+    names: NameMerge | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -159,7 +162,7 @@ class Shell:
         Shiboken.delete(self.engine)
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
-            self.edit, self.ratings, self.art, self.genres,
+            self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
         )  # fmt: skip
 
 
@@ -174,10 +177,12 @@ def close_bridges(
     ratings: Ratings | None = None,
     art: AlbumArt | None = None,
     genres: Genres | None = None,
+    attention: Attention | None = None,
+    names: NameMerge | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the Edit tags panel's and Album art's saves (stopped before their next file)
-    and threads, the
+    playback thread, the Edit tags panel's, Album art's and the merges' saves (stopped before
+    their next file) and threads, Needs attention's dismissals and watching, the
     ratings' save and watching, the play counts (their file written), the change history's
     thread, the watcher, the scan's thread and the worker processes, and the index; then deletes
     them (`release`)."""
@@ -190,6 +195,10 @@ def close_bridges(
         art.shut()
     if genres is not None:
         genres.shut()
+    if names is not None:
+        names.shut()
+    if attention is not None:
+        attention.close()
     if ratings is not None:
         ratings.close()
     if counts is not None:
@@ -198,7 +207,9 @@ def close_bridges(
         changes.close()
     library.close()
     index.close()
-    release(controls, counts, edit, art, genres, ratings, changes, player, library)
+    release(
+        controls, counts, edit, art, genres, names, attention, ratings, changes, player, library
+    )
 
 
 def release(*objects: QObject | None) -> None:
@@ -287,6 +298,8 @@ def load(
     )  # fmt: skip
     library.reloaded.connect(genre_tools.refresh)  # R9.5's banner, after a scan or a save
     genre_tools.refresh()
+    needs, names = attend(library, root, index, clock, edit, album_art, genre_tools, writing,
+                          changes, tags_settings, missing)  # fmt: skip
     engine.setInitialProperties(
         {
             "library": library,
@@ -296,6 +309,8 @@ def load(
             "ratings": rating,
             "art": album_art,
             "genres": genre_tools,
+            "attention": needs,
+            "names": names,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -304,15 +319,48 @@ def load(
         Shiboken.delete(engine)
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
-                      art=album_art, genres=genre_tools)  # fmt: skip
+                      art=album_art, genres=genre_tools, attention=needs, names=names)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating, album_art, genre_tools,
+        changes, edit, rating, album_art, genre_tools, needs, names,
     )  # fmt: skip
+
+
+def attend(
+    library: Library,
+    root: str,
+    index: db.Index,
+    clock: Clock,
+    edit: EditTags,
+    art: AlbumArt,
+    genres: Genres,
+    writing: Writing,
+    changes: ChangeHistory,
+    tags_settings: settings.RootTags,
+    missing: bool = False,
+) -> tuple[Attention, NameMerge]:
+    """Needs attention (R2.8): its list (Library's) told the genres the user has said are the
+    same (R9.5); its actions on the Edit tags panel, Album art, the genres' merge and the merge of
+    an artist's or an album's names (saved by `writing`, kept in `changes`); the root's
+    ignored.json read into the index, off the GUI thread, and again when another computer changes
+    it (A2.8). A root that isn't there (R2.10) lists what the index has."""
+    model = library.property("attention")
+    model.same = [tuple(g) for g in tags_settings.same_genres]
+    names = NameMerge(
+        root, index.read, writing, changes, saved=library.saved, undoable=tags_settings.history,
+        available=lambda: bool(library.property("available")),
+    )  # fmt: skip
+    needs = Attention(root, index, model, clock, edit=edit, art=art, genres=genres, names=names,
+                      history=changes, watching=not missing)  # fmt: skip
+    if not missing:
+        needs.start()
+    else:
+        model.refresh()
+    return needs, names
 
 
 def keep_playing(
@@ -680,9 +728,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         edit = session.shell.edit if session.shell is not None else None
         album_art = session.shell.art if session.shell is not None else None
         genre_tools = session.shell.genres if session.shell is not None else None
+        needs = session.shell.attention if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
-            history=changes, edit=edit, art=album_art, genres=genre_tools,
+            history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
         ).start()  # fmt: skip
     else:
         session.window.show()

@@ -21,7 +21,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from . import art, sortnames
+from . import art, attention, sortnames
 
 VARIOUS = "Various Artists"  # a compilation's album artist when its songs name none (R2.5.3)
 FLAGGED = "\x01"  # before the folder, the album-artist part of the identity of such a compilation
@@ -81,6 +81,9 @@ class Song:
     albumartistsort: str | None = None
     artistsort: str | None = None
     albumsort: str | None = None
+    cover_key: str | None = None  # its embedded cover's hash and size (attention.cover_of)
+    cover_width: int | None = None
+    cover_height: int | None = None
 
 
 @dataclass(frozen=True)
@@ -187,7 +190,7 @@ def name_of(spellings: Mapping[str, int]) -> str:
 ALBUM_ORDER = "disc IS NULL, disc, track IS NULL, track, path"
 SONG_COLUMNS = (
     "path, artist, albumartist, album, compilation, year, length, size, mtime_ns, has_cover,"
-    " albumartistsort, artistsort, albumsort"
+    " albumartistsort, artistsort, albumsort, cover_key, cover_width, cover_height"
 )
 
 
@@ -282,6 +285,28 @@ def _folder_image(
     return (f"{folder}/{found.name}" if folder else found.name, found.size, found.mtime_ns)
 
 
+def _image_size(
+    folder: str,
+    images: Mapping[str, Sequence[art.Image]] | None,
+    image: tuple[str, int, int] | None,
+    stored: tuple[object, ...],
+) -> tuple[int | None, int | None]:
+    """The size in pixels of the folder's cover image `image` (R5.6): as the walk measured it
+    (attention.measure), else as the row has it when it is the same image; (None, None) when it
+    isn't known."""
+    if image is None:
+        return None, None
+    if images is not None and folder in images:
+        name = image[0].rpartition("/")[2]
+        found = next((i for i in images[folder] if i.name == name), None)
+        if found is not None and found.width is not None:
+            return found.width, found.height
+    if tuple(stored[:3]) == image:
+        w, h = stored[3], stored[4]
+        return (w, h) if isinstance(w, int) and isinstance(h, int) else (None, None)
+    return None, None
+
+
 def refresh_album(
     c: sqlite3.Connection,
     album_id: int,
@@ -292,8 +317,8 @@ def refresh_album(
     folder it has no key for (None: any folder) keeps the folder image the row has, as a partial
     scan (A2.4) walks only some."""
     old = c.execute(
-        "SELECT artist_id, folder_image, folder_image_size, folder_image_mtime FROM album"
-        " WHERE id = ?",
+        "SELECT artist_id, folder_image, folder_image_size, folder_image_mtime,"
+        " folder_image_width, folder_image_height FROM album WHERE id = ?",
         (album_id,),
     ).fetchone()
     if old is None:
@@ -310,16 +335,30 @@ def refresh_album(
         Song(r[0], r[1], r[2], r[3], bool(r[4]), r[5], r[6], r[7], r[8], bool(r[9]), *r[10:])
         for r in rows
     ]
-    genres = [
-        g
-        for (g,) in c.execute(
-            "SELECT genre FROM song_genre JOIN song ON song.id = song_id WHERE album_id = ?"
-            f" ORDER BY {ALBUM_ORDER}, position",  # a tie goes to the first song's first genre
-            (album_id,),
-        )
-    ]
+    genres: list[str] = []
+    by_song: dict[str, list[str]] = {}
+    for path, g in c.execute(
+        "SELECT path, genre FROM song_genre JOIN song ON song.id = song_id WHERE album_id = ?"
+        f" ORDER BY {ALBUM_ORDER}, position",  # a tie goes to the first song's first genre
+        (album_id,),
+    ):
+        genres.append(g)
+        by_song.setdefault(path, []).append(g)
     folder = most_common(folder_of(s.path) for s in songs) or ""
-    a = summarize(songs, genres, _folder_image(folder, images, tuple(old[1:])))
+    image = _folder_image(folder, images, tuple(old[1:4]))
+    image_size = _image_size(folder, images, image, tuple(old[1:]))
+    a = summarize(songs, genres, image)
+    # Needs attention's (R2.8, R5.6): what its songs differ in, and its cover's size
+    differs = attention.differs([
+        attention.AlbumSong(s.album, s.albumartist, s.year, tuple(by_song.get(s.path, ())),
+                            s.has_cover, s.cover_key)
+        for s in songs
+    ])  # fmt: skip
+    cover_song = next((s for s in songs if s.path == a.cover), None)
+    if a.cover_kind == "embedded" and cover_song is not None:
+        cover_size = (cover_song.cover_width, cover_song.cover_height)
+    else:
+        cover_size = image_size if a.cover_kind == "file" else (None, None)
     who = artist_identity(a.artist)
     artist_id = _get_or_add(c, "artist", who) if who else None
     if artist_id is not None:
@@ -328,11 +367,13 @@ def refresh_album(
         "UPDATE album SET artist = ?, title = ?, artist_key = ?, title_key = ?, artist_id = ?,"
         " compilation = ?, year = ?, genre = ?, songs = ?, length = ?, size = ?, embedded = ?,"
         " folder = ?, folder_image = ?, folder_image_size = ?, folder_image_mtime = ?,"
-        " cover_kind = ?, cover = ?, thumb = ? WHERE id = ?",
+        " cover_kind = ?, cover = ?, thumb = ?, differs = ?, cover_width = ?, cover_height = ?,"
+        " folder_image_width = ?, folder_image_height = ? WHERE id = ?",
         (
             a.artist, a.title, a.artist_key, a.title_key, artist_id, int(a.compilation), a.year,
             a.genre, a.songs, a.length, a.size, a.embedded, a.folder, a.folder_image,
-            a.folder_image_size, a.folder_image_mtime, a.cover_kind, a.cover, a.thumb, album_id,
+            a.folder_image_size, a.folder_image_mtime, a.cover_kind, a.cover, a.thumb,
+            ",".join(differs) or None, *cover_size, *image_size, album_id,
         ),
     )  # fmt: skip
     return artists

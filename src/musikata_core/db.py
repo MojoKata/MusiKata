@@ -183,7 +183,42 @@ def _v7(c: sqlite3.Connection) -> None:
     c.execute("INSERT INTO rating_rule VALUES (0)")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6, _v7]
+def _v8(c: sqlite3.Connection) -> None:
+    """Needs attention (A2.6, R2.8): what its groups are found from, each kept by the scan so the
+    count is always current without a full pass (attention.py). On each song, its names with case
+    and spacing set aside, indexed with the name for the names that differ only so (`artist_nk`,
+    `albumartist_nk`; `album_nk`, the album artist's and the album's: the normalised pair), its
+    embedded front cover (its hash and size in pixels, R5.6) and the `.cue` sheet beside it that
+    names it (an album in one file). On each album, the fields its songs differ in (`differs`),
+    the size of its cover and of its folder's image. And the entries the user dismissed, from
+    `.musikata/ignored.json` (A2.8, `ignored`). The keys and covers are worked out from the files,
+    so every song is read again by the next scan, as for version 2."""
+    for column in (
+        "artist_nk TEXT", "albumartist_nk TEXT", "album_nk TEXT", "cover_key TEXT",
+        "cover_width INTEGER", "cover_height INTEGER", "cue TEXT",
+    ):  # fmt: skip
+        c.execute(f"ALTER TABLE song ADD COLUMN {column}")
+    c.execute("CREATE INDEX song_artist_nk ON song (artist_nk, artist)")
+    c.execute("CREATE INDEX song_albumartist_nk ON song (albumartist_nk, albumartist)")
+    c.execute("CREATE INDEX song_album_nk ON song (album_nk, album)")
+    c.execute("CREATE INDEX song_cue ON song (cue) WHERE cue IS NOT NULL")
+    c.execute("CREATE INDEX song_error ON song (path) WHERE error IS NOT NULL")
+    for column in (
+        "differs TEXT", "cover_width INTEGER", "cover_height INTEGER",
+        "folder_image_width INTEGER", "folder_image_height INTEGER",
+    ):  # fmt: skip
+        c.execute(f"ALTER TABLE album ADD COLUMN {column}")
+    c.execute(
+        "CREATE INDEX album_differs ON album (artist_key, title_key) WHERE differs IS NOT NULL"
+    )
+    c.execute(
+        "CREATE TABLE ignored (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, about TEXT NOT NULL,"
+        " hash TEXT, modified REAL, changed TEXT NOT NULL, UNIQUE (kind, about))"
+    )
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8]
 
 
 def connect(path: str) -> sqlite3.Connection:

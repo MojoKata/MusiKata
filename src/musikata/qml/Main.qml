@@ -19,7 +19,8 @@ import "."
 // the panel's cover or an image dropped on an album's cover (R5.4). While a modal dialog is open over
 // the window (`modal`: a bulk tool's, Album art's), the window's shortcuts don't act on what is
 // behind it, nor does a click reach it. A genre's Rename… and Merge into… (R9.4) open the same
-// dialog as a bulk tool, over the whole window. A star clicked
+// dialog as a bulk tool, over the whole window, as Needs attention's Merge of an artist's or an
+// album's names does (R2.8). A star clicked
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2).
 Window {
@@ -31,6 +32,8 @@ Window {
     required property var ratings
     required property var art
     required property var genres
+    required property var attention
+    required property var names
     width: 1280
     height: 800
     minimumWidth: 960
@@ -39,6 +42,7 @@ Window {
     color: Theme.bg
     // a modal dialog is open over the window: its shortcuts are the dialog's, not the window's
     readonly property bool modal: win.edit.tool.opened || win.art.opened || win.genres.opened
+                                  || win.names.opened
 
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -149,7 +153,7 @@ Window {
         }
         sourceComponent: ({
             albums: albums, album: album, artists: artists, artist: artist, songs: songs,
-            genres: genreList, genre: genre, folders: folders
+            genres: genreList, genre: genre, folders: folders, attention: needs
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art } }
@@ -159,6 +163,7 @@ Window {
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres } }
     Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres } }
     Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: needs; AttentionView { library: win.library; attention: win.attention } }
     Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
 
     UpNext {
@@ -188,7 +193,7 @@ Window {
     ToolDialog {
         objectName: "toolOverlay"
         anchors.fill: parent
-        tool: win.genres.opened ? win.genres : win.edit.tool  // never both: each is modal
+        tool: win.genres.opened ? win.genres : win.names.opened ? win.names : win.edit.tool  // never two: each is modal
     }
     AlbumArtDialog {
         objectName: "artOverlay"

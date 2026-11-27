@@ -1,8 +1,8 @@
 """The objects QML sees (A1.2). `Library`: the root, its card's line, the views and going between
 them (R2.6, R6.3), the header (R6.4: the view's title and count, the search, the view mode and the
 sort), Albums with its genre chips and Artists, an album's and an artist's pages, Genres and a
-genre's page (genres.py's, R9.1), Folders (its open folder and list are folders.py's, R2.9), and
-the scans,
+genre's page (genres.py's, R9.1), Folders (its open folder and list are folders.py's, R2.9),
+Needs attention and its count in the sidebar (its list is attention.py's, R2.8), and the scans,
 run one at a time on a thread of their own with the worker processes reading the files (A1.3,
 A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4); the root's
 card, and a root that isn't there (R2.1.1, R2.10).
@@ -34,6 +34,7 @@ from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
 from musikata_core.tags import Written
 
+from .attention import AttentionModel
 from .folders import MODES as folders_modes
 from .folders import SEARCH_HINT as FOLDERS_SEARCH_HINT
 from .folders import FolderView, Remembered
@@ -449,9 +450,9 @@ class ArtistPage(QObject):
     others = QtProperty(QObject, _get_others, constant=True)
 
 
-VIEWS = ("albums", "artists", "songs", "genres", "folders")  # the sidebar's views built so far
+VIEWS = ("albums", "artists", "songs", "genres", "folders", "attention")  # the sidebar's views
 TITLES = {"albums": "Albums", "artists": "Artists", "songs": "Songs", "genres": "Genres",
-          "folders": "Folders"}  # fmt: skip
+          "folders": "Folders", "attention": "Needs attention"}  # fmt: skip
 NOUNS = {"albums": "album", "artists": "artist", "songs": "song", "genres": "genre"}  # counted
 SEARCH_HINT = "Search the library"
 # the search box's hint where it searches less than the library: a page (R2.7), Folders (R2.9.2)
@@ -460,11 +461,13 @@ SEARCH_HINTS = {
     "artist": "Search this artist",
     "genre": "Search this genre",
     "folders": FOLDERS_SEARCH_HINT,
+    "attention": "Search these",
 }
 # what a search that finds nothing says it found none of (R2.7)
 EMPTY_NOUNS = {
     "albums": "albums", "artists": "artists", "songs": "songs", "folders": "folders or songs",
     "genres": "genres", "album": "songs", "artist": "albums or songs", "genre": "albums or songs",
+    "attention": "entries",
 }  # fmt: skip
 # the view modes each view has (R6.4; Albums' grid and list, R2.6; Folders' four, R2.9.4): its
 # name, label and icon
@@ -559,9 +562,11 @@ class Library(QObject):
         self._folders = FolderView(index.read, remembered, self, self._searcher)
         self._folders.opened.connect(self._on_folder_opened)
         self._folders.modeChanged.connect(self.viewChanged)
-        self._lists: dict[str, PagedModel | GenresModel] = {
+        self._attention = AttentionModel(index.read, self, self._searcher)  # R2.8
+        self._lists: dict[str, PagedModel | GenresModel | AttentionModel] = {
             "albums": self._albums, "artists": self._artists, "songs": self._songs,
             "genres": self._genres, "folders": self._folders.property("model"),
+            "attention": self._attention,
         }  # fmt: skip
         for model in self._lists.values():
             model.countChanged.connect(self.changed)
@@ -619,6 +624,7 @@ class Library(QObject):
         self._artists.refresh()
         self._genres.refresh()
         self._folders.reload()
+        self._attention.refresh()  # the sidebar's count, always current (A2.6)
         c = self._index.read()
         self._counts = counts(c)
         self._unreadable = (
@@ -1231,6 +1237,14 @@ class Library(QObject):
     def _get_folders(self) -> FolderView:
         return self._folders
 
+    def _get_attention(self) -> AttentionModel:
+        return self._attention
+
+    def _get_attention_count(self) -> str:
+        """The sidebar's count beside Needs attention (R2.8); "" for none."""
+        n = self._attention.total()
+        return f"{n:,}" if n else ""
+
     def _get_scanning(self) -> bool:
         return self._scanning
 
@@ -1266,6 +1280,8 @@ class Library(QObject):
     def _count_of(self, view: str) -> str:
         if view == "folders":
             return str(self._folders.property("count"))
+        if view == "attention":
+            return self._attention.count_text()
         model = self._lists[view]
         return count_text(model.rowCount(), model.total(), NOUNS[view], model.filtered())
 
@@ -1295,6 +1311,8 @@ class Library(QObject):
             if self._scanning:
                 return "Reading your music…"
             return f"No songs in {self._get_root()}"
+        if self._view == "attention" and not self._attention.total():
+            return "" if self._attention.pending() else "Nothing needs attention"
         page = self._pages.get(self._view)
         models = [m for m, _ in page.lists()] if page else [self._lists[self._view]]
         shown = next((m.shown_search() for m in models if m.shown_search().strip()), "")
@@ -1415,6 +1433,8 @@ class Library(QObject):
     genreList = QtProperty(QObject, _get_genre_list, constant=True)  # the Genres view's (R9.1)
     genrePage = QtProperty(QObject, _get_genre_page, constant=True)  # a genre's page
     folders = QtProperty(QObject, _get_folders, constant=True)  # Folders' open folder (R2.9)
+    attention = QtProperty(QObject, _get_attention, constant=True)  # Needs attention's (R2.8)
+    attentionCount = QtProperty(str, _get_attention_count, notify=changed)
     scanning = QtProperty(bool, _get_scanning, notify=scanningChanged)
     line = QtProperty(str, _get_line, notify=changed)
     countText = QtProperty(str, _get_count_text, notify=changed)  # 1,412 songs; 12 of 1,412 songs

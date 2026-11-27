@@ -2,10 +2,10 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "."
 
-// The sidebar (R6.3): the app's icon and name, the library's views as they are built (Albums,
-// Artists, Songs, Genres and Folders; Needs attention with slice 6, DEVELOP.md), and the music
-// root's card at the bottom (R2.1.1): its path, its line, and its dot, red with the card when the
-// root isn't there (R2.10).
+// The sidebar (R6.3): the app's icon and name, the library's views (Albums, Artists, Songs,
+// Genres, Folders, and Needs attention with its count, R2.8), and the music root's card at the
+// bottom (R2.1.1): its path, its line, and its dot, red with the card when the root isn't there
+// (R2.10).
 Rectangle {
     id: side
     required property var library
@@ -61,7 +61,7 @@ Rectangle {
     Repeater {
         model: [["albums", qsTr("Albums"), "album"], ["artists", qsTr("Artists"), "artist"],
                 ["songs", qsTr("Songs"), "song"], ["genres", qsTr("Genres"), "genre"],
-                ["folders", qsTr("Folders"), "folder"]]
+                ["folders", qsTr("Folders"), "folder"], ["attention", qsTr("Needs attention"), "attention"]]
         SideItem {
             required property int index
             required property var modelData
@@ -71,6 +71,7 @@ Rectangle {
             label: modelData[1]
             icon: modelData[2]
             active: side.library.section === modelData[0]
+            badge: modelData[0] === "attention" ? side.library.attentionCount : ""
             onClicked: side.library.show(modelData[0])
         }
     }

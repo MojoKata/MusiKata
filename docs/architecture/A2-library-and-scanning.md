@@ -60,8 +60,22 @@ folders a scan touched, so the count in the sidebar is always current without a 
 - Exact copies (R2.12) share an `audio_hash`; likely ones share the artist and title once case,
   accents and punctuation are set aside, with lengths within 2 seconds, and are found through an
   index on that normalised pair.
-- An album in one file is a single audio file of 20 minutes or more with a `.cue` beside it.
+- An album in one file is a single audio file of 20 minutes or more with a `.cue` beside it that
+  names it (by its name, else without its extension); the walk notes each folder's `.cue` sheets,
+  and the songs they name are set for the folders it walked.
+- Names that differ only in case or spacing are found the same way: each song keeps its artist's,
+  album artist's and album's names with case and spacing set aside (the album's as the normalised
+  pair of album artist and album), each indexed with the name, and a name with more than one
+  spelling under one key is an entry. Genres are grouped as R9.5 groups them.
+- An album's row keeps the fields its songs differ in and the size of its cover, read from the
+  image's header once: an embedded one's as its song is read, a folder's image's as the walk finds
+  it (by its path, size and modification time).
 - Text in the wrong encoding is flagged when it is read (A3.6).
+
+The groups are queries in `attention.py` over those columns rather than `CREATE VIEW`s, as a view
+made by a migration is fixed in time (A2.1) and the groups grow with the slices. A dismissed entry
+(`ignored`) is matched by its kind and what it is about, while the file's modification time is the
+one dismissed.
 
 A2.7. **Folders.** The `folder` table is what the Folders view (R2.9) lists, so opening a folder
 of a large library is one indexed query on `parent`, not a walk of the disk.
@@ -272,8 +286,9 @@ a rating cleared, kept so the clearing wins over an older rating from another co
 ```
 
 `ignored.json` (`ignored.v1.schema.json`), Needs attention's dismissals (R2.8). `about` is the file
-or folder an entry is about, or for names that differ only in case, the name; `modified` is the
-file's modification time when it was dismissed, so a change to the file brings the entry back:
+or folder an entry is about (an album's, its folder), or for names that differ only in case, the
+name; `modified` is the file's modification time when it was dismissed (an album's, the newest of
+its songs'), so a change to the file brings the entry back:
 
 ```json
 {

@@ -21,7 +21,13 @@ for a scan to find it (`link`), and a song moved by a scan takes its rows' paths
 A file is data from outside (another computer, another version, a sync in progress): one cut
 short, not JSON, or of the wrong shape is logged and skipped; an entry it can't use is logged and
 left out, the rest kept; a newer format is read for what it can and never written (A2.10); the
-fields it doesn't know are kept when this computer writes its own again."""
+fields it doesn't know are kept when this computer writes its own again.
+
+Needs attention's dismissals (Ignore, R2.8) are the root's `.musikata/ignored.json`, which any
+computer writes: read again before writing and merged entry by entry, the newest `changed`
+winning (`save_ignored`, A2.8), and kept in the index's `ignored` (`load_ignored`), at start and
+whenever the watcher sees the file change. Each names what it is about as A2.10 says, a song by its
+path and audio hash; attention.dismissed matches them."""
 
 from __future__ import annotations
 
@@ -726,3 +732,254 @@ class Keeping:
         self._closed = True
         if self._executor is not None:
             self._executor.shutdown(wait=True)
+
+
+# ---------- ignored.json: Needs attention's dismissals (R2.8, A2.8, A2.10) ----------
+
+IGNORED = "ignored.json"
+IGNORED_FORMAT = 1
+IGNORED_KNOWN = frozenset({"format", "entries"})
+IGNORED_KNOWN_ENTRY = frozenset({"kind", "about", "hash", "modified", "changed"})
+
+
+@dataclass(frozen=True)
+class Dismissal:
+    """A Needs attention entry the user dismissed (Ignore, R2.8), as ignored.json keeps it: its
+    kind, what it is about (a path under the root, or for names, the name), the song's audio hash
+    (None: not a song, or not known), the file's modification time in seconds when it was
+    dismissed (None: none kept), and when it was dismissed, a UTC time as A2.10 writes it."""
+
+    kind: str
+    about: str
+    hash: str | None
+    modified: float | None
+    changed: str
+
+
+@dataclass(frozen=True)
+class Dismissals:
+    """An ignored.json as read: its entries, the fields this version doesn't know (`extras`, and
+    each entry's by kind and about) to keep when it is written again; `newer`, a newer MusiKata's
+    format, never written; `broken`, a file that couldn't be used at all; `problems`, what
+    couldn't be used, for the log."""
+
+    entries: tuple[Dismissal, ...] = ()
+    extras: Mapping[str, object] = field(default_factory=dict)
+    entry_extras: Mapping[tuple[str, str], Mapping[str, object]] = field(default_factory=dict)
+    newer: bool = False
+    broken: bool = False
+    problems: tuple[str, ...] = ()
+
+
+class IgnoredError(Exception):
+    """ignored.json couldn't be written, and why, in words a person can act on."""
+
+    def __init__(self, why: str) -> None:
+        super().__init__(why)
+        self.why = why
+
+
+def _modified(value: object) -> float | None:
+    """A modification time in seconds from `value`: a number, also as text; None for anything
+    else (NaN, a bool, a negative time)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, int | float) and math.isfinite(value) and value >= 0:
+        return float(value)
+    return None
+
+
+def _dismissal(value: object, problems: list[str]) -> tuple[Dismissal, dict[str, object]] | None:
+    """An entry of `entries` and its fields this version doesn't know; None, with the problem,
+    when it can't be used."""
+    if not isinstance(value, dict):
+        problems.append(f"an entry isn't an object: {value!r}; left out")
+        return None
+    kind, about = value.get("kind"), value.get("about")
+    if not isinstance(kind, str) or not kind.strip():
+        problems.append(f"an entry's kind isn't text: {kind!r}; left out")
+        return None
+    if not isinstance(about, str) or not about:
+        problems.append(f"an entry's about isn't text: {about!r}; left out")
+        return None
+    hash_ = value.get("hash")
+    if isinstance(hash_, str) and HASH.fullmatch(hash_.lower()):
+        hash_ = hash_.lower()
+    else:
+        if hash_ is not None:
+            problems.append(f"{about}: its hash isn't an audio hash: {hash_!r}; found by its path")
+        hash_ = None
+    modified = _modified(value.get("modified"))
+    if modified is None and value.get("modified") is not None:
+        problems.append(f"{about}: modified isn't a time: {value.get('modified')!r}; left out")
+        return None
+    changed = parse_time(value.get("changed"))
+    if changed is None:
+        problems.append(
+            f"{about}: changed isn't a UTC time: {value.get('changed')!r}; the oldest there is"
+        )
+        changed = UNKNOWN
+    extras = {k: v for k, v in value.items() if k not in IGNORED_KNOWN_ENTRY}
+    return Dismissal(kind.strip(), about, hash_, modified, changed), extras
+
+
+def _broken_ignored(why: str) -> Dismissals:
+    return Dismissals(broken=True, problems=(f"{why}: its dismissals aren't read",))
+
+
+def parse_ignored(text: str) -> Dismissals:
+    """The dismissals in `text`, an ignored.json's content, whatever was written there: a file
+    that can't be used whole gives none, and an entry that can't be used is left out, each named
+    in `problems`. An entry named twice (its kind and about) is one, the newest `changed`
+    winning."""
+    try:
+        data = json.loads(text.removeprefix("﻿"))
+    except ValueError as e:
+        return _broken_ignored(f"it isn't JSON ({e})")
+    if not isinstance(data, dict):
+        return _broken_ignored("it isn't a JSON object")
+    problems: list[str] = []
+    fmt = data.get("format")
+    newer = False
+    if isinstance(fmt, int) and not isinstance(fmt, bool):
+        newer = fmt > IGNORED_FORMAT
+        if newer:
+            problems.append(f"it is format {fmt}, from a newer MusiKata: it is read, not written")
+    elif fmt is not None:
+        problems.append(f"format isn't a number: {fmt!r}; read as format {IGNORED_FORMAT}")
+    listed = data.get("entries", [])
+    if not isinstance(listed, list):
+        return _broken_ignored(f"entries isn't a list: {listed!r}")
+    entries: dict[tuple[str, str], Dismissal] = {}
+    entry_extras: dict[tuple[str, str], Mapping[str, object]] = {}
+    for value in listed:
+        read_ = _dismissal(value, problems)
+        if read_ is None:
+            continue
+        d, extras = read_
+        twice = entries.get((d.kind, d.about))
+        if twice is not None:
+            problems.append(f"{d.kind} {d.about} is named twice: the newest is kept")
+            if twice.changed > d.changed:
+                continue
+        entries[(d.kind, d.about)] = d
+        if extras:
+            entry_extras[(d.kind, d.about)] = extras
+    return Dismissals(
+        entries=tuple(entries.values()),
+        extras={k: v for k, v in data.items() if k not in IGNORED_KNOWN},
+        entry_extras=entry_extras,
+        newer=newer,
+        problems=tuple(problems),
+    )
+
+
+def merge_ignored(kept: Iterable[Dismissal], mine: Iterable[Dismissal]) -> list[Dismissal]:
+    """The dismissals of `kept` (the file as read again) with `mine` (this computer's new ones),
+    entry by entry (kind and about), the newest `changed` winning and, at the same time, `mine`
+    (A2.8); by kind and about, in order."""
+    out = {(d.kind, d.about): d for d in kept}
+    for d in mine:
+        there = out.get((d.kind, d.about))
+        if there is None or d.changed >= there.changed:
+            out[(d.kind, d.about)] = d
+    return [out[k] for k in sorted(out)]
+
+
+def ignored_document(
+    entries: Iterable[Dismissal], kept: Dismissals | None = None
+) -> dict[str, object]:
+    """ignored.json for `entries`; the fields `kept`, the file as read, had that this version
+    doesn't know are kept (A2.10)."""
+    extras = kept.extras if kept is not None else {}
+    entry_extras = kept.entry_extras if kept is not None else {}
+    out: list[dict[str, object]] = []
+    for d in entries:
+        entry: dict[str, object] = {**entry_extras.get((d.kind, d.about), {}), "kind": d.kind,
+                                    "about": d.about}  # fmt: skip
+        if d.hash is not None:
+            entry["hash"] = d.hash
+        if d.modified is not None:
+            entry["modified"] = d.modified
+        entry["changed"] = d.changed
+        out.append(entry)
+    return {**extras, "format": IGNORED_FORMAT, "entries": out}
+
+
+def ignored_of(root: str) -> str:
+    """The root's ignored.json, in its `.musikata` (R1.5)."""
+    return os.path.join(folder_of(root), IGNORED)
+
+
+def read_ignored(path: str) -> Dismissals | None:
+    """The ignored.json at `path`, each problem logged; None when there is none."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        found = _broken_ignored(f"it couldn't be read ({e.strerror or e})")
+    else:
+        found = parse_ignored(text)
+    for problem in found.problems:
+        log.warning("%s: %s", path, problem)
+    return found
+
+
+def save_ignored(path: str, mine: Sequence[Dismissal]) -> list[Dismissal]:
+    """`mine` written into the ignored.json at `path`, read again first and merged
+    (`merge_ignored`); the entries written. Raises IgnoredError, the file as it was, when it is
+    a newer MusiKata's, can't be read (it isn't written over: a sync may be bringing it), or
+    can't be written."""
+    found = read_ignored(path)
+    if found is not None and found.newer:
+        raise IgnoredError(
+            "the music folder's ignored.json was changed by a newer MusiKata: update MusiKata to"
+            " dismiss entries there"
+        )
+    if found is not None and found.broken:
+        why = found.problems[0] if found.problems else "it can't be read"
+        raise IgnoredError(
+            f"the music folder's ignored.json can't be read, so it isn't written over ({why})"
+        )
+    entries = merge_ignored(found.entries if found is not None else (), mine)
+    if not settings.save(path, ignored_document(entries, found)):
+        raise IgnoredError("the music folder's ignored.json couldn't be written")
+    return entries
+
+
+# in the index: each function runs in the writer's transaction
+
+
+def load_ignored(c: sqlite3.Connection, entries: Iterable[Dismissal]) -> int:
+    """Dismissals (as read, or made on this computer) merged into the index's `ignored`, entry
+    by entry, the newest `changed` winning; how many changed it."""
+    changed = 0
+    for d in entries:
+        there = c.execute(
+            "SELECT changed FROM ignored WHERE kind = ? AND about = ?", (d.kind, d.about)
+        ).fetchone()
+        if there is not None and d.changed < there[0]:
+            continue
+        c.execute(
+            "INSERT INTO ignored (kind, about, hash, modified, changed) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT (kind, about) DO UPDATE SET hash = excluded.hash,"
+            " modified = excluded.modified, changed = excluded.changed",
+            (d.kind, d.about, d.hash, d.modified, d.changed),
+        )
+        changed += 1
+    return changed
+
+
+def dismissals(c: sqlite3.Connection) -> list[Dismissal]:
+    """The dismissals the index holds, by kind and about."""
+    rows = c.execute(
+        "SELECT kind, about, hash, modified, changed FROM ignored ORDER BY kind, about"
+    )
+    return [Dismissal(*r) for r in rows]

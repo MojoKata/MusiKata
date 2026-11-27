@@ -536,6 +536,12 @@ class Genres(QObject):
         choices = choices_of(name, self._counts, self._groups)
         self._open("merge", (name,), choices[0] if choices else "", choices)
 
+    def merge_names(self, names: Sequence[str]) -> None:
+        """Needs attention's Merge of genres that look like one (R2.8, R9.5): the merge's
+        preview of `names`, the most used first and chosen, as Review… opens it."""
+        if names:
+            self._open("merge", names, names[0], list(names))
+
     def _open(self, tool: str, names: Sequence[str], into: str, choices: list[str]) -> None:
         if self._batch is not None:
             return

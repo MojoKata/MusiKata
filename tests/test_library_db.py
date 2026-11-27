@@ -170,7 +170,7 @@ def test_an_index_of_slice_4_gains_the_change_history_and_reads_nothing_again(tm
         step(c)
     c.execute("PRAGMA user_version = 5")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 10, 5)")
-    assert db.migrate(c) == len(db.MIGRATIONS)
+    db.MIGRATIONS[5](c)  # version 6 alone: a later one may read the songs again (version 8)
     assert c.execute("SELECT mtime_ns FROM song").fetchall() == [(5,)]
     c.execute(
         "INSERT INTO change (name, time, computer, action, description) VALUES"
@@ -179,4 +179,23 @@ def test_an_index_of_slice_4_gains_the_change_history_and_reads_nothing_again(tm
     c.execute("INSERT INTO change_file VALUES (1, 0, 'a.flac', NULL, 'title', NULL)")
     c.execute("DELETE FROM change")
     assert c.execute("SELECT COUNT(*) FROM change_file").fetchone()[0] == 0
+    c.close()
+
+
+def test_an_index_of_slice_5_gains_needs_attentions_columns_and_its_songs_are_read_again(tmp_path):
+    """Version 8 (A2.6, R2.8): the names' keys and the covers' sizes are worked out from the files
+    by the scan, so every song is read again; the dismissals come from ignored.json."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:7]:
+        step(c)
+    c.execute("PRAGMA user_version = 7")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 10, 5)")
+    assert db.migrate(c) == len(db.MIGRATIONS)
+    assert c.execute("SELECT mtime_ns, artist_nk, cover_key, cue FROM song").fetchall() == [
+        (-1, None, None, None)
+    ]
+    columns = {r[1] for r in c.execute("PRAGMA table_info(album)")}
+    assert {"differs", "cover_width", "folder_image_width"} <= columns
+    assert c.execute("SELECT COUNT(*) FROM ignored").fetchone() == (0,)
     c.close()
