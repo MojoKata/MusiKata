@@ -20,7 +20,10 @@ trash.
   highest rating when higher than its own (written as a rating is, ratings.Writing, `write`), all
   one entry in the change history (history.Recording: the rating as a file written, the plays
   and the files moved noted), whose message offers Undo and says that Undo can't take files out
-  of the trash (R2.11). Playlists naming a copy moved are slice 7's (R8, #24).
+  of the trash (R2.11). Once the files have gone, a step that fails is logged, the steps after it
+  still run, and the message says what wasn't done: rows not taken out stay listed until the next
+  scan, which takes out the songs whose file is gone. Playlists naming a copy moved are slice 7's
+  (R8, #24).
 
 What each says is decided here as plain data and text, tested without a window; what a group holds
 and the plan of a move are musikata_core.duplicates'."""
@@ -185,9 +188,16 @@ def description_of(plans: Sequence[Plan], moved: int) -> str:
     return f"{plural(moved, 'copy', 'copies')} of {plural(len(plans), 'song')} to the trash"
 
 
-def moved_text(moved: int, failed: Sequence[tuple[str, str]]) -> str:
+def moved_text(
+    moved: int,
+    failed: Sequence[tuple[str, str]],
+    listed: bool = False,
+    plays: bool = True,
+    rating: bool = True,
+) -> str:
     """The message after a move (R6.7, R2.11): what went, the first that didn't with why, and
-    that Undo can't take files out of the trash."""
+    that Undo can't take files out of the trash; whether those moved stay `listed` until the
+    next scan, and whether the copies kept were given their `plays` and `rating`."""
     if not moved and not failed:
         return "Nothing was moved to the trash"
     whole = moved + len(failed)
@@ -199,7 +209,20 @@ def moved_text(moved: int, failed: Sequence[tuple[str, str]]) -> str:
         what += f": {name} {why}{more}"
     if not moved:
         return what
-    return f"{what}. The copies kept have their plays and rating; {IN_TRASH}"
+    stays = ""
+    if listed:
+        stays = (
+            "It stays" if moved == 1 else "They stay"
+        ) + " listed until the library's next scan. "
+    if plays and rating:
+        kept = "The copies kept have their plays and rating"
+    elif rating:
+        kept = "The copies kept have their rating, but moving their plays to them failed"
+    elif plays:
+        kept = "The copies kept have their plays, but writing their rating failed"
+    else:
+        kept = "Moving their plays to the copies kept and writing their rating failed"
+    return f"{what}. {stays}{kept}; {IN_TRASH}"
 
 
 # ---------- moving the others to the trash (R2.12, R2.11) ----------
@@ -208,12 +231,16 @@ def moved_text(moved: int, failed: Sequence[tuple[str, str]]) -> str:
 @dataclass
 class Moved:
     """How a move went: the copies moved to the trash, those that weren't (name and why), the
-    rating's save and the number of plays moved."""
+    rating's save and the number of plays moved; whether the rows of those moved are still
+    `listed` (taking them out failed: the next scan does) and whether giving their plays failed
+    (`plays_left`)."""
 
     trashed: list[Copy] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
     outcome: Outcome[Written] = field(default_factory=Outcome)
     plays: int = 0
+    listed: bool = False
+    plays_left: bool = False
 
 
 def move(
@@ -230,7 +257,8 @@ def move(
     to the copy kept (`plays`, rootfiles.Keeping.change; None: none are counted); their rows taken
     out of the index (`remove`, scanner.remove); the kept copy given their highest rating
     (`write`, ratings.Writing); all one entry (`record`; None: the history is off), the rating a
-    file of it and the plays and the files moved noted."""
+    file of it and the plays and the files moved noted. Once a file has gone, a step that fails
+    is logged and noted in what it gives (`Moved`), and the steps after it still run."""
     out = Moved()
     done: list[tuple[Plan, list[Copy]]] = []
     for p in plans:
@@ -257,11 +285,26 @@ def move(
                                                       [g.path for g in went])
                     for p, went in done}  # fmt: skip
 
-        found = plays(take).result()
-        taken = found if isinstance(found, dict) else {}
-        out.plays = sum(e.count for moved in taken.values() for e in moved)
+        try:
+            found = plays(take).result()
+        except Exception:  # noqa: BLE001  (logged; the message says the plays weren't given)
+            log.exception("giving the copies kept the plays of those moved to the trash failed")
+            found = None
+        if isinstance(found, dict):  # Keeping gives None for a job that broke, logged there
+            taken = found
+            out.plays = sum(e.count for moved in taken.values() for e in moved)
+        else:
+            out.plays_left = True
+            log.warning("the plays of the copies moved to the trash weren't given to those kept")
     if out.trashed:
-        remove([c.path for c in out.trashed])
+        try:
+            remove([c.path for c in out.trashed])
+        except Exception:  # noqa: BLE001  (logged; the message says they stay listed)
+            log.exception(
+                "the copies moved to the trash couldn't be taken out of the library; its next"
+                " scan takes them out"
+            )
+            out.listed = True
     jobs = []
     for p, went in done:
         best = duplicates.plan(duplicates.Group((p.kept, *went), False), p.kept.song,
@@ -443,7 +486,9 @@ class Duplicates(QObject):
         elif self._done is not None:
             self._done()
         if self._changes is not None:
-            self._changes.after_save(out.outcome, moved_text(len(out.trashed), out.failed))
+            text = moved_text(len(out.trashed), out.failed, out.listed, not out.plays_left,
+                              not out.outcome.failed)  # fmt: skip
+            self._changes.after_save(out.outcome, text)
 
     def go(self, step: dict[str, Any]) -> None:
         """A tour's step (A1.6): {"review": "<title>"} opens the group of copies of that title in

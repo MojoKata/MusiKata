@@ -62,8 +62,10 @@ R3.6. **Tidying,** each a checkbox:
 
 R3.6.1. **Tidy case** (on): a value that is all lower case or all upper case becomes Title Case,
 keeping the small words (a, an, and, of, the, …) lower case inside a title; a value that already
-has mixed case is left alone, so "AC/DC" and "deadmau5" stay as they are only when the path
-spells them so.
+has mixed case is left alone, so "deadmau5" stays as it is only when the path spells it so.
+Inside a value all in capitals, letters split by `/` or `.` with each part 1 to 3 letters ("AC/DC",
+"R.E.M.", "P.I.L.") stay as spelled and the rest is tidied, so "AC/DC LIVE AT DONINGTON" becomes
+"AC/DC Live at Donington".
 
 R3.6.2. **Year from folder** (on): a four-digit year found in the album's folder name, as
 `2019 - Glass Harbor` or `Glass Harbor (2019)`, fills Year even when the pattern has no `{year}`.

@@ -388,6 +388,48 @@ def test_a_backend_that_cant_start_leaves_playback_as_it_was_and_says_so_once(
     p.close()
 
 
+class Breaking:
+    """A backend that started, then raises on what it is told (as Wine's SMTC did at start)."""
+
+    def __init__(self):
+        self.closed = False
+
+    def now_playing(self, song):
+        raise OSError(-2147221164, "Class not registered")
+
+    def state(self, state, position):
+        raise OSError(-2147221164, "Class not registered")
+
+    def seeked(self, position):
+        raise OSError(-2147221164, "Class not registered")
+
+    def close(self):
+        self.closed = True
+
+
+def test_a_backend_that_breaks_after_it_started_leaves_playback_and_says_so_once(
+    tmp_path, index, qtbot, caplog
+):
+    """A4.5: a platform whose controls fail still plays: what the backend raises once it has
+    started stops the controls, never the app."""
+    backend = Breaking()
+    p = bridges.Player(str(tmp_path), FakeEngine(), read=index.read)
+    with caplog.at_level(logging.INFO):
+        mc = media.MediaControls(p, lambda send, position, window: backend)
+        p.play_songs(song_ids(index), "")
+        qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+        p.toggle()
+        qtbot.waitUntil(lambda: p.property("paused"), timeout=WAIT)
+    said = [r.getMessage() for r in caplog.records if r.name == "musikata.media"]
+    assert said == [
+        "the system's media controls stopped (OSError: [Errno -2147221164] Class not "
+        "registered); MusiKata plays without them"
+    ]
+    assert mc.backend is None and backend.closed and p.property("paused")
+    mc.close()
+    p.close()
+
+
 def test_a_platform_without_controls_plays_and_says_so(tmp_path, qapp, caplog):
     p = bridges.Player(str(tmp_path), FakeEngine())
     with caplog.at_level(logging.INFO):
@@ -520,6 +562,62 @@ def test_windows_controls_let_go_when_closed(windows):
     backend.close()
     assert fake.removed == ["button-token", "position-token"]
     assert fake.is_enabled is False and fake.cleared == 1
+
+
+class FakeSmtcWithoutSeek(FakeSmtc):
+    """Controls without ISystemMediaTransportControls2 (Wine's): asking for the position moved
+    fails as PyWinRT fails it."""
+
+    def add_playback_position_change_requested(self, handler):
+        raise AttributeError(
+            "method 'add_PlaybackPositionChangeRequested' requires "
+            "'Windows.Media.ISystemMediaTransportControls2'"
+        )
+
+
+class FakeWineSmtc(FakeSmtcWithoutSeek):
+    """Wine's controls as the Windows build's start test met them: no seek, and the timeline's
+    update refused too (ISystemMediaTransportControls2's), as an OSError."""
+
+    def update_timeline_properties(self, timeline):
+        raise OSError(-2147221164, "Class not registered")
+
+
+def test_windows_controls_whose_timeline_is_refused_keep_the_rest_and_never_raise(caplog):
+    """CI's Windows start test: the app died at start when the timeline's update raised. The
+    controls go on without a timeline, saying so once."""
+    fake, sent = FakeWineSmtc(), []
+    with caplog.at_level(logging.INFO):
+        backend = smtc.Smtc(fake, WINDOWS_NAMES, sent.append, lambda: 12.0)
+        backend.now_playing(Song("/t/1", "Tidewater", length=200.0))
+        backend.state(State(PLAYING, True, True, True, False, True), 12.0)
+        backend.seeked(30.0)
+        backend.now_playing(Song("/t/2", "Glass Harbor", length=100.0))
+    said = [r.getMessage() for r in caplog.records if r.name == "musikata.media.smtc"]
+    assert len(said) == 2 and "seek" in said[0] and "timeline" in said[1]
+    assert fake.is_enabled is True and fake.playback_status == 3
+    fake.handlers["button"](fake, SimpleNamespace(button=Button.PAUSE))
+    assert sent == [Command(PAUSE)]
+    backend.close()
+
+
+def test_windows_controls_without_seek_keep_the_rest_and_say_so_once(caplog):
+    fake, sent = FakeSmtcWithoutSeek(), []
+    with caplog.at_level(logging.INFO):
+        backend = smtc.Smtc(fake, WINDOWS_NAMES, sent.append, lambda: 12.0)
+        backend.now_playing(Song("/t/1", "Tidewater", length=200.0))
+        backend.state(State(PLAYING, True, True, True, False, True), 12.0)
+        backend.seeked(30.0)
+    said = [r.getMessage() for r in caplog.records if r.name == "musikata.media.smtc"]
+    assert len(said) == 1 and "seek" in said[0] and "ISystemMediaTransportControls2" in said[0]
+    assert fake.is_enabled is True and fake.playback_status == 3
+    t = fake.timeline
+    assert (t.end_time, t.position) == (timedelta(seconds=200), timedelta(seconds=30))
+    assert t.max_seek_time == timedelta(0)  # the timeline isn't offered as seekable
+    fake.handlers["button"](fake, SimpleNamespace(button=Button.PAUSE))
+    assert sent == [Command(PAUSE)]
+    backend.close()
+    assert fake.removed == ["button-token"] and fake.is_enabled is False
 
 
 # ---------- macOS: Now Playing, faked ----------

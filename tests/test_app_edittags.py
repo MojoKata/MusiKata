@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 import mutagen.id3
 import pytest
 from fakes import FakeClock, fill
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from musikata import app, edittags, layout, tour
@@ -48,6 +48,7 @@ from musikata.edittags import (
     what_text,
     with_suggestion,
 )
+from musikata.folders import FolderModel
 from musikata.history import ChangeHistory, saved_text
 from musikata.models import SongsModel
 from musikata.preview import progress_text
@@ -168,6 +169,29 @@ def test_the_files_that_failed_are_listed_by_name_and_folder_with_why():
 
 
 # ---------- the bridge, over real files ----------
+
+
+def test_what_a_selection_or_a_right_click_stands_for_in_each_kind_of_list(tmp_path, qapp):
+    """R2.9.6, R7.2: in Folders, a folder's row stands for its songs and a file's for its own; a
+    row in the selection for the whole of it; a row past the end, or a list of no songs, for
+    none; and songs of none have no cover."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    fill(index, [{"path": "A/1.flac"}, {"path": "A/2.flac"}, {"path": "b.flac"}])
+    ids = dict(index.read().execute("SELECT path, id FROM song"))
+    m = FolderModel(index.read)
+    m.open("")
+    try:
+        assert edittags.target_at(m, 1) == ([ids["b.flac"]], "1 file")
+        m.click(0, False, False)
+        assert edittags.target_at(m, 0) == ([ids["A/1.flac"], ids["A/2.flac"]], "1 folder")
+        assert edittags.target_at(m, 0) == edittags.target_of(m)
+        assert edittags.target_at(m, 9) == ([], "")
+        other = QObject()
+        assert edittags.target_of(other) == ([], "") and edittags.target_at(other, 0) == ([], "")
+        assert edittags.art_of(index.read(), []) == {"cover": "", "chip": {}}
+    finally:
+        m.wait()
+        index.close()
 
 
 @pytest.fixture(scope="module")
@@ -898,9 +922,18 @@ def test_edit_tags_opens_from_an_album_a_songs_menu_the_selection_bar_and_folder
     e.editCurrent(lib)  # Ctrl+E there, nothing selected: the folder
     qtbot.waitUntil(lambda: e.property("count") == 4, timeout=WAIT)
     e.hide()
+    folders.property("model").click(0, False, False)
+    e.editCurrent(lib)  # a song selected there: the song
+    qtbot.waitUntil(lambda: e.property("count") == 1, timeout=WAIT)
+    e.hide()
+    folders.property("model").clearSelection()
     lib.openAlbum(album)
     e.editCurrent(lib)  # on an album's page: the album
     qtbot.waitUntil(lambda: e.property("count") == 4, timeout=WAIT)
+    e.hide()
+    lib.property("album").property("songs").click(0, False, False)
+    e.editCurrent(lib)  # a song of it selected: the song
+    qtbot.waitUntil(lambda: e.property("count") == 1, timeout=WAIT)
     e.hide()
     lib.show("albums")
     e.editCurrent(lib)  # a view with no songs listed: the panel says to select some

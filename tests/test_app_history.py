@@ -257,6 +257,30 @@ def test_ctrl_z_undoes_the_most_recent_save_and_the_messages_undo_redoes_it(root
     qtbot.waitUntil(lambda: tags.read(paths[0])[0].genres == ("Electronica",), timeout=WAIT)
 
 
+def test_an_entrys_files_past_the_first_are_counted_until_it_is_opened_whole(
+    root, changes, qtbot, monkeypatch
+):
+    """R4.9's Change history: an entry lists its first files and how many more; opened, all of
+    them. A tour's step opens the panel and the next closes it."""
+    monkeypatch.setattr(history_bridge, "FILES", 1)
+    music, index, paths = root
+    h = changes
+    save(music, h.clock_, paths, {"genres": ["Ambient"]})
+    started(h, qtbot)
+
+    def listed():
+        return [(r["kind"], r["text"]) for r in h.property("rows") if r["kind"] in ("file", "more")]
+
+    assert listed() == [("file", "01.flac"), ("more", "1 more file")]
+    (name,) = [r["name"] for r in h.property("rows") if r["kind"] == "more"]
+    h.expand(name)
+    assert listed() == [("file", "01.flac"), ("file", "02.flac")]
+    h.go({"history": True})
+    assert h.property("opened")
+    h.go({"view": "albums"})
+    assert not h.property("opened")
+
+
 def test_nothing_to_undo_says_so(changes, qtbot):
     started(changes, qtbot)
     changes.undoLast()

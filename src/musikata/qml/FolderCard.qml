@@ -3,7 +3,8 @@ import "."
 
 // A folder in Folders' Cards mode (R2.9.4, L06-folders-cards): a wide card with its cover at the
 // left, its name and counts; a selected one outlined, its check at the top right. The tint by the
-// cover's colour comes with R6.2.2's colour pick, and the state chip with R3.9 (slice 7).
+// cover's colour comes with R6.2.2's colour pick, built with Now Playing (slice 8), and the state
+// chip with R3.9 (slice 7).
 Rectangle {
     id: card
     signal tapped(int modifiers)

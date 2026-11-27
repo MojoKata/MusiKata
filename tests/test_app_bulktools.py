@@ -146,6 +146,8 @@ def test_tidy_case_tidies_the_fields_chosen(qapp, qtbot):
     with qtbot.waitSignal(b.saved) as sent:
         b.save()
     assert sent.args[1] == "Tidy case: Artist and Genre on 2 songs"
+    b.open("tidy", songs(), {"tidied": ["genres"]})  # opened with its fields chosen (a tour's)
+    assert [f["name"] for f in b.property("options")["fields"] if f["chosen"]] == ["genres"]
 
 
 def test_copy_from_copies_from_the_song_chosen(qapp, qtbot):

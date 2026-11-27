@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fakes import FakeClock
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QObject, QUrl
 from shiboken6 import Shiboken
 
 from musikata import app, media, tour
@@ -74,6 +74,29 @@ def test_a_window_that_doesnt_load_says_so_and_deletes_what_it_made(tmp_path, mo
     with pytest.raises(RuntimeError, match="didn't load"):
         app.load(str(tmp_path), {"MUSIKATA_DATA": str(tmp_path / "d")}, FakeClock())
     assert len(made) == 3 and not any(Shiboken.isValid(o) for o in made)
+
+
+def test_a_window_without_its_optional_parts_closes_the_rest_in_order_and_deletes_them():
+    """A1.3: a window made without the system's controls, the change history, the panels and
+    the rest closes what it has, playback first and the index last, and deletes each QObject."""
+    said = []
+
+    class Part(QObject):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        def close(self):
+            said.append(self.name)
+
+    class Index:
+        def close(self):
+            said.append("index")
+
+    player, counts, library = Part("player"), Part("counts"), Part("library")
+    app.close_bridges(player, counts, library, Index())
+    assert said == ["player", "counts", "library", "index"]
+    assert not any(Shiboken.isValid(o) for o in (player, counts, library))
 
 
 def run(*args):

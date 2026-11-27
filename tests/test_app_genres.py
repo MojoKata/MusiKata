@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fakes import FakeClock, FakeEngine, fill
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from musikata import app, bridges, layout, tour
@@ -214,6 +214,32 @@ def test_select_its_songs_selects_every_song_of_the_genre_on_its_page(lib, qtbot
     assert songs.property("selectionCount") == 3
     lib.openGenre("Electronic")  # already open: stays as it is
     assert songs.property("selectionCount") == 3
+
+
+def test_a_genre_not_there_opens_nothing_and_select_on_its_own_page_clears_its_search(
+    lib, index, qtbot
+):
+    """R9.4's Select its songs on the genre's page already open with a search typed: the search
+    cleared and every song selected; a genre gone opens nothing, and back to its page goes to
+    Genres."""
+    lib.show("genres")
+    lib.openGenre("Nope")
+    lib.selectGenre("Nope")
+    assert lib.property("view") == "genres"
+    lib.openGenre("Electronic")
+    songs = lib.property("genrePage").property("songs")
+    lib.setSearch("moon")
+    came(songs, qtbot)
+    lib.selectGenre("Electronic")
+    came(songs, qtbot)
+    assert lib.property("search") == "" and songs.property("selectionCount") == 3
+    lib.show("genres")
+    lib.openGenre("Jazz")
+    (album,) = index.read().execute("SELECT id FROM album").fetchone()
+    lib.openAlbum(album)
+    index.write(lambda c: c.execute("DELETE FROM song_genre WHERE genre = 'Jazz'")).result()
+    lib.back()
+    assert lib.property("view") == "genres"
 
 
 def test_a_genre_gone_after_a_save_sends_its_page_back_to_genres(lib, index, qtbot):
@@ -468,6 +494,10 @@ def test_rename_takes_the_new_name_as_typed_and_says_why_one_cant_be_written(roo
         g.rename("Electronica")
         opened(g, qtbot)
         assert g.property("title") == "Rename Electronica"
+        assert g.property("about") == (
+            "Every song with Electronica gets the new name instead. A name another genre has"
+            " already merges the two."
+        )
         assert g.property("options") == {"name": "Electronica"}
         assert g.property("saveLater") == "Nothing to save"  # the name it has: no change
         g.setOption("name", "Rock; Pop")
@@ -491,8 +521,11 @@ def test_merge_into_with_no_other_genre_says_so(root, qapp, qtbot):
     music, index, _paths = root
     g = make(root)
     try:
+        assert (g.property("title"), g.property("about"), g.property("options")) == ("", "", {})
         g.mergeInto("Electronica")  # its counts not read yet: nothing offered
         opened(g, qtbot)
+        assert g.property("title") == "Merge Electronica into…"
+        assert g.property("about") == "Every song with Electronica gets the genre chosen instead."
         assert g.property("problem") == "There's no other genre to merge it into"
         assert g.property("saveLater") == "Nothing to save"
     finally:
@@ -648,9 +681,9 @@ def find(shell, name):
     return found
 
 
-def click(shell, item):
+def click(shell, item, button=Qt.MouseButton.LeftButton):
     at = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
-    QTest.mouseClick(shell.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier(0), at)
+    QTest.mouseClick(shell.window, button, Qt.KeyboardModifier(0), at)
 
 
 def settled(shell, qtbot):
@@ -717,3 +750,26 @@ def test_a_genres_page_loads_and_its_menu_selects_its_songs_with_no_qml_warning(
     assert len(find(shell, "chips-genres")) == 1
     assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
     assert layout.faults(shell.window) == []
+
+
+@pytest.mark.slow
+def test_a_genres_song_list_has_play_next_and_add_to_queue_in_its_menu(shell, qtbot):
+    """R7.2 on a genre's page (R9.1): a right click on one of its songs offers Play next and Add
+    to queue, which queue that song."""
+    lib, p = shell.library, shell.player
+    lib.show("genres")
+    settled(shell, qtbot)
+    lib.selectGenre("Ambient")
+    settled(shell, qtbot)
+
+    def row(title):
+        rows = [r for lst in find(shell, "genreSongs")
+                for r in lst.property("contentItem").childItems()]  # fmt: skip
+        return next((r for r in rows if r.property("title") == title), None)
+
+    qtbot.waitUntil(lambda: row("Slack Water") is not None, timeout=WAIT)
+    click(shell, row("Slack Water"), Qt.MouseButton.RightButton)
+    for name in ("playNext", "addToQueue"):
+        assert shell.window.findChild(QObject, name).property("visible") is True
+    shell.window.findChild(QObject, "addToQueue").triggered.emit()
+    qtbot.waitUntil(lambda: p.property("title") == "Slack Water", timeout=WAIT)  # cued

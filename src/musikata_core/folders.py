@@ -337,9 +337,8 @@ def songs_beneath(c: sqlite3.Connection, path: str) -> list[int]:
     return out
 
 
-def count_songs(c: sqlite3.Connection, folders: Sequence[str], files: Sequence[str]) -> int:
-    """How many songs a selection stands for (R2.9.6): those beneath its folders and its files,
-    each once however the folders and files overlap."""
+def _selection(folders: Sequence[str], files: Sequence[str]) -> tuple[str, list[str]]:
+    """SQL for the songs beneath `folders` and at `files`, each once ("" for none)."""
     parts: list[str] = []
     params: list[str] = []
     for f in folders:
@@ -350,8 +349,26 @@ def count_songs(c: sqlite3.Connection, folders: Sequence[str], files: Sequence[s
         chunk = files[i : i + 500]
         parts.append(f"path IN ({', '.join('?' * len(chunk))})")
         params += chunk
-    if not parts:
+    return " OR ".join(parts), params
+
+
+def count_songs(c: sqlite3.Connection, folders: Sequence[str], files: Sequence[str]) -> int:
+    """How many songs a selection stands for (R2.9.6): those beneath its folders and its files,
+    each once however the folders and files overlap."""
+    where, params = _selection(folders, files)
+    if not where:
         return 0
-    return int(
-        c.execute(f"SELECT COUNT(*) FROM song WHERE {' OR '.join(parts)}", params).fetchone()[0]
-    )
+    return int(c.execute(f"SELECT COUNT(*) FROM song WHERE {where}", params).fetchone()[0])
+
+
+def album_of(c: sqlite3.Connection, folders: Sequence[str], files: Sequence[str]) -> int | None:
+    """The album every song a selection stands for is on (R2.9.6's Album art), by id; None when
+    they are on more than one, one of them is on none, or there are none."""
+    where, params = _selection(folders, files)
+    if not where:
+        return None
+    low, high, songs, on_one = c.execute(
+        f"SELECT MIN(album_id), MAX(album_id), COUNT(*), COUNT(album_id) FROM song WHERE {where}",
+        params,
+    ).fetchone()
+    return int(low) if songs and on_one == songs and low == high else None

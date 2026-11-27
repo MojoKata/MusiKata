@@ -73,10 +73,27 @@ def test_hyphens_slashes_and_dots_part_words():
     assert tidy_case("jay-z") == "Jay-Z"
     assert tidy_case("rock-and-roll hall") == "Rock-and-Roll Hall"
     assert tidy_case("r.e.m.") == "R.E.M."
-    assert tidy_case("ac/dc") == "Ac/Dc"
-    # all capitals is how a shout and an acronym are typed alike: AC/DC is tidied too, and the
-    # preview (R3.7) is where its file is unchecked
-    assert tidy_case("AC/DC") == "Ac/Dc"
+    assert tidy_case("ac/dc") == "Ac/Dc"  # in lower case, initials are words as any other
+
+
+def test_initials_in_capitals_stay_as_spelled_and_the_rest_is_tidied():
+    """R3.6.1: inside a value all in capitals, letters split by / or . with each part 1 to 3
+    letters are initials, kept as spelled; a part of 4 letters, or a lone / or . between longer
+    words, is tidied as words are."""
+    assert tidy_case("AC/DC") == "AC/DC"
+    assert tidy_case("AC/DC LIVE AT DONINGTON") == "AC/DC Live at Donington"
+    assert tidy_case("R.E.M.") == "R.E.M."
+    assert tidy_case("THE BEST OF R.E.M.") == "The Best of R.E.M."
+    assert tidy_case("P.I.L. - METAL BOX") == "P.I.L. - Metal Box"
+    assert tidy_case("ABC/DEF") == "ABC/DEF"  # parts of 3 letters
+    assert tidy_case("ABCD/EFG") == "Abcd/Efg"  # a part of 4
+    assert tidy_case("A.BCDE") == "A.Bcde"
+    assert tidy_case("ROCK/POP") == "Rock/Pop"
+    assert tidy_case("SOUL.FUNK") == "Soul.Funk"
+    assert tidy_case("MR. BROWN") == "Mr. Brown"  # a dot after a word, no letter after it
+    assert tidy_case("VOL.2") == "Vol.2"  # a digit is no initial
+    nfd = unicodedata.normalize("NFD", "ÉTÉ/ÖL LIVE")  # accents as a letter and its mark
+    assert tidy_case(nfd) == unicodedata.normalize("NFD", "ÉTÉ/ÖL Live")
 
 
 def test_digits_inside_and_at_the_start_of_words():

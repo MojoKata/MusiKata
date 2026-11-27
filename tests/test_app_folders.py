@@ -343,11 +343,37 @@ def test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title(v
         "Lumen Drift/Tide Tables/03 - Slack Water.flac",
     ]
     assert [paths[i] for i in m.songs_at(3)] == ["Lumen Drift/ebb & flow.mp3"]
+    assert paths[m.song_at(3)] == "Lumen Drift/ebb & flow.mp3" and m.song_at(2) is None  # R10.2
     assert m.songs_at(99) == []
     queued, source = m.queue_from(3)
     assert [paths[i] for i in queued][0] == "Lumen Drift/ebb & flow.mp3" and source == "Lumen Drift"
     m.selectRows([2, 1], False)  # a folder and the folder beside it, in the list's order
     assert [paths[i] for i in m.selected_songs()][0] == "Lumen Drift/Remixes/Glass/01.flac"
+
+
+def test_album_art_is_offered_for_a_selection_or_a_row_whose_songs_are_one_album(view, index):
+    """R2.9.6: the selection bar has Album art, before Organize…, when the songs selected are one
+    album, and so does a row's menu, for the selection when the row is in it."""
+    (album,) = index.read().execute("SELECT id FROM album WHERE title = 'Glass Harbor'").fetchone()
+    m = view.property("model")
+    view.open("Lumen Drift")
+    names = [name for _kind, name in rows(view)]
+    glass, tide = names.index("2019 - Glass Harbor"), names.index("Tide Tables")
+    assert view.property("selectedAlbum") == -1
+    assert view.property("laterActions") == folders.LATER
+    m.click(glass, False, False)
+    assert view.property("selectedAlbum") == album
+    assert [a["label"] for a in view.property("laterActions")] == [
+        "Add to playlist", "Edit tags", "Infer from path", "Album art", "Organize…"
+    ]  # fmt: skip
+    assert m.albumAt(glass) == album and m.albumAt(tide) == -1  # songs on no album
+    m.click(tide, True, False)  # and a folder of songs on none
+    assert view.property("selectedAlbum") == -1 and m.albumAt(glass) == -1
+    assert "Album art" not in [a["label"] for a in view.property("laterActions")]
+    assert m.albumAt(99) == -1
+    view.open("Lumen Drift/2019 - Glass Harbor")
+    assert m.albumAt(0) == album  # a file's own
+    assert folders.ART in view.property("stripButtons")
 
 
 def test_the_folder_holding_the_song_playing_is_marked(view):

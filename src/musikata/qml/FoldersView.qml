@@ -13,14 +13,17 @@ import "."
 // A click selects (Ctrl/⌘-click adds, Shift-click takes the range), as does a cover's checkbox and
 // List's, and a drag box in the image modes (R2.9.6); a double click or Enter opens a folder or
 // plays a file and the files after it (R7.1); a right click on a row of files or of List opens its
-// menu, Play next, Add to queue (R7.2) and Edit tags; Alt+↑ (⌘↑ on macOS) or Backspace goes up,
-// Alt+← or the mouse's back button back. Edit tags, on the selection bar, in the menu and on a folder
-// of songs' strip, opens the panel on the songs selected or beneath the folders (R2.9.6, R4.2).
+// menu, Play next, Add to queue (R7.2), Edit tags and Album art; Alt+↑ (⌘↑ on macOS) or Backspace
+// goes up, Alt+← or the mouse's back button back. Edit tags, on the selection bar, in the menu and on
+// a folder of songs' strip, opens the panel on the songs selected or beneath the folders (R2.9.6,
+// R4.2); Album art opens its dialog (R5.2) on their album, offered on the bar and in the menu when
+// they are one album, and on the strip on the album most of the folder's songs are on.
 Item {
     id: view
     required property var library
     required property var player
     property var edit: null
+    property var art: null      // the Album art dialog's bridge (R5.2)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
@@ -122,11 +125,17 @@ Item {
                     model: view.folders.stripButtons
                     Btn {
                         required property var modelData
-                        objectName: modelData.action === "edit" ? "editFolder" : ""
+                        objectName: modelData.action === "edit" ? "editFolder"
+                                    : modelData.action === "art" ? "folderArt" : ""
                         label: modelData.label
                         icon: modelData.icon
                         later: modelData.later
-                        onClicked: if (modelData.action === "edit") view.edit.editFolder(view.folders)
+                        onClicked: {
+                            if (modelData.action === "edit")
+                                view.edit.editFolder(view.folders)
+                            else if (modelData.action === "art")
+                                view.art.openFolder(view.folders.path, view.folders.title)
+                        }
                     }
                 }
                 Repeater {
@@ -333,6 +342,7 @@ Item {
             Component {
                 id: listRow
                 FolderListRow {
+                    objectName: "folderListRow"
                     columns: view.listColumns
                     isFolder: cell.isFolder
                     name: cell.name
@@ -423,14 +433,19 @@ Item {
         return out
     }
 
-    SongMenu { id: songMenu; player: view.player; edit: view.edit }
+    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art }
 
     SelectionBar {
         objectName: "selectionBar"
         text: view.folders.selectionText
         laterActions: view.folders.laterActions
         editing: view.edit !== null && view.edit.opened
-        onAct: (action) => { if (action === "edit") view.edit.editSelection(view.rowsModel) }
+        onAct: (action) => {
+            if (action === "edit")
+                view.edit.editSelection(view.rowsModel)
+            else if (action === "art")
+                view.art.openAlbum(view.folders.selectedAlbum)
+        }
         playNote: view.library.playNote
         onPlay: view.folders.playSelection()
         onClear: view.rowsModel.clearSelection()
