@@ -386,6 +386,13 @@ def test_pasting_takes_the_clipboards_own_bytes_else_its_image_else_says_none(ro
     qtbot.waitUntil(lambda: titles(dialog)[0][1] == "400 × 400", timeout=WAIT)
     dialog.paste_from(None, QImage())
     assert dialog.property("message") == "There's no image on the clipboard to paste"
+    bad = QImage(4000, 1, QImage.Format.Format_RGB32)
+    bad.fill(QColor("#000000"))
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(QImage, "save", lambda *a: False)
+        dialog.paste_from(QMimeData(), bad)
+        qtbot.waitUntil(lambda: "couldn't be made" in dialog.property("message"), timeout=WAIT)
+    assert dialog.property("message") == "The pasted image: it couldn't be made a PNG"
     dialog.findOnline()
     assert dialog.property("message") == "Finding covers online comes in a later version"
 

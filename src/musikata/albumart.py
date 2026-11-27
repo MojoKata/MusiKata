@@ -506,7 +506,7 @@ class AlbumArt(QObject):
                 self._add_urls(list(mime.urls()), "chosen")
                 return
         if not image.isNull():
-            self._add_bytes([("pasted", "", encoded(image, "PNG"))])
+            self._add_bytes([("pasted", "", image)])  # made a PNG off the GUI thread
             return
         self._say(NOTHING_PASTED)
 
@@ -535,14 +535,19 @@ class AlbumArt(QObject):
 
         self._searcher.submit(("add", self._ticket), work, self._on_added(self._ticket))
 
-    def _add_bytes(self, items: list[tuple[str, str, bytes]]) -> None:
+    def _add_bytes(self, items: list[tuple[str, str, bytes | QImage]]) -> None:
         if self._album is None:
             return
         side = self._options.side
 
         def work() -> list[tuple[Added | None, Prepared | None, str]]:
             out: list[tuple[Added | None, Prepared | None, str]] = []
-            for origin, name, data in items:
+            for origin, name, item in items:
+                try:
+                    data = encoded(item, "PNG") if isinstance(item, QImage) else item
+                except ArtError as e:
+                    out.append((None, None, f"The pasted image: {e.why}"))
+                    continue
                 ready = prepare(data, side)
                 what = name or "The pasted image"
                 out.append((Added(origin, name, data), ready, f"{what}: {ready.problem}"))
