@@ -25,6 +25,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtTest import QTest
 
 from musikata import app, layout, tour
+from musikata import history as history_bridge
 from musikata.history import (
     ChangeHistory,
     clock_text,
@@ -258,6 +259,29 @@ def test_nothing_to_undo_says_so(changes, qtbot):
     assert changes.property("message")["text"] == "Nothing to undo"
     changes.undoMessage()  # no entry: nothing happens
     assert not changes.property("busy")
+
+
+def test_while_the_root_isnt_there_undo_changes_no_file_and_says_why(root, qapp, qtbot):
+    """R2.10: while the root can't be reached, every change to files is unavailable, saying why:
+    Undo too, from Ctrl+Z, the panel or a file's own undo."""
+    music, index, paths = root
+    clock = FakeClock(NOW)
+    there = [True]
+    h = ChangeHistory(music, index, clock, lambda: ME, ME, "Laptop", settings.RootTags(),
+                      executor=ThreadPoolExecutor(1), zone=UTC, message_ms=60_000,
+                      available=lambda: there[0])  # fmt: skip
+    try:
+        name = save(music, clock, paths, {"genres": ["Ambient"]}).entry
+        started(h, qtbot)
+        there[0] = False
+        for undo in (h.undoLast, lambda: h.undo(name), lambda: h.undoFile(name, 0)):
+            h.dismiss()
+            undo()
+            assert h.property("message")["text"] == history_bridge.NOT_THERE
+            assert not h.property("busy")
+        assert all(tags.read(p)[0].genres == ("Ambient",) for p in paths)
+    finally:
+        h.close()
 
 
 def test_a_file_changed_since_asks_first_and_the_answer_decides(root, changes, qtbot):

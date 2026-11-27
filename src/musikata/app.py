@@ -392,6 +392,7 @@ def keep_history(
         watching=not missing,
         write=writing,
         look=history.looking(writing.kept) if writing is not None else None,
+        available=lambda: bool(library.property("available")),
     )
     if not missing:
         changes.start()

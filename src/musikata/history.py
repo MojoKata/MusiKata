@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 
 LISTED = 300  # the most recent entries the panel lists
 FILES = 3  # the files an entry shows until it is opened whole
+NOT_THERE = "Nothing can be undone while the music folder isn't available"  # R2.10
 MESSAGE_MS = 8_000  # how long a message stays (R6.7: short-lived)
 LABELS = {
     "title": "Title", "artist": "Artist", "album": "Album", "albumartist": "Album artist",
@@ -244,9 +245,12 @@ class ChangeHistory(QObject):
         parent: QObject | None = None,
         write: Callable[[Job], Written] | None = None,
         look: Callable[[str, bool], history.Current] | None = None,
+        available: Callable[[], bool] = lambda: True,
     ) -> None:
+        """`available` says whether the root is there: while it isn't, undo changes no file and
+        says why (R2.10)."""
         super().__init__(parent)
-        self._writer, self._look = write, look
+        self._writer, self._look, self._available = write, look, available
         self._root, self._index, self._clock = root, index, clock
         self._computer, self._own, self._own_name = computer, own, own_name
         self._settings, self._saved, self._zone = tags_settings, saved, zone
@@ -392,6 +396,9 @@ class ChangeHistory(QObject):
         self._plan_undo(name, {position})
 
     def _plan_undo(self, name: str, which: Collection[int] | None) -> None:
+        if not self._available():  # R2.10: no change to files while the root isn't there
+            self.say(NOT_THERE)
+            return
         if self._busy:
             log.info("an undo is still going on: %s waits for another try", name)
             return
