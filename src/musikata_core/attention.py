@@ -19,15 +19,18 @@ What each group holds:
   sets punctuation and "&"/"and" aside too, and the user's own sames join).
 - **An album in one file** (`ONE_FILE`, A2.6): a single audio file of 20 minutes or more with a
   `.cue` sheet beside it that names it (`cued`); it plays as one song, splitting it is #3.
+- **The same song more than once** (`COPIES`, R2.12): a group of exact or likely copies
+  (duplicates.found), an entry each, about its first copy by path.
 - **Files that couldn't be read** (`UNREADABLE`): `song.error`.
 
 The groups owned by later pieces (tags that differ from the path, R3; playlist entries whose file
-is missing, R8.7; the same song twice, R2.12; text in the wrong encoding, R4.10; files whose tags
-say nothing, R16.6) join `KINDS` with their own finders.
+is missing, R8.7; text in the wrong encoding, R4.10; files whose tags say nothing, R16.6) join
+`KINDS` with their own finders.
 
 **Ignore** (R2.8): an entry the user dismisses is kept in the root's `ignored.json`
 (rootfiles.Dismissal, A2.8) by its kind and what it is about (a song by its path and audio hash, an
-album by its folder, a name by itself) with the file's modification time; it stays dismissed until
+album by its folder, a name by itself, a group of copies by its first copy) with the file's
+modification time (the newest of an album's songs or of a group's copies); it stays dismissed until
 that time changes (`dismissed`).
 
 Plain functions over plain data (the keys, `differs`, the `.cue` sheet, `dismissed`,
@@ -43,7 +46,7 @@ import unicodedata
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from . import art, genres
+from . import art, duplicates, genres
 from .rootfiles import Dismissal
 from .tags import Picture, Tags
 from .tags.tools import Planned, Song
@@ -58,11 +61,13 @@ NAMES_ALBUM = "names-album"
 NAMES_GENRE = "names-genre"
 ONE_FILE = "album-in-one-file"
 UNREADABLE = "unreadable"
+COPIES = "same-song"  # R2.12
 # every kind this piece finds, in the order the view lists them
-KINDS = (COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ALBUM_DIFFERS, ONE_FILE,
-         UNREADABLE)  # fmt: skip
+KINDS = (COPIES, COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ALBUM_DIFFERS,
+         ONE_FILE, UNREADABLE)  # fmt: skip
 NAMES = (NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE)
-BY_SONG = (ONE_FILE, UNREADABLE)  # kinds about a song: dismissed by its path and audio hash
+# kinds about a song (a group of copies: its first by path): dismissed by its path and audio hash
+BY_SONG = (ONE_FILE, UNREADABLE, COPIES)
 BY_ALBUM = (ALBUM_DIFFERS, COVER_NONE, COVER_SMALL)  # kinds about an album: by its folder
 FIELDS = ("album", "albumartist", "year", "genre", "cover")  # what an album's songs differ in
 MIN_SIDE = 500  # R5.6: a cover smaller than this a side needs attention
@@ -317,9 +322,11 @@ class Entry:
     keeps it (a song's path, an album's folder, a name), and what the view says of it: an album's
     title, artist and cover (its thumbnail's name), and the fields its songs differ in or its
     cover's size; a name's spellings, the most used first, with how many songs have each, and the
-    key they share; a song's path, its error or `.cue` sheet and length. `hash` and `modified`
-    (the audio hash; the file's modification time, in seconds, the newest of an album's songs)
-    are what Ignore keeps, so a change brings it back."""
+    key they share; a song's path, its error or `.cue` sheet and length; a group of copies (R2.12),
+    its copies, the one proposed to keep first, whether they are likely ones and why the first is
+    kept (duplicates.Group). `hash` and `modified` (the audio hash; the file's modification time,
+    in seconds, the newest of an album's songs or a group's copies) are what Ignore keeps, so a
+    change brings it back."""
 
     kind: str
     about: str
@@ -339,6 +346,9 @@ class Entry:
     length: float | None = None
     hash: str | None = None
     modified: float | None = None
+    copies: tuple[duplicates.Copy, ...] = ()
+    likely: bool = False
+    why: str = ""
 
 
 def _seconds(mtime_ns: int | None) -> float | None:
@@ -463,6 +473,22 @@ def _one_file(c: sqlite3.Connection) -> list[Entry]:
     ]  # fmt: skip
 
 
+def copies_entry(g: duplicates.Group) -> Entry:
+    """A group of copies (R2.12) as an entry: about its first copy by path (its hash and, of its
+    copies, the newest modification time are what Ignore keeps), titled as its kept copy."""
+    first = min(g.copies, key=lambda c: c.path)
+    times = [c.modified for c in g.copies if c.modified is not None]
+    k = g.kept
+    return Entry(COPIES, first.path, k.title or k.path.rpartition("/")[2], k.artist, k.album_id,
+                 k.song, k.thumb, length=k.length, key=k.key or "", hash=first.hash,
+                 modified=max(times) if times else None, copies=g.copies, likely=g.likely,
+                 why=g.why)  # fmt: skip
+
+
+def _copies(c: sqlite3.Connection) -> list[Entry]:
+    return [copies_entry(g) for g in duplicates.found(c)]
+
+
 def _unreadable(c: sqlite3.Connection) -> list[Entry]:
     return [
         Entry(UNREADABLE, path, path, song=i, error=error, hash=h, modified=_seconds(m))
@@ -481,6 +507,7 @@ def found(
     the same (R9.5); `min_side`: a cover smaller than this a side needs attention (R5.6)."""
     covers = _covers(c, min_side)
     by_kind: dict[str, list[Entry]] = {
+        COPIES: _copies(c),
         COVER_NONE: [e for e in covers if e.kind == COVER_NONE],
         COVER_SMALL: [e for e in covers if e.kind == COVER_SMALL],
         NAMES_ARTIST: _artist_names(c),

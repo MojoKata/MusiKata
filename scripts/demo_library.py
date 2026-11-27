@@ -290,6 +290,13 @@ def _album(row, rng: random.Random, lib: Library) -> None:
 
 
 ONE_FILE_SECONDS = 52 * 60 + 8  # Live at the Lantern's length (L07-folders-list)
+SIGNAL_FIRES = "Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.flac"
+SIGNAL_COPY = "_Incoming/new rips/Signal Fires.flac"  # its exact copy (R2.12)
+MOONPULL = "Lumen Drift/Tide Tables/04 - Moonpull.flac"
+MOONPULL_COPY = "_Incoming/From Phone/Moonpull (radio).m4a"  # a likely copy of it (R2.12)
+# the plays of the copies L09 shows, as Studio-PC's plays.json has them (R7.9, A2.8)
+PLAYS = {SIGNAL_FIRES: 52, SIGNAL_COPY: 3, MOONPULL: 18, MOONPULL_COPY: 6}
+PLAYED = "2026-11-25T20:41:00Z"
 
 
 def _one_file(lib: Library, folder: str, artist: str, album: str, year: int, genre: str | None,
@@ -345,11 +352,17 @@ def plan(seed: int = 1) -> Library:
         lib.songs.append(
             Song(f"_Incoming/new rips/track{n:02d}.mp3", "mp3", None, tone=300 + n * 40)
         )
+    # the same song more than once (R2.12, L09-needs-attention): an exact copy of Signal Fires (its
+    # audio, retagged), and Moonpull as a phone saved it, a likely copy (a second longer, as AAC)
+    glass = next(s for s in lib.songs if s.path == SIGNAL_FIRES)
+    copied = {"title": "Signal Fires", "artist": "Lumen Drift", "genre": [], "rating": 4}
+    lib.songs.append(Song(SIGNAL_COPY, glass.kind, copied, tone=glass.tone))
     lib.songs.append(
         Song(
-            "_Incoming/From Phone/Moonpull (radio).m4a",
+            MOONPULL_COPY,
             "aac",
-            {"title": "Moonpull (radio)", "genre": [], "rating": 0},
+            {"title": "Moonpull", "artist": "Lumen Drift", "genre": [], "rating": 0},
+            seconds=2.0,
         )
     )
     lib.playlists["Playlists/Road Trip.m3u8"] = [
@@ -364,7 +377,21 @@ def plan(seed: int = 1) -> Library:
         + ".mp3",
         "../Lumen Drift/Tide Tables/10 - Slack Tide.flac",  # missing: Needs attention's Find (R8.7)
     ]
+    _apart(lib, {SIGNAL_COPY})
     return lib
+
+
+def _apart(lib: Library, copies: set[str]) -> None:
+    """Every song's audio its own (A2.3: songs of one kind, tone and length are exact copies,
+    R2.12), but the `copies` meant as such: a song whose audio another's before it has gets the
+    next tone free."""
+    taken: set[tuple[str, int, float | None]] = set()
+    for song in lib.songs:
+        if song.path in copies:
+            continue
+        while (song.kind, song.tone, song.seconds) in taken:
+            song.tone += 1
+        taken.add((song.kind, song.tone, song.seconds))
 
 
 def more(lib: Library, songs: int, seed: int = 1) -> None:
@@ -632,7 +659,8 @@ def before_history(song: Song, saves: list = HISTORY) -> Song:
 def history(music: str, lib: Library, saves: list = HISTORY, undone: dict = UNDONE) -> list[str]:
     """The change history's saves (`HISTORY`), each made by MusiKata's own batch into Music's
     .musikata/history at its time, on its computer, and those UNDONE undone by MusiKata's Undo;
-    each computer named by an empty play file, as A2.8's are. The entries made, by name."""
+    each computer named by its play file, as A2.8's are, Studio-PC's holding the plays of L09's
+    copies (`PLAYS`, R2.12). The entries made, by name."""
     from datetime import UTC, datetime
 
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -675,8 +703,12 @@ def history(music: str, lib: Library, saves: list = HISTORY, undone: dict = UNDO
             if done.failed or done.entry is None:
                 raise RuntimeError(f"undoing {what!r} failed: {done.failed}")
             made.append(done.entry)
+    kinds = {s.path: s.kind for s in lib.songs}
+    plays = [{"path": p, "hash": scanner.audio_hash(os.path.join(music, p), kinds[p]),
+              "count": n, "last": PLAYED} for p, n in PLAYS.items() if p in kinds]  # fmt: skip
     for name, computer in COMPUTERS.items():
-        doc = {"format": 1, "computer": {"id": computer, "name": name}, "songs": []}
+        doc = {"format": 1, "computer": {"id": computer, "name": name},
+               "songs": plays if name == "Studio-PC" else []}  # fmt: skip
         path = rootfiles.file_of(rootfiles.folder_of(music), computer)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:

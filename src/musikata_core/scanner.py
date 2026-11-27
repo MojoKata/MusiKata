@@ -30,7 +30,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field, replace
 from typing import BinaryIO, Literal
 
-from . import albums, art, attention, db, folders, ratings, rootfiles, search, sortnames
+from . import albums, art, attention, db, duplicates, folders, ratings, rootfiles, search, sortnames
 from .clock import Clock, SystemClock
 from .rootfiles import path_under as path_under  # A2.8's naming, here as ever
 from .tags import EXTENSIONS, AudioInfo, TagReadError, Tags, Written, is_leftover, pictures
@@ -492,6 +492,7 @@ def _values(r: Read) -> dict[str, object]:
     row["artist_nk"] = attention.name_key(t.artist)
     row["albumartist_nk"] = attention.name_key(t.albumartist)
     row["album_nk"] = attention.album_pair(t.album, t.albumartist, t.artist)
+    row["copy_key"] = duplicates.song_key(t.artist, t.title)  # likely copies' (R2.12)
     if r.cover_known:
         key, width, height = r.cover if r.cover is not None else (None, None, None)
         row.update(cover_key=key, cover_width=width, cover_height=height)
@@ -578,7 +579,7 @@ def wrote(c: sqlite3.Connection, root: str, written: Iterable[Written]) -> Resul
 # a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
 ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
        "error", *db.FIELDS, "file_rating", "artist_nk", "albumartist_nk", "album_nk", "cover_key",
-       "cover_width", "cover_height", "cue")  # fmt: skip
+       "cover_width", "cover_height", "cue", "copy_key")  # fmt: skip
 
 
 def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched) -> bool:

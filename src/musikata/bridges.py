@@ -1166,6 +1166,7 @@ class Library(QObject):
         self._album.property("songs").refresh()
         self._artist.property("others").refresh()
         self._genre_page.property("songs").refresh()
+        self._attention.refresh()  # a group of copies shows each copy's plays (R2.12)
 
     @Slot(str)
     def show_playing(self, path: str) -> None:

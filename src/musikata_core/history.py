@@ -10,7 +10,11 @@ description (`pictures`), and the hashes of those written (`new_pictures`). An i
 wrote beside the songs (cover.jpg, R5.3) is a file of the entry too, with its old bytes' hash
 (`image`, null: there was none) and its new one's (`new_image`). An old cover, picture or image is
 kept once in `history/images/<sha256>`, however many entries name it
-(`history-entry.v1.schema.json`, A2.10).
+(`history-entry.v1.schema.json`, A2.10). Moving the others of a song's copies to the trash (R2.12,
+R2.11) names each file moved (`trashed`), which Undo can't take out of the trash, and the plays
+the copy kept took from them, on the computer that saved the entry (`plays_from`, each as
+plays.json names a song; an Undo of it names them `plays_to`, given back), which Undo gives
+back (`plays`).
 
 Recording is `Recording`, the tags.Recorder every save's batch is given (tags.batch): it is told
 each file as it is written, keeping its old cover then, and writes the entry at the end.
@@ -52,6 +56,7 @@ from datetime import UTC, datetime, timedelta
 from . import art, db, rootfiles, scanner
 from .art import ImageWritten
 from .clock import Clock
+from .rootfiles import Entry as Plays
 from .tags import Batch, Failed, Job, Outcome, Picture, Tags, WriteError, Written, compose
 from .tags import pictures as read_pictures
 from .tags import read as read_tags
@@ -110,19 +115,37 @@ class FileChange:
     others: tuple[KeptPicture, ...] | None = None
     new_others: tuple[str, ...] = ()
     image: bool = False
+    trashed: bool = False
+    plays_from: tuple[Plays, ...] = ()
+    plays_to: tuple[Plays, ...] = ()
 
     def fields(self) -> list[str]:
         """The fields it changed, in compose.FIELDS' order, the cover and the other pictures
-        among them; an image file's is its cover."""
+        among them, then its plays (R2.12) and whether it went to the trash; an image file's is
+        its cover."""
         if self.image:
             return ["cover"]
-        return [
-            f
-            for f in compose.FIELDS
-            if f in self.old
-            or (f == "cover" and self.cover)
-            or (f == "others" and self.others is not None)
-        ]
+        return (
+            [
+                f
+                for f in compose.FIELDS
+                if f in self.old
+                or (f == "cover" and self.cover)
+                or (f == "others" and self.others is not None)
+            ]
+            + (["plays"] if self.plays else [])
+            + (["trashed"] if self.trashed else [])
+        )
+
+    @property
+    def plays(self) -> bool:
+        """Whether it moved plays (R2.12): from other copies into this file, or back."""
+        return bool(self.plays_from or self.plays_to)
+
+    @property
+    def tags(self) -> bool:
+        """Whether it changed the file itself: a field, the cover or the other pictures."""
+        return bool(self.old) or self.cover or self.others is not None
 
     def kept(self) -> list[str]:
         """The hashes of what it keeps in history/images: the old cover or image, and the old
@@ -251,6 +274,12 @@ def document(entry: Entry) -> dict[str, object]:
                 {"type": p.type, "mime": p.mime, "desc": p.desc, "image": p.hash} for p in f.others
             ]
             out["new_pictures"] = list(f.new_others)
+        if f.plays_from:
+            out["plays_from"] = [rootfiles.entry_document(e) for e in f.plays_from]
+        if f.plays_to:
+            out["plays_to"] = [rootfiles.entry_document(e) for e in f.plays_to]
+        if f.trashed:
+            out["trashed"] = True
         files.append(out)
     doc: dict[str, object] = {
         "format": FORMAT,
@@ -327,6 +356,24 @@ def _pictures(
     return tuple(out), written
 
 
+def _plays(value: object, where: str, problems: list[str]) -> tuple[Plays, ...]:
+    """An entry's `plays_from` or `plays_to` (R2.12): each song's plays as plays.json names them,
+    one it can't use left out; none when it isn't a list."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        problems.append(f"{where} isn't a list: {value!r}; left out")
+        return ()
+    out = []
+    for item in value:
+        found = rootfiles.entry_of(item, problems)
+        if found is not None and under_root(found.path) is not None:
+            out.append(found)
+        elif found is not None:
+            problems.append(f"{where}: {found.path!r} isn't a path under the root; left out")
+    return tuple(out)
+
+
 def _image(path: str, value: dict[str, object], problems: list[str]) -> FileChange | None:
     """An image file of `files` (cover.jpg, R5.3): its old and new bytes' hashes."""
     usable, old = _cover(value["image"], f"{path}: image", problems)
@@ -373,11 +420,16 @@ def _file(value: object, problems: list[str]) -> FileChange | None:
         found = _pictures(value["pictures"], value.get("new_pictures"), path, problems)
         if found is not None:
             others, new_others = found
-    if not old and not cover and others is None:
+    plays_from = _plays(value.get("plays_from"), f"{path}: plays_from", problems)
+    plays_to = _plays(value.get("plays_to"), f"{path}: plays_to", problems)
+    trashed = value.get("trashed") is True
+    if "trashed" in value and not isinstance(value["trashed"], bool):
+        problems.append(f"{path}: trashed isn't true or false: {value['trashed']!r}; false")
+    if not old and not cover and others is None and not plays_from and not plays_to and not trashed:
         problems.append(f"{path}: no field it can put back; left out")
         return None
     return FileChange(path, hash_, old, new, cover, old_cover, new_cover, others,
-                      new_others or ())  # fmt: skip
+                      new_others or (), False, trashed, plays_from, plays_to)  # fmt: skip
 
 
 def parse(name: str, text: str) -> Entry | Broken:
@@ -679,8 +731,15 @@ class Recording:
         new = image_hash(written.after) if written.after is not None else None
         self.files.append(FileChange(path, None, {}, {}, False, old, new, image=True))
 
+    def note(self, change: FileChange) -> None:
+        """A change that isn't a file written (R2.12: a file moved to the trash, the plays the
+        copy kept took), kept in the entry with the files saved; one of a file saved too is one
+        file of the entry (`combined`)."""
+        self.files.append(change)
+
     def done(self, action: str, description: str) -> str | None:
         """The entry written for the files saved; its name, None when none was."""
+        self.files = combined(self.files)
         if not self.files:
             return None
         computer = self._computer()
@@ -697,6 +756,27 @@ class Recording:
             return None
         log.info("kept %s in the change history: %d files", written.name, len(self.files))
         return written.name
+
+
+def combined(files: Sequence[FileChange]) -> list[FileChange]:
+    """`files` with the changes of one path made one, in the order each path came first: a file
+    saved (its fields) and what was noted of it (its plays, R2.12), so an entry names it once."""
+    out: dict[str, FileChange] = {}
+    for f in files:
+        had = out.get(f.path)
+        if had is None:
+            out[f.path] = f
+            continue
+        pictured = had if had.cover else f
+        others = had if had.others is not None else f
+        out[f.path] = dataclasses.replace(
+            had, hash=had.hash or f.hash, old={**f.old, **had.old}, new={**f.new, **had.new},
+            cover=had.cover or f.cover, old_cover=pictured.old_cover,
+            new_cover=pictured.new_cover, others=others.others, new_others=others.new_others,
+            trashed=had.trashed or f.trashed, plays_from=had.plays_from + f.plays_from,
+            plays_to=had.plays_to + f.plays_to,
+        )  # fmt: skip
+    return list(out.values())
 
 
 # ---------- Undo ----------
@@ -739,6 +819,11 @@ class Plan:
     def failed(self) -> list[FileUndo]:
         """The files that can't be undone, each with why."""
         return [f for f in self.files if f.why]
+
+    @property
+    def in_trash(self) -> list[FileUndo]:
+        """The files the entry moved to the trash (R2.11, R2.12): Undo can't take them out."""
+        return [f for f in self.files if f.change.trashed]
 
 
 @dataclass(frozen=True)
@@ -844,12 +929,18 @@ def plan(
                 continue
             out.append(FileUndo(change, change.path, lost_image(change, now_image)))
             continue
+        if change.trashed and not change.tags and not change.plays:
+            out.append(FileUndo(change, None))  # in the trash: nothing Undo can do (R2.11)
+            continue
         path: str | None = change.path
         if not os.path.exists(scanner.full_path(root, change.path)):
             found = find(change.hash) if change.hash is not None else ()
             path = next((p for p in found if os.path.exists(scanner.full_path(root, p))), None)
         if path is None:
             out.append(FileUndo(change, None, why="it isn't there any more"))
+            continue
+        if not change.tags:  # its plays alone (R2.12): nothing of the file to read
+            out.append(FileUndo(change, path))
             continue
         try:
             pictures = change.cover or change.others is not None
@@ -876,6 +967,8 @@ def jobs(plan_: Plan, root: str, overwrite: bool) -> list[Job]:
     for f in plan_.files:
         if f.why or f.path is None or (f.lost and not overwrite):
             continue
+        if not f.change.image and not f.change.tags:
+            continue  # its plays alone (R2.12): `undo` gives them back
         old = f.change.old_cover
         if f.change.image:
             image = KeptCover(old) if old is not None else None
@@ -930,8 +1023,44 @@ def with_covers(write: Writer, history: str) -> Writer:
 def description_of(entry: Entry, files: int) -> str:
     """What undoing `entry` is, for the list: "Undo: <what it was>"."""
     what = entry.description or ("a save" if entry.action != UNDO else "an undo")
-    some = "" if files == len(entry.files) else f" ({files} of {len(entry.files)} files)"
+    whole = sum(1 for f in entry.files if f.image or f.tags or f.plays)  # not those in the trash
+    some = "" if files == whole else f" ({files} of {whole} files)"
     return f"Undo: {what}{some}"
+
+
+# gives back the plays of the files of an entry saved on a computer (its id): R2.12's, each where
+# it is now; what was given back, as the undo's entry keeps it
+PlaysBack = Callable[[str, Sequence["FileUndo"]], list[FileChange]]
+
+
+def plays_undone(f: FileUndo, moved: Sequence[Plays]) -> FileChange:
+    """What undoing a file's plays (R2.12) did, as the undo's entry keeps it, so it can be undone
+    in turn: plays it had taken given back (`plays_to`), or plays given back taken again
+    (`plays_from`), `moved` being those."""
+    path = f.path or f.change.path
+    if f.change.plays_from:
+        return FileChange(path, f.change.hash, {}, plays_to=tuple(moved))
+    return FileChange(path, f.change.hash, {}, plays_from=tuple(moved))
+
+
+def plays_back(c: sqlite3.Connection, computer: str, files: Sequence[FileUndo]) -> list[FileChange]:
+    """In the writer's transaction: the plays each file of an entry moved (R2.12) moved back, on
+    `computer`'s rows (this computer's key): plays the file took from other copies given back to
+    them (rootfiles.give_plays), plays given back taken again (rootfiles.take_back). What was
+    done, as the undo's entry keeps it (`plays_undone`); a file the index hasn't is passed by."""
+    out = []
+    for f in files:
+        song = c.execute("SELECT id FROM song WHERE path = ?", (f.path,)).fetchone()
+        if song is None:
+            log.warning("%s isn't in the library: its plays weren't moved back", f.path)
+            continue
+        if f.change.plays_from:
+            moved = rootfiles.give_plays(c, computer, song[0], f.change.plays_from)
+        else:
+            moved = rootfiles.take_back(c, computer, song[0], f.change.plays_to)
+        if moved:
+            out.append(plays_undone(f, moved))
+    return out
 
 
 def undo(
@@ -942,21 +1071,31 @@ def undo(
     record: Recording | None,
     progress: Progress | None = None,
     trash: art.Trash = art.to_trash,
+    plays: PlaysBack | None = None,
 ) -> Outcome[Written | ImageWritten]:
     """Undoes `plan_` (R4.9): the old values written with `write` (safe.save, A3.4) in a batch of
     its own, recorded by `record` (a Recording that `undoes` the entry; None: the history is off)
     as an entry, so it can be undone in turn. Files changed since are written only when
     `overwrite` (R4.9.1), else passed by; those that can't be undone are listed as failed, with
     why, as a save's are (R4.7). An image file (cover.jpg) is put back, or moved to the trash
-    when there was none, by art.save_image, the one there now going to the trash (`trash`)."""
+    when there was none, by art.save_image, the one there now going to the trash (`trash`).
+    The plays an entry moved (R2.12) are given back by `plays` (None: they aren't), kept in the
+    undo's entry with its files; the files it moved to the trash stay there (R2.11)."""
     todo = jobs(plan_, root, overwrite)
+    moving = [f for f in plan_.files if f.change.plays and not f.why and f.path is not None
+              and (not f.lost or overwrite)]  # fmt: skip
+    if moving and plays is not None:
+        for change in plays(plan_.entry.computer, moving):
+            if record is not None:
+                record.note(change)
+    undone = len(todo) + sum(1 for f in moving if not f.change.tags)
     batch: Batch[Written | ImageWritten] = Batch(
         todo,
         with_covers(art.writer(write, trash), folder_of(root)),
         progress,
         record=record,
         action=UNDO,
-        description=description_of(plan_.entry, len(todo)),
+        description=description_of(plan_.entry, undone),
     )
     out = batch.run()
     for f in plan_.failed:

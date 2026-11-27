@@ -199,3 +199,21 @@ def test_an_index_of_slice_5_gains_needs_attentions_columns_and_its_songs_are_re
     assert {"differs", "cover_width", "folder_image_width"} <= columns
     assert c.execute("SELECT COUNT(*) FROM ignored").fetchone() == (0,)
     c.close()
+
+
+def test_an_index_of_slice_6_gains_the_copies_key_and_its_songs_are_read_again(tmp_path):
+    """Version 9 (A2.6, R2.12): the normalised pair of artist and title is worked out from the
+    tags by the scan, so every song is read again; it is indexed with the length."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:8]:
+        step(c)
+    c.execute("PRAGMA user_version = 8")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 10, 5)")
+    assert db.migrate(c) == len(db.MIGRATIONS) == 9
+    assert c.execute("SELECT mtime_ns, copy_key FROM song").fetchall() == [(-1, None)]
+    plan = c.execute(
+        "EXPLAIN QUERY PLAN SELECT id FROM song WHERE copy_key = 'x' ORDER BY length"
+    ).fetchall()
+    assert any("song_copy_key" in str(row) for row in plan)
+    c.close()

@@ -9,13 +9,19 @@ entries, each with the action that fixes it, and Ignore.
   models.Searcher, A1.3) by musikata_core.attention's queries, after every scan or save, so the
   count in the sidebar is always current; a row is made only when the list shows it, as a long
   list's are. The header's search (R2.7) keeps the entries whose words it finds.
+- **The same song more than once** (R2.12): a group of copies is an entry drawn as L09 draws it,
+  a row per copy with the copy kept and those checked for the trash (`AttentionModel`'s choice of
+  each group, duplicates.initial at first, changed by its radio buttons and checkboxes), and the
+  selection bar's Move N to the trash over every group's; Review… opens the group in its dialog
+  (musikata.duplicates).
 - **The actions** (`Attention`): Edit tags (the Edit tags panel on the album's songs, R4.2), Album
-  art (its dialog, R5.2), Merge (a genre's merge of R9.4; for an artist's or an album's names,
-  `NameMerge`: the same preview, saved through the batch as one entry in the change history that
-  Undo reverses), Show in folder (the system's file manager, the file selected where the platform
-  can, `reveal_command`), and Ignore: the entry kept in the root's `.musikata/ignored.json`
-  (rootfiles.save_ignored, read again and merged first) and in the index, until its file changes.
-  Another computer's dismissals are read again whenever the watcher sees `.musikata` change.
+  art (its dialog, R5.2), Review… (musikata.duplicates' dialog, R2.12), Merge (a genre's merge of
+  R9.4; for an artist's or an album's names, `NameMerge`: the same preview, saved through the
+  batch as one entry in the change history that Undo reverses), Show in folder (the system's file
+  manager, the file selected where the platform can, `reveal_command`), and Ignore: the entry kept
+  in the root's `.musikata/ignored.json` (rootfiles.save_ignored, read again and merged first) and
+  in the index, until its file changes. Another computer's dismissals are read again whenever the
+  watcher sees `.musikata` change.
 
 What a chip, a group's line and an entry say, and which actions an entry has, are decided here as
 plain data and text (`entry_row`, `group_row`, `chips_of`, …), tested without a window; what each
@@ -49,12 +55,14 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QDesktopServices
 
-from musikata_core import attention, db, rootfiles, scanner, watch
+from musikata_core import attention, db, duplicates, rootfiles, scanner, watch
 from musikata_core.attention import Entry
 from musikata_core.clock import Clock
+from musikata_core.duplicates import Plan
 from musikata_core.tags import Batch, Failed, Job, Outcome, Written
 from musikata_core.tags.tools import Planned, Song
 
+from .duplicates import Duplicates, badge_text, bar_text, copy_rows, heading_text, move_label
 from .history import NAMES, ChangeHistory
 from .models import SHORT, Searcher, cover_url, plural, time_text
 from .preview import Preview, failed_text, footer_text, progress_text, save_text
@@ -64,7 +72,7 @@ log = logging.getLogger(__name__)
 ONLINE_LATER = "Finding covers online comes in a later version"  # R16.4.1: #27
 SHOWN = 3  # the entries a folded group's line names
 ROLES = ("type", "group", "kind", "title", "detail", "cover", "icon", "actions", "open",
-         "summary", "note", "count", "tone")  # fmt: skip
+         "summary", "note", "count", "tone", "badge", "copies")  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -83,6 +91,9 @@ class Group:
 
 
 GROUPS = (
+    Group("copies", "Same song twice", "SAME SONG MORE THAN ONCE",
+          "The kept copy takes the others' plays and highest rating.", (attention.COPIES,),
+          "song"),
     Group("covers", "Covers", "NO COVER, OR A SMALL ONE",
           "Album art finds the covers there are, embeds one and saves it as cover.jpg; a cover"
           " under 500 × 500 looks blurred.",
@@ -106,6 +117,7 @@ GROUP_OF = {kind: g.key for g in GROUPS for kind in g.kinds}
 # Other; the later pieces' (R3's, R2.12's, R4.10's) come in their places
 CHIPS = (
     ("all", "All", tuple(g.key for g in GROUPS)),
+    ("copies", "Same song twice", ("copies",)),
     ("covers", "Covers", ("covers",)),
     ("names", "Names", ("names",)),
     ("one-file", "Album in one file", ("one-file",)),
@@ -143,11 +155,20 @@ def _action(name: str, label: str) -> dict[str, str]:
 IGNORE = _action("ignore", "Ignore")
 
 
-def entry_row(e: Entry) -> dict[str, Any]:
+def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dict[str, Any]:
     """An entry as the view shows it (L09-needs-attention): its title, the line under it, its
-    cover (an album's) or icon, and its actions, the one that fixes it first and Ignore last."""
+    cover (an album's) or icon, and its actions, the one that fixes it first and Ignore last; a
+    group of copies (R2.12) its badge and a row per copy, as `choice` (the copy kept, those
+    checked; duplicates.initial when None) has them."""
     who = e.artist or "Unknown artist"
-    if e.kind in (attention.COVER_NONE, attention.COVER_SMALL):
+    badge, copies = "", []
+    if e.kind == attention.COPIES:
+        group = duplicates.Group(e.copies, e.likely, e.why)
+        kept, checked = choice if choice is not None else duplicates.initial(group)
+        detail, badge, copies = heading_text(e), badge_text(e), copy_rows(e, kept, checked)
+        actions = [_action("review", "Review…")]
+        icon = "album"
+    elif e.kind in (attention.COVER_NONE, attention.COVER_SMALL):
         detail = (f"{who} · No cover" if e.kind == attention.COVER_NONE
                   else f"{who} · Cover {size_text(e.width, e.height)}")  # fmt: skip
         actions = [_action("art", "Album art…")]
@@ -178,7 +199,8 @@ def entry_row(e: Entry) -> dict[str, Any]:
         "type": "entry", "group": GROUP_OF[e.kind], "kind": e.kind, "title": title,
         "detail": detail, "cover": cover_url(e.thumb) if e.album is not None else "",
         "icon": icon, "actions": [*actions, IGNORE], "open": True, "summary": "", "note": "",
-        "count": 0, "tone": "err" if e.kind == attention.UNREADABLE else "",
+        "count": 0, "tone": "err" if e.kind == attention.UNREADABLE else "", "badge": badge,
+        "copies": copies,
     }  # fmt: skip
 
 
@@ -213,7 +235,7 @@ def group_row(group: Group, entries: Sequence[Entry], opened: bool) -> dict[str,
         "type": "group", "group": group.key, "kind": "", "title": group.label,
         "detail": group.heading, "cover": "", "icon": "", "open": opened,
         "actions": [group.action] if group.action else [], "summary": summary_text(group, entries),
-        "note": group.note, "count": len(entries), "tone": "",
+        "note": group.note, "count": len(entries), "tone": "", "badge": "", "copies": [],
     }  # fmt: skip
 
 
@@ -326,6 +348,7 @@ class AttentionModel(QAbstractListModel):
 
     countChanged = Signal()
     chipsChanged = Signal()
+    choicesChanged = Signal()  # a group of copies' choice changed (R2.12)
 
     def __init__(
         self,
@@ -349,6 +372,7 @@ class AttentionModel(QAbstractListModel):
         self._pending = False
         self._generation = 0
         self._found_once = False
+        self._choices: dict[str, tuple[int, frozenset[int]]] = {}  # each group of copies'
 
     # ---------- what Library asks of a list ----------
 
@@ -389,6 +413,7 @@ class AttentionModel(QAbstractListModel):
         self._found_once = True
         if found is not None:
             self._all = found
+            self._keep_choices()
         self._shape()
 
     def _shape(self) -> None:
@@ -402,6 +427,108 @@ class AttentionModel(QAbstractListModel):
         self.endResetModel()
         self.countChanged.emit()
         self.chipsChanged.emit()
+
+    # ---------- the groups of copies' choices (R2.12) ----------
+
+    def _keep_choices(self) -> None:
+        """The choices of the groups found again: each kept while its copies are, a group new or
+        changed starting from duplicates.initial."""
+        kept: dict[str, tuple[int, frozenset[int]]] = {}
+        for e in self._all:
+            if e.kind != attention.COPIES:
+                continue
+            had = self._choices.get(e.about)
+            songs = {c.song for c in e.copies}
+            if had is not None and had[0] in songs and had[1] <= songs:
+                kept[e.about] = had
+        self._choices = kept
+        self.choicesChanged.emit()
+
+    def entry_of(self, about: str) -> Entry | None:
+        """The group of copies about `about` (its first copy), as last found."""
+        return next((e for e in self._all if e.kind == attention.COPIES and e.about == about),
+                    None)  # fmt: skip
+
+    def entry_titled(self, title: str) -> Entry | None:
+        """The first group of copies of the title `title` (the tour's)."""
+        return next((e for e in self._all if e.kind == attention.COPIES and e.title == title),
+                    None)  # fmt: skip
+
+    def choice_of(self, e: Entry) -> tuple[int, frozenset[int]]:
+        """A group's choice: the copy kept and those checked for the trash, by song id."""
+        found = self._choices.get(e.about)
+        return (
+            found
+            if found is not None
+            else duplicates.initial(duplicates.Group(e.copies, e.likely, e.why))
+        )
+
+    def _choose(self, about: str, choice: tuple[int, frozenset[int]]) -> None:
+        self._choices[about] = choice
+        for n, (kind, _key, i) in enumerate(self._rows):
+            if kind == "entry" and self._entries[i].about == about:
+                self._made.pop(n, None)
+                self.dataChanged.emit(self.index(n), self.index(n))
+        self.choicesChanged.emit()
+
+    def keep_copy(self, about: str, song: int) -> None:
+        """The copy `song` of the group about `about` kept instead (duplicates.rechoose)."""
+        e = self.entry_of(about)
+        if e is None:
+            return
+        kept, checked = self.choice_of(e)
+        group = duplicates.Group(e.copies, e.likely, e.why)
+        self._choose(about, duplicates.rechoose(group, kept, checked, song))
+
+    def toggle_copy(self, about: str, song: int) -> None:
+        """The copy `song` of the group about `about` checked for the trash, or not; never the
+        copy kept."""
+        e = self.entry_of(about)
+        if e is None or song not in {c.song for c in e.copies}:
+            return
+        kept, checked = self.choice_of(e)
+        if song != kept:
+            self._choose(about, (kept, checked ^ {song}))
+
+    @Slot(int, int)
+    def keepCopy(self, row: int, song: int) -> None:  # noqa: N802
+        """A copy's radio button (L09) on row `row`."""
+        e = self.entry_at(row)
+        if e is not None:
+            self.keep_copy(e.about, song)
+
+    @Slot(int, int)
+    def toggleCopy(self, row: int, song: int) -> None:  # noqa: N802
+        """A copy's checkbox (L09) on row `row`."""
+        e = self.entry_at(row)
+        if e is not None:
+            self.toggle_copy(e.about, song)
+
+    @Slot()
+    def clearChecked(self) -> None:  # noqa: N802
+        """The selection bar's ✕ (L09): every group's copies unchecked, the copy kept kept."""
+        for e in self._all:
+            if e.kind == attention.COPIES:
+                kept, checked = self.choice_of(e)
+                if checked:
+                    self._choose(e.about, (kept, frozenset()))
+
+    def checked_plans(self) -> list[tuple[str, Plan]]:
+        """The plans of the groups the search keeps with copies checked (duplicates.plan), by
+        what each is about: what the selection bar's Move N to the trash moves."""
+        out = []
+        for e in self._entries:
+            if e.kind != attention.COPIES:
+                continue
+            kept, checked = self.choice_of(e)
+            p = duplicates.plan(duplicates.Group(e.copies, e.likely, e.why), kept, checked)
+            if p.gone:
+                out.append((e.about, p))
+        return out
+
+    def checked(self) -> int:
+        """The copies checked for the trash, in every group the search keeps (L09's bar)."""
+        return sum(len(p.gone) for _, p in self.checked_plans())
 
     def searching(self) -> bool:
         return bool(words_of(self._search))
@@ -467,7 +594,8 @@ class AttentionModel(QAbstractListModel):
         if made is None:
             kind, key, i = self._rows[n]
             if kind == "entry":
-                made = entry_row(self._entries[i])
+                e = self._entries[i]
+                made = entry_row(e, self.choice_of(e) if e.kind == attention.COPIES else None)
             else:
                 group = BY_KEY[key]
                 mine = [e for e in self._entries if GROUP_OF[e.kind] == key]
@@ -497,6 +625,9 @@ class AttentionModel(QAbstractListModel):
     chip = QtProperty(str, lambda self: self._chip, notify=chipsChanged)
     loading = QtProperty(bool, lambda self: self._pending or not self._found_once,
                          notify=countChanged)  # fmt: skip
+    checkedCount = QtProperty(int, checked, notify=choicesChanged)  # L09's selection bar
+    barText = QtProperty(str, lambda self: bar_text(self.checked()), notify=choicesChanged)
+    moveLabel = QtProperty(str, lambda self: move_label(self.checked()), notify=choicesChanged)
 
 
 # ---------- Merge for an artist's or an album's names ----------
@@ -756,7 +887,8 @@ def _gone() -> bool:
 class Attention(QObject):
     """Needs attention's actions (R2.8) on the entries of `model`: Edit tags on `edit` (the Edit
     tags panel, musikata.edittags), Album art on `art` (musikata.albumart), Merge on `genres`
-    (musikata.genres) or `names` (`NameMerge`), Show in folder through `reveal` (a command, or
+    (musikata.genres) or `names` (`NameMerge`), Review… on `copies` (musikata.duplicates' dialog,
+    R2.12), Show in folder through `reveal` (a command, or
     the folder opened by `open_folder`), and Ignore. A dismissal is written into the root's
     ignored.json (read again and merged first) and the index on `executor` (its own thread when
     None) at `clock`'s time, or the index only when `.musikata` can't be written (R1.5.2); the
@@ -778,6 +910,7 @@ class Attention(QObject):
         genres: QObject | None = None,
         names: NameMerge | None = None,
         history: ChangeHistory | None = None,
+        copies: Duplicates | None = None,
         watching: bool = True,
         executor: Executor | None = None,
         reveal: Callable[[str], list[str] | None] | None = None,
@@ -788,7 +921,7 @@ class Attention(QObject):
         super().__init__(parent)
         self._root, self._index, self._model, self._clock = root, index, model, clock
         self._edit, self._art, self._genres, self._names = edit, art, genres, names
-        self._history = history
+        self._history, self._copies = history, copies
         self._watching = watching
         self._executor = executor
         self._reveal = reveal or (lambda p: reveal_command(p, sys.platform, shutil.which))
@@ -855,8 +988,8 @@ class Attention(QObject):
 
     @Slot(int, str)
     def act(self, row: int, action: str) -> None:
-        """An entry's action (row `row` of the list): "edit", "art", "merge", "folder" or
-        "ignore"."""
+        """An entry's action (row `row` of the list): "edit", "art", "merge", "review",
+        "folder" or "ignore"."""
         e = self._model.entry_at(row)
         if e is None:
             return
@@ -870,9 +1003,11 @@ class Attention(QObject):
             self._genres.merge_names(list(e.names))  # type: ignore[attr-defined]
         elif action == "merge" and self._names is not None:
             self._names.open(e)
+        elif action == "review" and self._copies is not None:
+            self._copies.open(e)
         elif action == "folder":
             self.show_in_folder(scanner.full_path(self._root, e.about))
-        elif action not in ("edit", "art", "merge"):
+        elif action not in ("edit", "art", "merge", "review"):
             raise ValueError(f"no such action: {action}")
 
     def show_in_folder(self, path: str) -> None:
@@ -938,6 +1073,7 @@ class Attention(QObject):
             self._executor.shutdown(wait=True)
             self._executor = None
         self._edit = self._art = self._genres = self._names = self._history = None
+        self._copies = None
 
 
 def _open_folder(folder: str) -> None:

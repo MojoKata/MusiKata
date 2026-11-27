@@ -218,7 +218,20 @@ def _v8(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8]
+def _v9(c: sqlite3.Connection) -> None:
+    """The same song more than once (R2.12, A2.6): each song's artist and title with case, accents
+    and punctuation set aside, the normalised pair likely copies share (`copy_key`), indexed with
+    the length they are compared by; exact copies are found by the `audio_hash` index of version
+    1. The key is worked out from the tags (duplicates.song_key), so every song is read again by
+    the next scan, as for version 2."""
+    c.execute("ALTER TABLE song ADD COLUMN copy_key TEXT")
+    c.execute("CREATE INDEX song_copy_key ON song (copy_key, length) WHERE copy_key IS NOT NULL")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9,
+]  # fmt: skip
 
 
 def connect(path: str) -> sqlite3.Connection:

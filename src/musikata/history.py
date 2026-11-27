@@ -38,20 +38,23 @@ LISTED = 300  # the most recent entries the panel lists
 FILES = 3  # the files an entry shows until it is opened whole
 NOT_THERE = "Nothing can be undone while the music folder isn't available"  # R2.10
 MESSAGE_MS = 8_000  # how long a message stays (R6.7: short-lived)
+IN_TRASH = "Undo can't take files out of the trash"  # R2.11
 LABELS = {
     "title": "Title", "artist": "Artist", "album": "Album", "albumartist": "Album artist",
     "track": "Track", "tracktotal": "Track total", "disc": "Disc", "disctotal": "Disc total",
     "year": "Year", "genres": "Genre", "composer": "Composer", "comment": "Comment",
     "compilation": "Compilation", "rating": "Rating", "artistsort": "Artist sort",
     "albumartistsort": "Album artist sort", "albumsort": "Album sort", "cover": "Cover",
-    "others": "Other pictures",
+    "others": "Other pictures", "plays": "Plays", "trashed": "Moved to the trash",
 }  # fmt: skip
 RATE = "rate"  # a save of ratings (R10.2)
 ART = "album-art"  # a save of the Album art dialog, or Save cover to folder (R5.3, R5.5)
 GENRE = "genres"  # a genre renamed or merged (R9.4, R9.5)
 NAMES = "names"  # an artist's or an album's names merged, from Needs attention (R2.8)
+COPIES = "copies"  # a song's other copies moved to the trash (R2.12)
 ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
-           ART: "Album art", GENRE: "Genres", NAMES: "Names merged"}  # fmt: skip  # an entry
+           ART: "Album art", GENRE: "Genres", NAMES: "Names merged",
+           COPIES: "Copies moved to the trash"}  # fmt: skip  # an entry
 # with no description, by its action
 
 
@@ -196,9 +199,9 @@ def saved_text(outcome: Outcome[Written]) -> str:
     )
 
 
-def undone_text(outcome: Outcome[Written], what: str, skipped: int = 0) -> str:
+def undone_text(outcome: Outcome[Written], what: str, skipped: int = 0, in_trash: int = 0) -> str:
     """The message after an undo: what was undone, and the files that couldn't be or were left
-    (R4.9.1)."""
+    (R4.9.1), or that stay in the trash (R2.11)."""
     done, failed = len(outcome.saved), len(outcome.failed)
     text = f"Undone: {what}"
     if failed:
@@ -211,6 +214,9 @@ def undone_text(outcome: Outcome[Written], what: str, skipped: int = 0) -> str:
     if skipped:
         left = "it is" if skipped == 1 else "they are"
         text += f" ({files_text(skipped)} changed since left as {left})"
+    if in_trash:
+        stays = "stays" if in_trash == 1 else "stay"
+        text += f"; {files_text(in_trash)} moved to the trash {stays} there"
     return text
 
 
@@ -228,15 +234,17 @@ class ChangeHistory(QObject):
     the local zone the days are in (None: the system's). `write` writes a file of an undo
     (ratings.Writing, so a rating goes back where it is kept; safe.save with the root's settings
     when None) and `look` reads a file as it is now for R4.9.1 (history.looking; history.current
-    when None)."""
+    when None). `plays` gives back the plays an entry moved (R2.12; duplicates.plays_back; None:
+    they aren't)."""
 
     changed = Signal()  # the rows, or whether the panel is open
     messageChanged = Signal()
     questionChanged = Signal()
     _read = Signal(object)  # from the thread: the computers' names, after a read
     _planned = Signal(object)  # a Plan, or why there is none
-    # an undo's outcome, what it undid, the files skipped, and this computer's id, made by then
-    _undone = Signal(object, str, int, object)
+    # an undo's outcome, what it undid, the files skipped, this computer's id, made by then, and
+    # the files it left in the trash
+    _undone = Signal(object, str, int, object, int)
 
     def __init__(
         self,
@@ -256,11 +264,13 @@ class ChangeHistory(QObject):
         write: Callable[[Job], Written] | None = None,
         look: Callable[[str, bool], history.Current] | None = None,
         available: Callable[[], bool] = lambda: True,
+        plays: history.PlaysBack | None = None,
     ) -> None:
         """`available` says whether the root is there: while it isn't, undo changes no file and
         says why (R2.10)."""
         super().__init__(parent)
         self._writer, self._look, self._available = write, look, available
+        self.plays = plays
         self._root, self._index, self._clock = root, index, clock
         self._computer, self._own, self._own_name = computer, own, own_name
         self._settings, self._saved, self._zone = tags_settings, saved, zone
@@ -428,6 +438,9 @@ class ChangeHistory(QObject):
 
     @Slot(object)
     def _on_planned(self, planned: Plan | str) -> None:
+        if (not isinstance(planned, str) and planned.in_trash
+                and len(planned.in_trash) == len(planned.files)):  # fmt: skip
+            planned = IN_TRASH  # a file moved to the trash alone (R2.11): nothing to undo
         if isinstance(planned, str):
             self._busy = self._loading = False
             self.say(planned)
@@ -474,20 +487,27 @@ class ChangeHistory(QObject):
 
         write = self._writer or save_one
 
+        plays = self.plays
+        in_trash = len(planned.in_trash)
+
         def job() -> None:
-            out = history.undo(planned, root, overwrite, write, record)
+            out = history.undo(planned, root, overwrite, write, record, plays=plays)
             history.refresh(self._index, self._folder)
-            self._undone.emit(out, what, skipped, self._computer() if out.entry else None)
+            self._undone.emit(out, what, skipped, self._computer() if out.entry else None,
+                              in_trash)  # fmt: skip
 
         self._submit(job)
 
-    @Slot(object, str, int, object)
-    def _on_undone(self, out: Outcome[Written], what: str, skipped: int, own: str | None) -> None:
+    @Slot(object, str, int, object, int)
+    def _on_undone(
+        self, out: Outcome[Written], what: str, skipped: int, own: str | None, in_trash: int
+    ) -> None:
         self._busy = False
         self._own = self._own or own  # its entries named as this computer's from now on
         if out.saved and self._saved is not None:  # their rows, on this thread (Library.saved)
             self._saved(art.written_songs(out.saved))  # a cover.jpg's folder is rescanned
-        self._message = {"text": undone_text(out, what, skipped), "undo": out.entry or ""}
+        self._message = {"text": undone_text(out, what, skipped, in_trash),
+                         "undo": out.entry or ""}  # fmt: skip
         self._timer.start()
         self.messageChanged.emit()
         self._on_read(self._names)
@@ -535,7 +555,7 @@ class ChangeHistory(QObject):
             self._executor.shutdown(wait=True)
             self._executor = None
         self._plan = None
-        self._saved = self._writer = self._look = None
+        self._saved = self._writer = self._look = self.plays = None
 
     # ---------- what QML reads ----------
 

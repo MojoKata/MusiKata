@@ -27,6 +27,7 @@ from . import layout
 from .albumart import AlbumArt
 from .attention import Attention
 from .bridges import Library, Player
+from .duplicates import Duplicates
 from .edittags import EditTags
 from .genres import Genres
 from .history import ChangeHistory
@@ -51,8 +52,9 @@ SIZES = (SHOT, DESIGN)
 # bulk tool's preview (R4.5, R3.7), Number tracks over L03's four songs. T02 is the Album art dialog
 # (R5.2) over Glass Harbor's page, as its mockup draws it. G01 is Genres (R9.1) with the banner of
 # the demo library's near duplicates (R9.5) and Electronic's ⋯ menu open, as its mockup draws it.
-# L09 is Needs attention (R2.8) with Names chosen, its entries open and the other groups folded
-# after it, as its mockup draws Same song twice (R2.12, a later piece's).
+# L09 is Needs attention (R2.8) with Same song twice chosen (R2.12), its groups of copies open and
+# the other groups folded after it, as its mockup draws it. L13 has no mockup: the Review… dialog
+# of Signal Fires' copies (R2.12) over it, drawn after T01's preview.
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -113,7 +115,11 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
     ),
     ("T02-album-art", {"view": "album", "album": "Glass Harbor", "art": True}),
     ("G01-genres", {"view": "genres", "genreMenu": "Electronic"}),
-    ("L09-needs-attention", {"view": "attention", "attention": "names"}),
+    ("L09-needs-attention", {"view": "attention", "attention": "copies"}),
+    (
+        "L13-same-song-review",
+        {"view": "attention", "attention": "copies", "review": "Signal Fires"},
+    ),
     ("X03-change-history", {"view": "songs", "select": [], "history": True}),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
@@ -162,6 +168,7 @@ class Tour(QObject):
         art: AlbumArt | None = None,
         genres: Genres | None = None,
         attention: Attention | None = None,
+        copies: Duplicates | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -172,7 +179,7 @@ class Tour(QObject):
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
         self.player, self.history, self.edit, self.art = player, history, edit, art
-        self.genres, self.attention = genres, attention
+        self.genres, self.attention, self.copies = genres, attention, copies
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -214,6 +221,8 @@ class Tour(QObject):
             self.genres.go(step)
         if self.attention is not None and "view" in step:
             self.attention.go(step)
+        if self.copies is not None and "view" in step:
+            self.copies.go(step)
         self._size = 0
         self._at_size()
 

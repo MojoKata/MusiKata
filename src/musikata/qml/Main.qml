@@ -20,7 +20,8 @@ import "."
 // the window (`modal`: a bulk tool's, Album art's), the window's shortcuts don't act on what is
 // behind it, nor does a click reach it. A genre's Rename… and Merge into… (R9.4) open the same
 // dialog as a bulk tool, over the whole window, as Needs attention's Merge of an artist's or an
-// album's names does (R2.8). A star clicked
+// album's names does (R2.8). Needs attention's Review… of a song's copies opens its dialog over the
+// whole window (R2.12), and moving copies to the trash asks first, over it (R2.11). A star clicked
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2).
 Window {
@@ -34,6 +35,7 @@ Window {
     required property var genres
     required property var attention
     required property var names
+    required property var copies
     width: 1280
     height: 800
     minimumWidth: 960
@@ -42,7 +44,8 @@ Window {
     color: Theme.bg
     // a modal dialog is open over the window: its shortcuts are the dialog's, not the window's
     readonly property bool modal: win.edit.tool.opened || win.art.opened || win.genres.opened
-                                  || win.names.opened
+                                  || win.names.opened || win.copies.opened
+                                  || win.copies.question.title !== undefined
 
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -163,7 +166,7 @@ Window {
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres } }
     Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres } }
     Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
-    Component { id: needs; AttentionView { library: win.library; attention: win.attention } }
+    Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
     Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
 
     UpNext {
@@ -199,6 +202,16 @@ Window {
         objectName: "artOverlay"
         anchors.fill: parent
         art: win.art
+    }
+    ReviewDialog {
+        objectName: "reviewOverlay"
+        anchors.fill: parent
+        copies: win.copies
+    }
+    CopiesQuestion {
+        objectName: "questionOverlay"
+        anchors.fill: parent
+        copies: win.copies
     }
     Shortcut {
         sequence: "Ctrl+E"

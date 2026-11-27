@@ -39,6 +39,7 @@ from .albumart import AlbumArt, ArtImages
 from .attention import Attention, NameMerge
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
+from .duplicates import Duplicates, plays_back, remover
 from .edittags import EditTags
 from .firstrun import FirstRun, music_folder
 from .genres import Genres
@@ -154,6 +155,7 @@ class Shell:
     genres: Genres | None = None
     attention: Attention | None = None
     names: NameMerge | None = None
+    copies: Duplicates | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -163,6 +165,7 @@ class Shell:
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
+            self.copies,
         )  # fmt: skip
 
 
@@ -179,6 +182,7 @@ def close_bridges(
     genres: Genres | None = None,
     attention: Attention | None = None,
     names: NameMerge | None = None,
+    copies: Duplicates | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's, Album art's and the merges' saves (stopped before
@@ -197,6 +201,8 @@ def close_bridges(
         genres.shut()
     if names is not None:
         names.shut()
+    if copies is not None:
+        copies.shut()
     if attention is not None:
         attention.close()
     if ratings is not None:
@@ -208,8 +214,9 @@ def close_bridges(
     library.close()
     index.close()
     release(
-        controls, counts, edit, art, genres, names, attention, ratings, changes, player, library
-    )
+        controls, counts, edit, art, genres, names, copies, attention, ratings, changes, player,
+        library,
+    )  # fmt: skip
 
 
 def release(*objects: QObject | None) -> None:
@@ -298,8 +305,9 @@ def load(
     )  # fmt: skip
     library.reloaded.connect(genre_tools.refresh)  # R9.5's banner, after a scan or a save
     genre_tools.refresh()
-    needs, names = attend(library, root, index, clock, edit, album_art, genre_tools, writing,
-                          changes, tags_settings, missing)  # fmt: skip
+    changes.plays = plays_back(counts.change if counts is not None else None, make)  # R2.12
+    needs, names, copies = attend(library, root, index, clock, edit, album_art, genre_tools,
+                                  writing, changes, tags_settings, missing, counts)  # fmt: skip
     engine.setInitialProperties(
         {
             "library": library,
@@ -311,6 +319,7 @@ def load(
             "genres": genre_tools,
             "attention": needs,
             "names": names,
+            "copies": copies,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -319,14 +328,15 @@ def load(
         Shiboken.delete(engine)
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
-                      art=album_art, genres=genre_tools, attention=needs, names=names)  # fmt: skip
+                      art=album_art, genres=genre_tools, attention=needs, names=names,
+                      copies=copies)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating, album_art, genre_tools, needs, names,
+        changes, edit, rating, album_art, genre_tools, needs, names, copies,
     )  # fmt: skip
 
 
@@ -342,10 +352,13 @@ def attend(
     changes: ChangeHistory,
     tags_settings: settings.RootTags,
     missing: bool = False,
-) -> tuple[Attention, NameMerge]:
+    counts: PlayCounts | None = None,
+) -> tuple[Attention, NameMerge, Duplicates]:
     """Needs attention (R2.8): its list (Library's) told the genres the user has said are the
     same (R9.5); its actions on the Edit tags panel, Album art, the genres' merge and the merge of
-    an artist's or an album's names (saved by `writing`, kept in `changes`); the root's
+    an artist's or an album's names (saved by `writing`, kept in `changes`), and Review… and Move
+    the others to the trash for the same song more than once (R2.12: the kept copy's rating
+    written by `writing`, its plays given on `counts`' rows, kept in `changes`); the root's
     ignored.json read into the index, off the GUI thread, and again when another computer changes
     it (A2.8). A root that isn't there (R2.10) lists what the index has."""
     model = library.property("attention")
@@ -354,13 +367,18 @@ def attend(
         root, index.read, writing, changes, saved=library.saved, undoable=tags_settings.history,
         available=lambda: bool(library.property("available")),
     )  # fmt: skip
+    copies = Duplicates(
+        root, model, writing, remover(root, index), changes,
+        plays=counts.change if counts is not None else None, done=library.reload,
+        saved=library.saved, available=lambda: bool(library.property("available")),
+    )  # fmt: skip
     needs = Attention(root, index, model, clock, edit=edit, art=art, genres=genres, names=names,
-                      history=changes, watching=not missing)  # fmt: skip
+                      history=changes, copies=copies, watching=not missing)  # fmt: skip
     if not missing:
         needs.start()
     else:
         model.refresh()
-    return needs, names
+    return needs, names, copies
 
 
 def keep_playing(
@@ -729,9 +747,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         album_art = session.shell.art if session.shell is not None else None
         genre_tools = session.shell.genres if session.shell is not None else None
         needs = session.shell.attention if session.shell is not None else None
+        copies = session.shell.copies if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
+            copies=copies,
         ).start()  # fmt: skip
     else:
         session.window.show()
