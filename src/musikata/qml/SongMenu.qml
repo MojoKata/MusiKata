@@ -11,6 +11,8 @@ import "."
 // playlist from selection (R8.3), the same way; on a playlist's page (`inPlaylist`), Remove from
 // playlist (R8.6). Organize files… (R12.2, R2.9.6), the same way, when the view gives it the
 // dialog; and in Folders, Show in file manager (R2.9.6), the row's folder or file shown there.
+// Move to trash (R2.11), the same way, when the view gives it `removing`, asked first; and on a
+// folder's row in Folders, Ignore this folder (R2.11.1).
 Menu {
     id: menu
     required property var player
@@ -19,17 +21,20 @@ Menu {
     property var art: null            // the Album art dialog's bridge, in Folders
     property var organize: null       // Organize files' dialog (R12.2)
     property var reveal: null         // Show in file manager (R2.9.6): Needs attention's bridge
+    property var removing: null       // Move to trash and Ignore this folder (R2.11, R2.11.1)
     property var playlists: null      // the playlists' bridge (musikata.playlists)
     property var playlistList: null   // the playlists Add to playlist lists (library.playlists)
     property bool inPlaylist: false   // a playlist's page: Remove from playlist (R8.6)
     property var songs                 // the list's model: what a row's songs are
     property int row: -1
     property int album: -1             // the album the row's songs are on, -1 for none
+    property string folder: ""         // the folder the row is in Folders, "" for a file's
 
     function openFor(songs, row) {
         menu.songs = songs
         menu.row = row
         menu.album = menu.art !== null ? songs.albumAt(row) : -1
+        menu.folder = menu.removing !== null ? menu.removing.folderAt(songs, row) : ""
         menu.popup()
     }
 
@@ -100,5 +105,19 @@ Menu {
         visible: menu.album >= 0
         height: visible ? implicitHeight : 0
         onTriggered: menu.art.openAlbum(menu.album)
+    }
+    MenuItem {
+        objectName: "ignoreFolderRow"
+        text: qsTr("Ignore this folder")
+        visible: menu.folder !== ""
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.removing.ignoreFolder(menu.folder)
+    }
+    MenuItem {
+        objectName: "trashRow"
+        text: qsTr("Move to trash")
+        visible: menu.removing !== null
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.removing.askRow(menu.songs, menu.row)
     }
 }

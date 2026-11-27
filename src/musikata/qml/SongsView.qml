@@ -23,6 +23,7 @@ Item {
     property var edit: null
     property var infer: null    // Infer from path's dialog (R3)
     property var organize: null  // Organize files' dialog (R12.2)
+    property var removing: null  // Move to trash (R2.11): the menu's, and Delete's (R6.9)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var dragging: null  // a row dragged: the selection when it is in it (R6.10)
     readonly property var songs: library.songs
@@ -34,6 +35,7 @@ Item {
     }
     Keys.onReturnPressed: view.player.playSelection(view.songs)
     Keys.onEnterPressed: view.player.playSelection(view.songs)
+    Keys.onDeletePressed: if (view.removing !== null) view.removing.askSelection(view.songs)
     Keys.onPressed: (event) => {
         const row = view.songs.press(event.key, event.modifiers, Math.max(1, Math.floor(list.height / 36)))
         event.accepted = row !== -2
@@ -146,7 +148,7 @@ Item {
             }
             ScrollBar.vertical: ScrollBar { }
         }
-        SongMenu { id: songMenu; player: view.player; edit: view.edit; infer: view.infer; playlists: view.playlists; playlistList: view.library.playlists }
+        SongMenu { id: songMenu; player: view.player; edit: view.edit; infer: view.infer; removing: view.removing; playlists: view.playlists; playlistList: view.library.playlists }
         Connections {
             target: view.songs
             // once the list has taken its rows: a search's come with the selection it waited for

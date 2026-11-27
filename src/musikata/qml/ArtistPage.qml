@@ -17,6 +17,7 @@ Item {
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // Album art (R5.4): an image dropped on an album's cover
     property var dragging: null  // an album or a song dragged (R6.10)
+    property var removing: null  // Move to trash (R2.11): the menu's, and Delete's (R6.9)
     readonly property var artist: library.artist
     readonly property var others: artist.others
     focus: true
@@ -27,6 +28,7 @@ Item {
     }
     Keys.onReturnPressed: page.player.playSelection(page.others)
     Keys.onEnterPressed: page.player.playSelection(page.others)
+    Keys.onDeletePressed: if (page.removing !== null) page.removing.askSelection(page.others)
     Keys.onPressed: (event) => {
         const row = page.others.press(event.key, event.modifiers, Math.max(1, Math.floor(list.height / 42)))
         event.accepted = row !== -2
@@ -183,5 +185,5 @@ Item {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 14 }
     }
-    SongMenu { id: songMenu; player: page.player; edit: page.edit; playlists: page.playlists; playlistList: page.library.playlists }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit; removing: page.removing; playlists: page.playlists; playlistList: page.library.playlists }
 }

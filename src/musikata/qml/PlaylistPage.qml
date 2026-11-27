@@ -26,6 +26,7 @@ Item {
     property var playlists: null
     property var dragging: null       // drag and drop (musikata.dragging): reordering, dropping
     property var smart: null          // Edit rule (musikata.smart, R8.9)
+    property var removing: null       // the menu's Move to trash (R2.11); Delete is R8.6's
     readonly property var playlist: library.playlistPage
     readonly property var songs: playlist.songs
     focus: true
@@ -264,6 +265,7 @@ Item {
         player: page.player
         edit: page.edit
         infer: page.infer
+        removing: page.removing
         playlists: page.playlists
         playlistList: page.library.playlists
         inPlaylist: !page.playlist.smart

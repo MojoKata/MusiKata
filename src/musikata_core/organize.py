@@ -1025,3 +1025,119 @@ def index_added(c: sqlite3.Connection, reads: list[scanner.Read], added: float,
         if row is not None:
             out.append(int(row[0]))
     return out
+
+
+# ---------- removing songs to the trash (R2.11) ----------
+
+
+TRASH = "trash"  # a removal's Job: the file or folder at its path goes to the system's trash
+SONGS = "songs"  # and the songs it takes with it, for the change history
+
+
+@dataclass(frozen=True)
+class Going:
+    """A file or a folder Move to trash takes (R2.11): its path under the root, its audio hash
+    (None: a folder, or a file beside the songs), whether it is a folder, which goes whole, and
+    the songs it takes with it, each its path under the root and audio hash: a song's own, a
+    folder's every one beneath it."""
+
+    path: str
+    hash: str | None = None
+    folder: bool = False
+    songs: tuple[tuple[str, str | None], ...] = ()
+
+
+@dataclass(frozen=True)
+class Removal:
+    """What Move to trash would do (R2.11): the folders that go whole, then each song and the
+    files beside it that go with it (R12.3), in order."""
+
+    going: tuple[Going, ...] = ()
+
+    @property
+    def songs(self) -> list[tuple[str, str | None]]:
+        """Every song that goes, a folder's included: its path under the root and audio hash."""
+        return [s for g in self.going for s in g.songs]
+
+    @property
+    def folders(self) -> list[Going]:
+        """The folders that go whole."""
+        return [g for g in self.going if g.folder]
+
+    @property
+    def beside(self) -> list[Going]:
+        """The files beside the songs that go with them (R12.3)."""
+        return [g for g in self.going if not g.folder and not g.songs]
+
+
+def removal(
+    songs: Sequence[tuple[str, str | None]],
+    folders: Mapping[str, Sequence[tuple[str, str | None]]],
+    beside: Mapping[str, Collection[str]],
+) -> Removal:
+    """Move to trash's plan (R2.11) of `songs` (each its path under the root and audio hash) and
+    `folders` (each folder's path under the root, with the songs beneath it): each folder whole,
+    but one beneath another that goes, one with no songs (not the library's), and never the root;
+    each song but those in a folder that goes, with the files beside it in `beside` (each
+    folder's entries by name, as `listing` gives them) that go with it: its own lyrics, and the
+    album's images, `.cue`, `.lrc` and `.log` files when every song of its folder goes (R12.3,
+    `companions`)."""
+    chosen = sorted(f for f in folders if f and folders[f])  # a folder of no songs isn't listed
+    whole = [f for f in chosen if not any(f.startswith(o + "/") for o in chosen if o != f)]
+    going = [Going(f, None, True, tuple(dict.fromkeys(folders[f]))) for f in whole]
+    loose: dict[str, tuple[str, str | None]] = {}
+    for path, digest in songs:
+        if not any(path.startswith(f + "/") for f in whole):
+            loose.setdefault(path, (path, digest))
+    by_folder: dict[str, list[tuple[str, str | None]]] = {}
+    for song in loose.values():
+        by_folder.setdefault(folder_of(song[0]), []).append(song)
+    for folder, those in by_folder.items():
+        going += [Going(p, h, False, ((p, h),)) for p, h in those]
+        for n, _owner in companions(beside.get(folder, ()), {name_of(p) for p, _ in those}):
+            going.append(Going(f"{folder}/{n}" if folder else n))
+    return Removal(tuple(going))
+
+
+@dataclass(frozen=True)
+class Trashed:
+    """A file or folder moved to the trash (R2.11), as a batch's writer gives it: its whole path,
+    its audio hash (None: not a song) and the songs that went with it (paths under the root and
+    audio hashes; a folder's every one), which the change history names."""
+
+    path: str
+    hash: str | None = None
+    songs: tuple[tuple[str, str | None], ...] = ()
+
+
+def trash_job(root: str, g: Going) -> Job:
+    """The batch's job of moving `g` under `root` to the trash."""
+    return Job(scanner.full_path(root, g.path), {TRASH: True, HASH: g.hash, SONGS: g.songs})
+
+
+def trasher(trash: art.Trash = art.to_trash) -> Callable[[Job], Trashed]:
+    """Move to trash's writer (a tags.Batch's, R2.11): the file or folder at `job.path` moved to
+    the system's trash by `trash`, so the user can put it back by hand (Principle 5). Raises
+    WriteError, nothing moved, when it isn't there or can't be moved."""
+
+    def write(job: Job) -> Trashed:
+        if not os.path.lexists(job.path):
+            raise WriteError(job.path, "it isn't there any more")
+        if not trash(job.path):
+            raise WriteError(job.path, "it couldn't be moved to the trash")
+        log.info("moved %s to the trash", job.path)
+        digest, songs = job.changes.get(HASH), job.changes.get(SONGS)
+        return Trashed(job.path, digest if isinstance(digest, str) else None,
+                       tuple(songs) if isinstance(songs, tuple) else ())  # fmt: skip
+
+    return write
+
+
+def folders_left(root: str, trashed: Iterable[Trashed]) -> set[str]:
+    """The folders under `root` the files and folders `trashed` left, for `prune`."""
+    out = set()
+    for t in trashed:
+        path = scanner.path_under(root, t.path)
+        if path:
+            out.add(folder_of(path))
+    return out

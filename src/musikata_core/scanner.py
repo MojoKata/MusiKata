@@ -736,6 +736,36 @@ def remove(root: str, index: db.Index, paths: Collection[str]) -> int:
     return removed
 
 
+def forget(index: db.Index, folder: str) -> int:
+    """Takes the songs beneath `folder` (a path under the root) out of the index whether their
+    files are there or not, with the folders' rows: a folder ignored (R2.11.1) leaves the library
+    at once. The number taken out."""
+
+    def write(c: sqlite3.Connection) -> int:
+        known = [p for (p,) in c.execute(
+            "SELECT path FROM song WHERE path >= ? AND path < ?", (folder + "/", folder + "0")
+        )]  # fmt: skip
+        _remove(c, known, {}, None)
+        return len(known)
+
+    taken: int = index.write(write).result()
+    log.info("took the %d songs beneath %s, ignored, out of the library", taken, folder)
+    return taken
+
+
+def ignore(root: str, folder: str) -> str:
+    """Ignore this folder (R2.11.1): the `.musikataignore` of R2.3.1 written in `folder` (a path
+    under the root, never the root itself), empty, so every scan passes it by; its whole path.
+    One there already is left as it is. Raises OSError when it can't be written."""
+    if not folder:
+        raise ValueError("the root itself can't be ignored")
+    path = os.path.join(full_path(root, folder), IGNORE)
+    with open(path, "a", encoding="utf-8"):
+        pass
+    log.info("wrote %s: %s is out of the library", path, folder)
+    return path
+
+
 def asks_first(gone: int, songs: int) -> bool:
     """Whether taking out `gone` songs of a library of `songs` waits on the user's answer
     (R2.10.1): when they are more than a quarter of it and more than ASK_OVER."""

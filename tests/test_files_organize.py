@@ -709,6 +709,107 @@ def test_files_brought_in_are_indexed_as_a_scans_batch_would(library):
     )
 
 
+# ---------- removing songs to the trash (R2.11) ----------
+
+
+def test_a_removal_takes_each_folder_whole_and_each_song_with_its_own_lyrics():
+    """R2.11: a folder goes whole, with every song beneath it, a folder beneath another that goes
+    and the songs in it left to it, never the root; a song goes with its own .lrc, and alone
+    while its folder keeps other songs."""
+    beside = {"A": ["a.flac", "a.lrc", "b.flac", "cover.jpg", "x.log", "sub/"]}
+    plan = organize.removal(
+        [("A/a.flac", "h1"), ("K/s/t.mp3", "h2"), ("A/a.flac", "h1")],
+        {"K": [("K/s/t.mp3", "h2"), ("K/u.mp3", None)], "K/s": [("K/s/t.mp3", "h2")], "": []},
+        beside,
+    )
+    assert [(g.path, g.folder) for g in plan.going] == [
+        ("K", True), ("A/a.flac", False), ("A/a.lrc", False)]  # fmt: skip
+    assert plan.folders[0].songs == (("K/s/t.mp3", "h2"), ("K/u.mp3", None))
+    assert plan.songs == [("K/s/t.mp3", "h2"), ("K/u.mp3", None), ("A/a.flac", "h1")]
+    assert [g.path for g in plan.beside] == ["A/a.lrc"]
+    assert organize.removal([], {}, {}).going == ()
+
+
+def test_the_files_beside_an_album_go_with_it_only_when_every_song_of_its_folder_goes():
+    """R2.11, R12.3: the images, .cue, .lrc and .log files beside an album's songs go when the
+    whole album goes; files that aren't R12.3's, and subfolders, stay."""
+    names = ["01.flac", "02.flac", "Cover.JPG", "album.cue", "rip.log", "notes.nfo", "Scans/"]
+    whole = organize.removal([("R/01.flac", "a"), ("R/02.flac", "b")], {}, {"R": names})
+    assert [g.path for g in whole.beside] == ["R/Cover.JPG", "R/album.cue", "R/rip.log"]
+    assert all(g.hash is None and not g.songs for g in whole.beside)
+    some = organize.removal([("R/01.flac", "a")], {}, {"R": names})
+    assert [g.path for g in some.going] == ["R/01.flac"]
+    at_root = organize.removal([("01.flac", "a")], {}, {"": ["01.flac", "cover.jpg"]})
+    assert [g.path for g in at_root.going] == ["01.flac", "cover.jpg"]
+
+
+def test_organize_and_removal_share_r12_3s_rule_of_what_goes_with_the_songs():
+    names = ["a.flac", "a.lrc", "b.flac", "b.LRC", "c.flac", "front.png", "sub/"]
+    assert organize.companions(names, {"a.flac"}) == [("a.lrc", "a.flac")]
+    assert organize.companions(names, {"a.flac", "b.flac", "c.flac"}) == [
+        ("a.lrc", "a.flac"), ("b.LRC", "b.flac"), ("front.png", None)]  # fmt: skip
+    assert organize.companions([], {"a.flac"}) == []
+
+
+def test_the_trasher_moves_a_file_or_folder_to_the_trash_or_says_why_not(tmp_path):
+    """R2.11 (Principle 5): to the system's trash, never deleted; a file gone or one the trash
+    refuses fails with why, nothing moved."""
+    (tmp_path / "K").mkdir()
+    (tmp_path / "K" / "t.mp3").write_bytes(b"x")
+    (tmp_path / "a.mp3").write_bytes(b"x")
+    taken = []
+
+    def trash(path):
+        taken.append(path)
+        shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+        return True
+
+    write = organize.trasher(trash)
+    folder = organize.Going("K", None, True, (("K/t.mp3", "h"),))
+    got = write(organize.trash_job(str(tmp_path), folder))
+    assert got == organize.Trashed(str(tmp_path / "K"), None, (("K/t.mp3", "h"),))
+    got = write(organize.trash_job(str(tmp_path), organize.Going("a.mp3", "h2", False,
+                                                                 (("a.mp3", "h2"),))))  # fmt: skip
+    assert got.hash == "h2" and taken == [str(tmp_path / "K"), str(tmp_path / "a.mp3")]
+    with pytest.raises(tags.WriteError, match="isn't there any more"):
+        write(organize.trash_job(str(tmp_path), organize.Going("a.mp3")))
+    (tmp_path / "b.mp3").write_bytes(b"x")
+    with pytest.raises(tags.WriteError, match="couldn't be moved to the trash"):
+        organize.trasher(lambda _p: False)(
+            organize.trash_job(str(tmp_path), organize.Going("b.mp3"))
+        )
+    assert (tmp_path / "b.mp3").exists()
+    assert organize.folders_left(
+        str(tmp_path),
+        [
+            organize.Trashed(str(tmp_path / "K" / "s")),
+            organize.Trashed(str(tmp_path / "a.mp3")),
+            organize.Trashed("/elsewhere/x"),
+        ],
+    ) == {"K", ""}
+
+
+def test_a_removal_is_one_entry_naming_each_song_moved_to_the_trash_which_undo_leaves(tmp_path):
+    """R2.11, R4.9: the change history keeps the removal, each song of a folder named by its path
+    and hash, a file beside them named too; Undo can't take them out of the trash."""
+    root = str(tmp_path)
+    (tmp_path / "K").mkdir()
+    rec = Recording(root, lambda: ME, FakeClock(WHEN))
+    rec.saved(organize.Trashed(str(tmp_path / "K"), None, (("K/a.mp3", "a" * 64),
+                                                            ("K/b.mp3", None))))  # fmt: skip
+    rec.saved(organize.Trashed(str(tmp_path / "c.mp3"), "c" * 64))
+    rec.saved(organize.Trashed("/elsewhere/d.mp3", "d" * 64))
+    name = rec.done("trash", "3 songs to the trash")
+    entry = history.read(history.folder_of(root), name)
+    assert [(f.path, f.hash, f.trashed) for f in entry.files] == [
+        ("K/a.mp3", "a" * 64, True),
+        ("K/b.mp3", None, True),
+        ("c.mp3", "c" * 64, True),
+    ]
+    plan = history.plan(entry, root, lambda _h: [])
+    assert len(plan.in_trash) == 3 and history.jobs(plan, root, True) == []
+
+
 # ---------- a .cue sheet's FILE lines follow the files it names (R12.3, A2.6) ----------
 
 
