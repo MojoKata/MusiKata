@@ -42,9 +42,10 @@ from musikata_core.tags import Batch, Failed, Job, Outcome, TagReadError, Writte
 from musikata_core.tags import pictures as read_pictures
 from musikata_core.tags.read import EXTENSIONS
 
-from .edittags import FEW, failed_rows, failed_text, progress_text
+from .edittags import FEW, failed_rows
 from .history import ChangeHistory
 from .models import Searcher
+from .preview import failed_text, progress_text
 
 log = logging.getLogger(__name__)
 

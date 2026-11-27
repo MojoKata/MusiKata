@@ -286,7 +286,7 @@ def test_pages_go_back_the_way_they_came(lib, qtbot):
     lib.openArtist(-1)
     assert lib.property("view") == "albums"  # no such page: nothing opens
     with pytest.raises(ValueError):
-        lib.show("genres")
+        lib.show("attention")  # Needs attention: not built yet (R2.8)
 
 
 def test_a_page_whose_album_went_with_a_scan_goes_back(lib, index):

@@ -40,6 +40,7 @@ from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .edittags import EditTags
 from .firstrun import FirstRun, music_folder
+from .genres import Genres
 from .history import ChangeHistory
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .plays import PlayCounts
@@ -149,6 +150,7 @@ class Shell:
     edit: EditTags | None = None
     ratings: Ratings | None = None
     art: AlbumArt | None = None
+    genres: Genres | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -157,7 +159,7 @@ class Shell:
         Shiboken.delete(self.engine)
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
-            self.edit, self.ratings, self.art,
+            self.edit, self.ratings, self.art, self.genres,
         )  # fmt: skip
 
 
@@ -171,6 +173,7 @@ def close_bridges(
     edit: EditTags | None = None,
     ratings: Ratings | None = None,
     art: AlbumArt | None = None,
+    genres: Genres | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's and Album art's saves (stopped before their next file)
@@ -185,6 +188,8 @@ def close_bridges(
         edit.close()
     if art is not None:
         art.shut()
+    if genres is not None:
+        genres.shut()
     if ratings is not None:
         ratings.close()
     if counts is not None:
@@ -193,7 +198,7 @@ def close_bridges(
         changes.close()
     library.close()
     index.close()
-    release(controls, counts, edit, art, ratings, changes, player, library)
+    release(controls, counts, edit, art, genres, ratings, changes, player, library)
 
 
 def release(*objects: QObject | None) -> None:
@@ -276,6 +281,12 @@ def load(
         root, index.read, writing, changes, saved=library.saved, images=thumbs,
         available=lambda: bool(library.property("available")),
     )  # fmt: skip
+    genre_tools = Genres(
+        root, index.read, writing, changes, saved=library.saved, same=tags_settings.same_genres,
+        undoable=tags_settings.history, available=lambda: bool(library.property("available")),
+    )  # fmt: skip
+    library.reloaded.connect(genre_tools.refresh)  # R9.5's banner, after a scan or a save
+    genre_tools.refresh()
     engine.setInitialProperties(
         {
             "library": library,
@@ -284,6 +295,7 @@ def load(
             "edit": edit,
             "ratings": rating,
             "art": album_art,
+            "genres": genre_tools,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -292,14 +304,14 @@ def load(
         Shiboken.delete(engine)
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
-                      art=album_art)  # fmt: skip
+                      art=album_art, genres=genre_tools)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating, album_art,
+        changes, edit, rating, album_art, genre_tools,
     )  # fmt: skip
 
 
@@ -667,9 +679,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         changes = session.shell.changes if session.shell is not None else None
         edit = session.shell.edit if session.shell is not None else None
         album_art = session.shell.art if session.shell is not None else None
+        genre_tools = session.shell.genres if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
-            history=changes, edit=edit, art=album_art,
+            history=changes, edit=edit, art=album_art, genres=genre_tools,
         ).start()  # fmt: skip
     else:
         session.window.show()

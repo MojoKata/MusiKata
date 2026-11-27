@@ -9,7 +9,10 @@ import "."
 // takes the field, what to find and what to put in its place, and whether it is a regular expression
 // or matches case, saying why an expression can't be used; Tidy case the fields to tidy; Copy from…
 // the song to copy from and the fields to copy. Esc, the × or Cancel closes it, saving nothing. What
-// it shows and does is the tool's (musikata.bulktools).
+// it shows and does is the tool's (musikata.bulktools). A genre's Rename… and Merge into… (R9.4,
+// musikata.genres) are shown the same way: the new name typed, or the genre merged into chosen
+// among the options' chips (`single`), and while their save goes on the footer says how far it has
+// come and Cancel stops it.
 Item {
     id: dialog
     required property var tool
@@ -122,6 +125,13 @@ Item {
             visible: dialog.tool.tool !== "number"  // Number tracks has none
             spacing: 12
 
+            OptionText {  // a genre's Rename…: the new name
+                visible: dialog.tool.tool === "rename"
+                name: "name"
+                label: qsTr("New name")
+                value: dialog.options.name || ""
+                tool: dialog.tool
+            }
             Row {  // Replace in field: what to find, and what to put in its place
                 visible: dialog.tool.tool === "replace"
                 spacing: 16
@@ -210,15 +220,18 @@ Item {
                     }
                 }
             }
-            Flow {  // the field to replace in (one), or the fields to tidy or copy (any)
-                visible: dialog.tool.tool !== "number"
+            Flow {  // the field to replace in (one), or the fields to tidy or copy (any), or a genre
+                id: choices
+                visible: dialog.tool.tool !== "number" && dialog.tool.tool !== "rename"
+                readonly property bool single: dialog.tool.tool === "replace" || dialog.options.single === true
                 width: parent.width
                 spacing: 8
                 Text {
                     height: 32
                     rightPadding: 4
                     verticalAlignment: Text.AlignVCenter
-                    text: dialog.tool.tool === "replace" ? qsTr("In") : qsTr("Fields")
+                    text: dialog.tool.tool === "merge" ? qsTr("Into")
+                        : dialog.tool.tool === "replace" ? qsTr("In") : qsTr("Fields")
                     color: Theme.muted
                     font { family: Theme.sans; pixelSize: 14 }
                 }
@@ -229,9 +242,9 @@ Item {
                         objectName: "toolField-" + modelData.name
                         label: modelData.label
                         chosen: modelData.chosen
-                        Accessible.role: dialog.tool.tool === "replace" ? Accessible.RadioButton : Accessible.CheckBox
+                        Accessible.role: choices.single ? Accessible.RadioButton : Accessible.CheckBox
                         Accessible.checked: modelData.chosen
-                        onClicked: dialog.tool.tool === "replace" ? dialog.tool.setOption("field", modelData.name) : dialog.tool.toggleField(modelData.name)
+                        onClicked: choices.single ? dialog.tool.setOption(dialog.options.choose || "field", modelData.name) : dialog.tool.toggleField(modelData.name)
                     }
                 }
             }
@@ -260,7 +273,7 @@ Item {
                 width: cancel.x - 16
                 anchors.verticalCenter: parent.verticalCenter
                 elide: Text.ElideRight
-                text: dialog.tool.preview.footer
+                text: dialog.tool.footer
                 color: Theme.muted
                 font { family: Theme.sans; pixelSize: 14 }
             }
@@ -280,11 +293,11 @@ Item {
                 x: parent.width - width
                 anchors.verticalCenter: parent.verticalCenter
                 minWidth: 160
-                label: dialog.tool.preview.saveLabel
+                label: dialog.tool.saveLabel
                 icon: "check"
                 primary: true
                 height: 40
-                later: dialog.tool.preview.canSave && dialog.tool.problem === "" ? "" : qsTr("Nothing to save")
+                later: dialog.tool.saveLater
                 onClicked: dialog.tool.save()
             }
         }

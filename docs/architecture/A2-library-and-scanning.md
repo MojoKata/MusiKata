@@ -162,14 +162,17 @@ Schema in `src/musikata_core/schemas/`, which the tests hold every example below
 ```
 
 The root's `settings.json` (`root-settings.v1.schema.json`), each group as R13 lists it; a group or
-setting left out takes its default:
+setting left out takes its default. Beside the Genre list (`genres`, R9.6; the built-in one until
+set) are the genres the user has said are the same (`same_genres`, R9.5), each group offered for a
+merge whatever its spellings, as names that differ only in case are; both are edited in Settings
+(R13.3):
 
 ```json
 {
   "format": 1,
   "tags": {"id3_version": "2.4", "write_ratings": true, "rating_scale": "windows-media",
            "history": true, "history_days": 90, "articles": ["The", "A", "An"],
-           "keep_modified_times": false},
+           "same_genres": [["Electronic", "Electronica"]], "keep_modified_times": false},
   "patterns": {"user": ["{albumartist}/{album}/{track} - {title}"],
                "organize": "{albumartist}/{year} - {album}/{disc-}{track:02} - {title}"},
   "album_art": {"file_name": "cover.jpg", "embed_max": 1200, "jpeg_quality": 90,

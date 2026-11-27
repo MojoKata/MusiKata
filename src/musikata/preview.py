@@ -113,6 +113,16 @@ def footer_text(files: int, changes: int, undoable: bool = True) -> str:
     return f"{plural(files, 'file')} · {plural(changes, 'change')} · {then}"
 
 
+def progress_text(done: int, total: int) -> str:
+    """A save's progress (R4.7): Saving 12 of 40 files…"""
+    return f"Saving {done:,} of {plural(total, 'file')}…"
+
+
+def failed_text(failed: int) -> str:
+    """The heading of the files a save couldn't write (R4.7)."""
+    return "1 file wasn't saved" if failed == 1 else f"{failed:,} files weren't saved"
+
+
 def save_text(files: int) -> str:
     """R3.8's button: Save 4 files; Save when nothing will."""
     return f"Save {plural(files, 'file')}" if files else "Save"

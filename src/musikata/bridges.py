@@ -1,7 +1,8 @@
 """The objects QML sees (A1.2). `Library`: the root, its card's line, the views and going between
 them (R2.6, R6.3), the header (R6.4: the view's title and count, the search, the view mode and the
-sort), Albums with its genre chips and Artists, an album's and an artist's pages, Folders (its open
-folder and list are folders.py's, R2.9), and the scans,
+sort), Albums with its genre chips and Artists, an album's and an artist's pages, Genres and a
+genre's page (genres.py's, R9.1), Folders (its open folder and list are folders.py's, R2.9), and
+the scans,
 run one at a time on a thread of their own with the worker processes reading the files (A1.3,
 A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4); the root's
 card, and a root that isn't there (R2.1.1, R2.10).
@@ -36,6 +37,8 @@ from musikata_core.tags import Written
 from .folders import MODES as folders_modes
 from .folders import SEARCH_HINT as FOLDERS_SEARCH_HINT
 from .folders import FolderView, Remembered
+from .genres import SORT_LABELS as GENRE_SORT_LABELS
+from .genres import GenrePage, GenresModel
 from .models import (
     ALBUM_SORT_LABELS,
     AlbumsModel,
@@ -46,6 +49,7 @@ from .models import (
     artist_line,
     artist_text,
     artist_thumbs,
+    average_in,
     count_text,
     cover_url,
     format_text,
@@ -54,6 +58,7 @@ from .models import (
     plural,
     size_text,
     song_headers,
+    song_order,
     tiles,
     time_text,
     title_of,
@@ -251,26 +256,6 @@ def page_count_text(parts: Sequence[tuple[int, int, str]], filtered: bool) -> st
     return " · ".join(count_text(shown, total, one, True) for shown, total, one in parts if total)
 
 
-def average_of(total: int | None, rated: int) -> dict[str, object]:
-    """The average of an album's or artist's rated songs (R10.1), for its page: its stars,
-    rounded half up, and in words ("4.3 average of 9 rated songs"); {} when none is rated."""
-    if not rated or not total:
-        return {}
-    mean = total / rated
-    return {
-        "stars": max(1, min(5, int(mean + 0.5))),
-        "text": f"{mean:.1f} average of {plural(rated, 'rated song')}",
-    }
-
-
-def average_in(c: sqlite3.Connection, where: str, params: tuple[object, ...]) -> dict[str, object]:
-    """`average_of` the songs `where` picks."""
-    total, rated = c.execute(
-        f"SELECT SUM(rating), COUNT(*) FROM song WHERE rating > 0 AND ({where})", params
-    ).fetchone()
-    return average_of(total, rated)
-
-
 def _field(name: str, default: object = "") -> Callable[[AlbumPage | ArtistPage], object]:
     """A page's property getter: its value of `name`, `default` before it shows anything."""
     return lambda page: page._values.get(name, default)
@@ -464,20 +449,22 @@ class ArtistPage(QObject):
     others = QtProperty(QObject, _get_others, constant=True)
 
 
-VIEWS = ("albums", "artists", "songs", "folders")  # the sidebar's views built so far (R6.3)
-TITLES = {"albums": "Albums", "artists": "Artists", "songs": "Songs", "folders": "Folders"}
-NOUNS = {"albums": "album", "artists": "artist", "songs": "song"}  # what each view counts
+VIEWS = ("albums", "artists", "songs", "genres", "folders")  # the sidebar's views built so far
+TITLES = {"albums": "Albums", "artists": "Artists", "songs": "Songs", "genres": "Genres",
+          "folders": "Folders"}  # fmt: skip
+NOUNS = {"albums": "album", "artists": "artist", "songs": "song", "genres": "genre"}  # counted
 SEARCH_HINT = "Search the library"
 # the search box's hint where it searches less than the library: a page (R2.7), Folders (R2.9.2)
 SEARCH_HINTS = {
     "album": "Search this album",
     "artist": "Search this artist",
+    "genre": "Search this genre",
     "folders": FOLDERS_SEARCH_HINT,
 }
 # what a search that finds nothing says it found none of (R2.7)
 EMPTY_NOUNS = {
     "albums": "albums", "artists": "artists", "songs": "songs", "folders": "folders or songs",
-    "album": "songs", "artist": "albums or songs",
+    "genres": "genres", "album": "songs", "artist": "albums or songs", "genre": "albums or songs",
 }  # fmt: skip
 # the view modes each view has (R6.4; Albums' grid and list, R2.6; Folders' four, R2.9.4): its
 # name, label and icon
@@ -568,28 +555,31 @@ class Library(QObject):
         self._songs.source = "Songs"
         self._albums = AlbumsModel(index.read, self, searcher=self._searcher)
         self._artists = ArtistsModel(index.read, self, self._searcher)
+        self._genres = GenresModel(index.read, self, self._searcher)
         self._folders = FolderView(index.read, remembered, self, self._searcher)
         self._folders.opened.connect(self._on_folder_opened)
         self._folders.modeChanged.connect(self.viewChanged)
-        self._lists: dict[str, PagedModel] = {
+        self._lists: dict[str, PagedModel | GenresModel] = {
             "albums": self._albums, "artists": self._artists, "songs": self._songs,
-            "folders": self._folders.property("model"),
+            "genres": self._genres, "folders": self._folders.property("model"),
         }  # fmt: skip
         for model in self._lists.values():
             model.countChanged.connect(self.changed)
         self._album = AlbumPage(index.read, self, self._searcher)
         self._artist = ArtistPage(index.read, self, self._searcher)
-        self._pages: dict[str, AlbumPage | ArtistPage] = {
+        self._genre_page = GenrePage(index.read, self, self._searcher)
+        self._pages: dict[str, AlbumPage | ArtistPage | GenrePage] = {
             "album": self._album,
             "artist": self._artist,
+            "genre": self._genre_page,
         }
         for page in self._pages.values():
             for model, _ in page.lists():
                 model.countChanged.connect(self.changed)
         self._view = "albums"
         self._search = ""  # what the header's search box holds (R2.7)
-        # the views a page was opened from, each with its search
-        self._history: list[tuple[str, int, str]] = []
+        # the views a page was opened from, each with its page's id (a genre's: its name) and search
+        self._history: list[tuple[str, int | str, str]] = []
         self._genre = ""
         self._albums_mode = "grid"
         self._chips: tuple[list[str], list[str]] = ([], [])
@@ -627,6 +617,7 @@ class Library(QObject):
         self._songs.refresh()
         self._albums.refresh()
         self._artists.refresh()
+        self._genres.refresh()
         self._folders.reload()
         c = self._index.read()
         self._counts = counts(c)
@@ -673,14 +664,15 @@ class Library(QObject):
         self.viewChanged.emit()
         self.changed.emit()
 
+    def _here(self) -> tuple[str, int | str, str]:
+        """The view open, its page's id (-1 for none) and its search: where back returns to."""
+        page = self._pages.get(self._view)
+        return self._view, page.property("id") if page is not None else -1, self._search
+
     @Slot(int)
     def openAlbum(self, album_id: int) -> None:  # noqa: N802
         """Opens an album's page (L02-album) from the view open now."""
-        current = (
-            self._view,
-            self._artist.property("id") if self._view == "artist" else -1,
-            self._search,
-        )
+        current = self._here()
         if self._album.load(album_id, ""):
             self._history.append(current)
             self._go("album", "")
@@ -688,24 +680,42 @@ class Library(QObject):
     @Slot(int)
     def openArtist(self, artist_id: int) -> None:  # noqa: N802
         """Opens an artist's page from the view open now."""
-        current = (
-            self._view,
-            self._album.property("id") if self._view == "album" else -1,
-            self._search,
-        )
+        current = self._here()
         if artist_id >= 0 and self._artist.load(artist_id, ""):
             self._history.append(current)
             self._go("artist", "")
+
+    @Slot(str)
+    def openGenre(self, name: str) -> None:  # noqa: N802
+        """Opens a genre's page (R9.1) from the view open now."""
+        current = self._here()
+        if current[:2] == ("genre", name):
+            return
+        if self._genre_page.load(name, ""):
+            self._history.append(current)
+            self._go("genre", "")
+
+    @Slot(str)
+    def selectGenre(self, name: str) -> None:  # noqa: N802
+        """Select its songs (R9.4): the genre's page, every song of it selected, for Edit tags,
+        Play next or a rating to act on."""
+        self.openGenre(name)
+        if self._view == "genre" and self._genre_page.property("id") == name:
+            if self._search:
+                self.setSearch("")
+            self._genre_page.select_all()
 
     @Slot()
     def back(self) -> None:
         """Back to the view or page this one was opened from (Albums when none), filtered by the
         search it had, as a list is (R2.7)."""
         view, page, text = self._history.pop() if self._history else ("albums", -1, "")
-        if view == "album" and not self._album.load(page, text):
+        if view == "album" and not self._album.load(int(page), text):
             view, text = "albums", ""
-        if view == "artist" and not self._artist.load(page, text):
+        if view == "artist" and not self._artist.load(int(page), text):
             view, text = "artists", ""
+        if view == "genre" and not self._genre_page.load(str(page), text):
+            view, text = "genres", ""
         self._go(view, text)
 
     def _go(self, view: str, search: str) -> None:
@@ -739,6 +749,8 @@ class Library(QObject):
         year (R2.6, R2.13); Artists by name, the one order they have."""
         if self._view == "albums":
             self._albums.sort_by(sort)
+        elif self._view == "genres":
+            self._genres.sort_by(sort)
         elif self._view not in ("artists", "folders") or sort != "name":
             raise ValueError(f"no such order in {self._view}: {sort}")
         self.viewChanged.emit()
@@ -757,7 +769,7 @@ class Library(QObject):
         """A tour's step (A1.6): {"view": "albums"}, a view with a search typed into it:
         {"view": "songs", "search": "electronic"}, or a page by its name, with a search too:
         {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}, {"view": "artist",
-        "artist": "Lumen Drift"}; or Folders at a
+        "artist": "Lumen Drift"}, {"view": "genre", "genre": "Electronic"}; or Folders at a
         folder, in a mode, with rows selected: {"view": "folders", "folder": "Lumen Drift",
         "mode": "large", "select": ["Lumen Drift/Remixes"]}; or Songs with songs selected, by
         their titles: {"view": "songs", "select": ["Neap Tide", "Moonpull"]}, or none ([])."""
@@ -778,6 +790,10 @@ class Library(QObject):
             r = c.execute("SELECT id FROM artist WHERE name = ?", (step["artist"],)).fetchone()
             self.show("artists")
             self.openArtist(r[0] if r else -1)
+            self.setSearch(step.get("search", ""))
+        elif view == "genre":
+            self.show("genres")
+            self.openGenre(step["genre"])
             self.setSearch(step.get("search", ""))
         else:
             self.show(view)
@@ -1127,6 +1143,7 @@ class Library(QObject):
     def show_ratings(self, ratings: Mapping[int, int]) -> None:
         """The ratings being saved, by song id, shown at once in every list of songs (R10.2)."""
         for model in (self._songs, self._album.property("songs"), self._artist.property("others"),
+                      self._genre_page.property("songs"),
                       self._folders.property("model")):  # fmt: skip
             model.show_ratings(ratings)
 
@@ -1142,6 +1159,7 @@ class Library(QObject):
         self._songs.refresh()
         self._album.property("songs").refresh()
         self._artist.property("others").refresh()
+        self._genre_page.property("songs").refresh()
 
     @Slot(str)
     def show_playing(self, path: str) -> None:
@@ -1160,8 +1178,10 @@ class Library(QObject):
         self._folders.property("model").set_playing(self._playing)
         self._album.property("songs").set_playing(self._playing)
         self._artist.property("others").set_playing(self._playing)
+        self._genre_page.property("songs").set_playing(self._playing)
         self._albums.set_playing(album)
         self._artist.property("albums").set_playing(album)
+        self._genre_page.property("albums").set_playing(album)
 
     def wait(self) -> None:
         """Until the scan's thread and the search thread have ended (their results still to be
@@ -1201,6 +1221,12 @@ class Library(QObject):
 
     def _get_artist(self) -> ArtistPage:
         return self._artist
+
+    def _get_genre_list(self) -> GenresModel:
+        return self._genres
+
+    def _get_genre_page(self) -> GenrePage:
+        return self._genre_page
 
     def _get_folders(self) -> FolderView:
         return self._folders
@@ -1315,6 +1341,8 @@ class Library(QObject):
     def _get_sorts(self) -> list[dict[str, str]]:
         if self._view == "albums":
             return [{"sort": k, "label": v} for k, v in ALBUM_SORT_LABELS.items()]
+        if self._view == "genres":
+            return [{"sort": k, "label": v} for k, v in GENRE_SORT_LABELS.items()]
         if self._view in ("artists", "folders"):
             return [{"sort": "name", "label": "Name"}]
         return []  # Songs sorts by its columns' headers
@@ -1322,6 +1350,8 @@ class Library(QObject):
     def _get_sort(self) -> str:
         if self._view == "albums":
             return self._albums.order()
+        if self._view == "genres":
+            return self._genres.order()
         return "name" if self._view in ("artists", "folders") else ""
 
     def _get_sort_text(self) -> str:
@@ -1347,6 +1377,8 @@ class Library(QObject):
             return str(self._album.property("title"))
         if view == "artist":
             return str(self._artist.property("name"))
+        if view == "genre":
+            return str(self._genre_page.property("name"))
         return TITLES[view]
 
     def _get_genres(self) -> list[str]:
@@ -1380,6 +1412,8 @@ class Library(QObject):
     artists = QtProperty(QObject, _get_artists, constant=True)
     album = QtProperty(QObject, _get_album, constant=True)  # the album page's
     artist = QtProperty(QObject, _get_artist, constant=True)  # the artist page's
+    genreList = QtProperty(QObject, _get_genre_list, constant=True)  # the Genres view's (R9.1)
+    genrePage = QtProperty(QObject, _get_genre_page, constant=True)  # a genre's page
     folders = QtProperty(QObject, _get_folders, constant=True)  # Folders' open folder (R2.9)
     scanning = QtProperty(bool, _get_scanning, notify=scanningChanged)
     line = QtProperty(str, _get_line, notify=changed)
@@ -1610,6 +1644,22 @@ class Player(QObject):
             self.queue.set_shuffle(True)
             self._remember(shuffle=True)
         self.play_songs(*self._album(album_id), start=None)
+
+    @Slot(str)
+    def playGenre(self, name: str) -> None:  # noqa: N802
+        """A genre's Play all (R9.4, R7.1): its songs in its page's order, by album artist, album,
+        disc and track, from the first."""
+        if self._read is None:
+            return
+        ids = [
+            r[0]
+            for r in self._read().execute(
+                "SELECT id FROM song WHERE id IN (SELECT song_id FROM song_genre WHERE genre = ?)"
+                f" ORDER BY {song_order('artist')}",
+                (name,),
+            )
+        ]
+        self.play_songs(ids, name)
 
     def _album(self, album_id: int) -> tuple[list[int], str]:
         if self._read is None:

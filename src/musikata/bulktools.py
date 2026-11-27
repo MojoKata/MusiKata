@@ -24,7 +24,7 @@ from musikata_core.tags.tools import Planned, ReplaceError
 
 from .history import LABELS
 from .models import plural, title_of
-from .preview import Preview, file_of, labels_text
+from .preview import Preview, file_of, footer_text, labels_text, save_text
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +114,7 @@ class BulkTool(QObject):
         self._copied: list[str] = list(tools.COPIED_FIRST)
         self._source = 0
         self._problem = ""
+        self._preview.changed.connect(self.changed)  # a file checked or not: the footer
 
     def open(
         self,
@@ -232,6 +233,13 @@ class BulkTool(QObject):
                     "fields": field_choices(tools.COPIED, self._copied)}  # fmt: skip
         return {}
 
+    def _get_footer(self) -> str:
+        return footer_text(*self._preview.counts(), undoable=self._undoable)
+
+    def _get_save_later(self) -> str:
+        """Why Save can't be pressed now ("" when it can)."""
+        return "" if self._preview.chosen() and not self._problem else "Nothing to save"
+
     opened = QtProperty(bool, lambda self: bool(self._tool), notify=changed)
     tool = QtProperty(str, lambda self: self._tool, notify=changed)
     title = QtProperty(str, lambda self: LABEL.get(self._tool, ""), notify=changed)
@@ -240,3 +248,6 @@ class BulkTool(QObject):
     options = QtProperty(dict, _get_options, notify=changed)
     problem = QtProperty(str, lambda self: self._problem, notify=changed)
     preview = QtProperty(QObject, lambda self: self._preview, constant=True)
+    footer = QtProperty(str, _get_footer, notify=changed)  # R3.8: what will be saved
+    saveLabel = QtProperty(str, lambda self: save_text(self._preview.counts()[0]), notify=changed)
+    saveLater = QtProperty(str, _get_save_later, notify=changed)

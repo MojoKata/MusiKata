@@ -309,6 +309,27 @@ def test_a_numbered_genre_is_written_by_its_name(audio, tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("numbered", ["13", "(13)", "(13)Pop", "(13);Jazz", "13; (8)"])
+def test_a_numbered_genre_shows_by_name_and_is_written_by_name_whatever_the_save(
+    audio, tmp_path, numbered
+):
+    """R9.3: ID3's numbered genres, bare or in brackets, with their name after them or beside
+    another genre, read as names; the next save writes the names, whichever field it changes,
+    in ID3v2.3 (joined, R9.2) and ID3v2.4 (one value each)."""
+    want = {"13": ("Pop",), "(13)": ("Pop",), "(13)Pop": ("Pop",), "(13);Jazz": ("Pop", "Jazz"),
+            "13; (8)": ("Pop", "Jazz")}[numbered]  # fmt: skip
+    for version in ("2.4", "2.3"):
+        path = _copy(audio, "mp3", tmp_path, f"{version}.mp3")
+        f = id3.ID3()
+        f.add(id3.TCON(encoding=3, text=numbered))
+        f.save(path, v2_version=3)
+        assert tags.read(path)[0].genres == want
+        save(path, version, title="Kindling")  # a save of another field
+        text = id3.ID3(path, translate=False)["TCON"].text
+        assert text == (["; ".join(want)] if version == "2.3" else list(want))
+
+
+@pytest.mark.slow
 def test_vorbis_keys_in_any_case_are_replaced_not_doubled_and_the_rest_kept_in_order(
     audio, tmp_path
 ):

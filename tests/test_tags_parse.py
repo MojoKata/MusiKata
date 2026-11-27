@@ -51,6 +51,15 @@ def test_genres_come_as_separate_values_or_joined_with_semicolons_and_slash_is_l
     assert parse.genres(["Rock", "rock", " ", ""]) == ("Rock",)
 
 
+def test_an_id3_tags_numbered_genres_are_names_wherever_they_stand_and_other_kinds_numbers_text():
+    """R9.3: ID3's "(13)" and "13" are Pop, beside other genres too ("13; (8)", which Mutagen's
+    own reading leaves as text); a Vorbis comment's "13" is the text it is."""
+    assert parse.genres(["13; (8)", "Pop", " 52 "], numbered=True) == ("Pop", "Jazz", "Electronic")
+    assert parse.genres(["(255)", "1999", "80s"], numbered=True) == ("(255)", "1999", "80s")
+    assert parse.from_id3({"TCON": ["13; (8)"]}).genres == ("Pop", "Jazz")
+    assert parse.from_vorbis({"GENRE": ["13"]}).genres == ("13",)
+
+
 @pytest.mark.parametrize(
     ("popms", "stars"),
     [

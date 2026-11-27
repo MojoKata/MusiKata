@@ -41,7 +41,6 @@ from musikata.edittags import (
     is_edit,
     labels_text,
     problem_line,
-    progress_text,
     save_label,
     sorted_fields,
     unsaved_text,
@@ -51,6 +50,7 @@ from musikata.edittags import (
 )
 from musikata.history import ChangeHistory, saved_text
 from musikata.models import SongsModel
+from musikata.preview import progress_text
 from musikata_core import db, scanner, settings, tags
 from musikata_core.tags import AudioInfo, Failed, Job, Outcome, Tags, Written, edit
 
@@ -242,6 +242,27 @@ def opened(e, qtbot, ids, what=""):
 
 def field(e, name):
     return e.property("fields")[name]
+
+
+def test_several_genres_show_as_chips_and_a_chips_x_takes_its_genre_out(root, panel, qtbot):
+    """R9.2: Genre holding several genres shows each as a chip; one genre, or a mixed field,
+    shows its text alone; a chip's × takes that genre out, as typing would."""
+    shared = view_field(edit.Field("genres", "Electronic; Ambient", False), None, False, None)
+    assert shared["chips"] == ["Electronic", "Ambient"]
+    assert view_field(edit.Field("genres", "Electronic", False), None, False, None)["chips"] == []
+    typed = view_field(edit.Field("genres", "", True), "Jazz;Soul; jazz", True, None)
+    assert typed["chips"] == ["Jazz", "Soul"]
+    assert view_field(edit.Field("title", "A; B", False), None, False, None)["chips"] == []
+    music, index, ids, paths = root
+    opened(panel, qtbot, ids[:1])
+    panel.setText("genres", "Electronica; Ambient; Jazz")
+    assert field(panel, "genres")["chips"] == ["Electronica", "Ambient", "Jazz"]
+    panel.removeGenre("Ambient")
+    assert (
+        field(panel, "genres")["text"] == "Electronica; Jazz" and field(panel, "genres")["changed"]
+    )
+    panel.removeGenre("Jazz")
+    assert field(panel, "genres")["chips"] == [] and not field(panel, "genres")["changed"]
 
 
 def test_four_songs_show_what_they_share_and_whats_mixed(root, panel, qtbot):
@@ -642,6 +663,28 @@ def test_the_library_suggests_its_values_as_the_user_types(root, panel, qtbot):
     with qtbot.waitSignal(panel.suggestionsChanged, timeout=WAIT):
         panel.suggest("artist", "lu")
     assert panel.property("suggestions") == ["Lumen Drift", "lumen drift"]
+
+
+def test_genre_suggests_the_built_in_list_after_the_library_else_the_roots_own(root, qtbot):
+    """R9.6: the library's genres, then the built-in list's the library hasn't; the root's
+    Genre list (R13.3) in its place once set."""
+    music, index, ids, paths = root
+    for tags_settings, typed, want in (
+        (settings.RootTags(), "e", ["Electronic", "electronic", "Electronica"]),
+        (settings.RootTags(), "reg", ["Reggae"]),
+        (settings.RootTags(genres=("Regional", "Electro Swing")), "reg", ["Regional"]),
+        (settings.RootTags(genres=("Regional", "Electro Swing")), "elec", [
+            "Electronic", "electronic", "Electronica", "Electro Swing"]),
+    ):  # fmt: skip
+        e = make(root, qtbot, tags_settings)
+        try:
+            opened(e, qtbot, ids)
+            with qtbot.waitSignal(e.suggestionsChanged, timeout=WAIT):
+                e.suggest("genres", typed)
+            assert e.property("suggestions")[: len(want)] == want, typed
+        finally:
+            e.close()
+            e.history_.close()
 
 
 # ---------- the window ----------

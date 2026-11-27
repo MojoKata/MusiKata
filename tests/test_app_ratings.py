@@ -23,9 +23,8 @@ from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from musikata import app, layout, tour
-from musikata.bridges import average_of
 from musikata.history import ChangeHistory
-from musikata.models import SongsModel
+from musikata.models import SongsModel, average_of
 from musikata.ratings import (
     NONE_SELECTED,
     NOT_THERE,

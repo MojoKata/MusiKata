@@ -252,11 +252,19 @@ def rank(values: Iterable[tuple[str, int]], typed: str, limit: int = SUGGESTIONS
 
 
 def suggestions(
-    c: sqlite3.Connection, field: str, typed: str, limit: int = SUGGESTIONS
+    c: sqlite3.Connection,
+    field: str,
+    typed: str,
+    limit: int = SUGGESTIONS,
+    extra: Iterable[str] = (),
 ) -> list[str]:
     """The values of the library's songs that the Edit tags panel suggests for `field` (artist,
-    albumartist, album, genres; R4.6) as `typed` is typed (`rank`); none for another field."""
+    albumartist, album, genres; R4.6) as `typed` is typed (`rank`), and of `extra` (a built-in
+    list, R9.6) those the library has in no case, after the library's; none for another field."""
     query = SUGGESTED.get(field)
     if query is None or not typed.strip():
         return []
-    return rank(c.execute(query), typed, limit)
+    values = [(str(v), int(n)) for v, n in c.execute(query)]
+    known = {fold(v) for v, _ in values}
+    values += [(v, 0) for v in dict.fromkeys(extra) if fold(v) not in known]
+    return rank(values, typed, limit)

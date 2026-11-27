@@ -194,6 +194,9 @@ HISTORY = [
      "Afterlight (Deluxe)"),
 ]  # fmt: skip
 UNDONE = {"Album on 6 songs": ("Laptop", "2026-11-25T21:31:20")}
+# the root's own settings.json (R13.9, A2.10): the genres the user has said are the same (R9.5), so
+# G01-genres' banner offers Tide Tables' Electronica beside its "electronic"
+ROOT_SETTINGS = {"format": 1, "tags": {"same_genres": [["Electronic", "Electronica"]]}}
 
 
 @dataclass
@@ -674,7 +677,17 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
     history(music, lib)
+    root_settings(music)
     return lib
+
+
+def root_settings(music: str, settings: dict = ROOT_SETTINGS) -> str:
+    """Music's .musikata/settings.json (`ROOT_SETTINGS`); its path."""
+    path = os.path.join(music, ".musikata", "settings.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(settings, indent=2) + "\n")
+    return path
 
 
 def main(argv: list[str]) -> int:

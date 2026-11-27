@@ -8,7 +8,8 @@ import "."
 // field changed from what the files hold is outlined in the accent with a dot at its end (R4.4); one
 // whose text can't be written, in red, saying why in its tooltip. Artist, Album artist, Album and
 // Genre suggest the library's values as they are typed (R4.6): ↓ goes into the list, Enter or a click
-// takes one, Esc closes it. Everything it shows is the bridge's (musikata.edittags).
+// takes one, Esc closes it. Genre holding several genres shows them as chips (R9.2), each with its ×,
+// until the field is clicked into to type. Everything it shows is the bridge's (musikata.edittags).
 Item {
     id: f
     required property var edit
@@ -40,7 +41,7 @@ Item {
         text: f.field.text || ""
         placeholderText: f.placeholder
         placeholderTextColor: Theme.faint
-        color: Theme.text
+        color: chips.visible ? "transparent" : Theme.text
         selectionColor: Theme.accentSoft
         selectedTextColor: Theme.text
         selectByMouse: true
@@ -77,6 +78,69 @@ Item {
                 event.accepted = false
         }
 
+        Item {  // several genres, as chips (R9.2); a click beside them types into the field
+            id: chips
+            objectName: "chips-" + f.name
+            x: 6
+            width: input.width - 12 - (dot.visible ? 14 : 0) - (values.visible ? 22 : 0)
+            height: parent.height
+            clip: true
+            visible: (f.field.chips || []).length > 1 && !input.activeFocus
+            readonly property int hidden: {  // the chips that don't fit, counted as +N
+                let n = 0
+                for (let i = 0; i < chipRepeater.count; i++)
+                    if (chipRepeater.itemAt(i) && chipRepeater.itemAt(i).opacity === 0) n++
+                return n
+            }
+            Text {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                visible: chips.hidden > 0
+                text: "+" + chips.hidden
+                color: Theme.muted
+                font { family: Theme.sans; pixelSize: 12 }
+            }
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+                Repeater {
+                    id: chipRepeater
+                    model: chips.visible ? f.field.chips : []
+                    Rectangle {
+                        id: chip
+                        required property string modelData
+                        required property int index
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 24
+                        width: chipText.implicitWidth + 30
+                        radius: 12
+                        color: Theme.accentSoft
+                        // only those that fit, with room for +N after them unless it is the last
+                        opacity: chip.x + chip.width <= chips.width - (chip.index < chipRepeater.count - 1 ? 30 : 0) ? 1 : 0
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: chip.modelData
+                        Text {
+                            id: chipText
+                            x: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: chip.modelData
+                            color: Theme.text
+                            font { family: Theme.sans; pixelSize: 12 }
+                        }
+                        Item {
+                            x: parent.width - 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 16
+                            height: 16
+                            Accessible.role: Accessible.Button
+                            Accessible.name: qsTr("Remove %1").arg(chip.modelData)
+                            Icon { anchors.centerIn: parent; name: "close"; size: 10; color: Theme.muted }
+                            TapHandler { onTapped: f.edit.removeGenre(chip.modelData) }
+                        }
+                    }
+                }
+            }
+        }
         Rectangle {  // changed (R4.4)
             id: dot
             visible: f.changed || f.wrong

@@ -6,7 +6,7 @@
 # (docs/process/ci.md, "The Pages site"). Extra args go to the tour (--tour-only L03-songs).
 #
 # The demo library (scripts/demo_library.py) is made in build/demo when it isn't there, or has no
-# change history yet (R4.9). It is the
+# change history (R4.9) or root's settings (R9.5's same genres) yet. It is the
 # home's Music folder in the container, so the screens show ~/Music, as on a new user's computer.
 # The tour runs three times, once in each state it has screens for (src/musikata/tour.py): the
 # library; the same root unmounted (X02, R2.10); a first start with nothing configured (X01, R2.1).
@@ -20,7 +20,8 @@ CPY="/src${PYT#"$HERE"}"
 DEMO="$HERE/build/demo"
 OUT="$HERE/build/tour"
 mkdir -p "$DEMO"
-if [ ! -d "$DEMO/Music/.musikata/history" ]; then   # made before it had its history: anew
+if [ ! -d "$DEMO/Music/.musikata/history" ] || [ ! -f "$DEMO/Music/.musikata/settings.json" ]; then
+    # made before it had its history or its settings: anew
     echo "== the demo library, in $DEMO" >&2
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e PYTHONDONTWRITEBYTECODE=1 \
         -v "$HERE:/src:ro" -v "$SITE:/site:ro" -v "$DEMO:/demo" "$IMG" sh -c \
