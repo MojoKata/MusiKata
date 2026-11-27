@@ -241,8 +241,27 @@ def _v10(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
+def _v11(c: sqlite3.Connection) -> None:
+    """Tags match path (R3.9, A2.6, A2.7): on each song, whether its tags agree with its path under
+    the pattern detected for its folder (`path_state`: 0 they match, 1 they can be fixed, 2 it has
+    no tags; NULL: no pattern fits it) and how they differ (`path_diff`, JSON: [field, how, the
+    path's value] each; NULL: they don't), indexed by folder for Needs attention's group; on each
+    folder, the worst state beneath it and how many files beneath it can be fixed or have no tags
+    (`path_state`, `path_fix`, R2.9.5); and the user's own patterns (R3.3, R13.4), tried before the
+    presets, as the root's settings name them (`user_pattern`). The states are worked out from the
+    tags and the paths (folders.match_folder), so every song is read again by the next scan, as for
+    version 2."""
+    c.execute("ALTER TABLE song ADD COLUMN path_state INTEGER")
+    c.execute("ALTER TABLE song ADD COLUMN path_diff TEXT")
+    c.execute("CREATE INDEX song_path_diff ON song (folder) WHERE path_diff IS NOT NULL")
+    c.execute("ALTER TABLE folder ADD COLUMN path_state INTEGER")
+    c.execute("ALTER TABLE folder ADD COLUMN path_fix INTEGER NOT NULL DEFAULT 0")
+    c.execute("CREATE TABLE user_pattern (position INTEGER PRIMARY KEY, text TEXT NOT NULL)")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11,
 ]  # fmt: skip
 
 

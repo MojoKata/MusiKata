@@ -344,3 +344,96 @@ def test_a_selection_is_one_album_only_when_every_song_it_stands_for_is_on_it(in
     assert folders.album_of(c, ["LD/GH"], ["LD/loose.mp3"]) is None  # a song on none
     assert folders.album_of(c, [], ["LD/loose.mp3"]) is None
     assert folders.album_of(c, ["Nope"], []) is None and folders.album_of(c, [], []) is None
+
+
+# ---------- tags match path (R3.9, R2.9.5) ----------
+
+LD = "Lumen Drift"
+TIDE = [
+    {"path": f"Lumen Drift/Tide Tables/0{n} - {t}.flac", "title": t, "track": n,
+     "albumartist": a, "album": "Tide Tables"}
+    for n, t, a in ((1, "Neap Tide", LD), (2, "Spring Tide", LD), (3, "Slack Water", "lumen drift"))
+] + [
+    {"path": "Lumen Drift/Glass Harbor/01 - Tidewater.flac", "title": "Tidewater", "track": 1,
+     "albumartist": LD, "album": "Glass Harbor"},
+    {"path": "_Incoming/new rips/track01.mp3"},
+    {"path": "_Incoming/new rips/Signal Fires.flac", "title": "Signal Fires"},
+]  # fmt: skip
+
+
+def states(index):
+    return {p: (s, d) for p, s, d in index.read().execute(
+        "SELECT path, path_state, path_diff FROM song")}  # fmt: skip
+
+
+def test_a_write_keeps_each_songs_path_match_and_each_folders_worst_beneath(index):
+    """R3.9, A2.6: each song's state under its folder's pattern, and how it differs; A2.7, R2.9.5:
+    each folder the worst state beneath it and how many files beneath it can be fixed or have no
+    tags, up through its ancestors."""
+    fill(index, TIDE)
+    got = states(index)
+    assert got["Lumen Drift/Tide Tables/01 - Neap Tide.flac"] == (0, None)
+    assert got["Lumen Drift/Tide Tables/03 - Slack Water.flac"] == (
+        1, '[["albumartist", "case", "Lumen Drift"]]')  # fmt: skip
+    assert got["_Incoming/new rips/track01.mp3"] == (2, None)  # no tags, no pattern fits
+    assert got["_Incoming/new rips/Signal Fires.flac"] == (None, None)
+    by = {p: (s, n) for p, s, n in index.read().execute(
+        "SELECT path, path_state, path_fix FROM folder")}  # fmt: skip
+    assert by["Lumen Drift/Tide Tables"] == (1, 1) and by["Lumen Drift/Glass Harbor"] == (0, 0)
+    assert by["Lumen Drift"] == (1, 1) and by["_Incoming/new rips"] == (2, 1)
+    assert by["_Incoming"] == (2, 1) and by[""] == (2, 2)
+
+
+def test_one_song_written_again_brings_its_folders_states_up_to_date(index):
+    """A song fixed is a match, and the folder above it with it; a folder's pattern is its whole
+    folder's, so its other songs are worked out again."""
+    fill(index, TIDE)
+    fill(index, [dict(TIDE[2], albumartist=LD)])
+    assert states(index)["Lumen Drift/Tide Tables/03 - Slack Water.flac"] == (0, None)
+    assert row(index, "Lumen Drift", "path_state, path_fix") == (0, 0)
+    gone = [p for p in states(index) if p.startswith("_Incoming")]
+    index.write(lambda c: scanner._remove(c, gone, {}, None)).result()
+    assert row(index, "", "path_state, path_fix") == (0, 0)
+
+
+def test_the_users_own_patterns_are_kept_and_every_folder_worked_out_again_when_they_change(index):
+    """R3.3, R13.4: the root's settings' patterns, kept in the index; a change works out every
+    folder again, the same ones none."""
+    fill(index, [{"path": "Lumen Drift/Tide Tables/04 - Moonpull.flac", "title": "Moonpull",
+                  "artist": "lumen drift", "album": "Tide Tables", "track": 4}])  # fmt: skip
+    moon = "Lumen Drift/Tide Tables/04 - Moonpull.flac"
+    assert states(index)[moon][0] == 1  # no album artist, which the preset reads
+    user = ["{artist}/{album}/{track} - {title}"]
+    assert index.write(lambda c: folders.set_user_patterns(c, user)).result()
+    assert folders.user_patterns(index.read()) == user
+    assert states(index)[moon] == (1, '[["artist", "case", "Lumen Drift"]]')
+    assert not index.write(lambda c: folders.set_user_patterns(c, user)).result()
+    assert index.write(lambda c: folders.set_user_patterns(c, [])).result()
+    assert folders.user_patterns(index.read()) == []
+
+
+def test_how_a_song_differs_is_kept_as_json_and_read_back_whatever_the_column_holds():
+    from musikata_core.patterns import Difference
+
+    diffs = (Difference("year", "missing", "2022"), Difference("artist", "case", "Ünïcode"))
+    text = folders.diff_text(diffs)
+    assert folders.diffs_of(text) == diffs and "Ünïcode" in text
+    assert folders.diff_text(()) is None
+    for broken in (None, "", "not json", "{}", '[["a", "b"], 3]', "[[1, 2, 3]]"):
+        got = folders.diffs_of(broken)
+        assert got == () or got == (Difference("1", "2", "3"),)
+    assert folders.worst([None, 0, 1, None]) == 1 and folders.worst([None]) is None
+
+
+def test_the_songs_infer_from_path_plans_from_are_read_in_the_order_asked_with_their_folders(
+    index,
+):
+    fill(index, TIDE)
+    c = index.read()
+    ids = dict(c.execute("SELECT path, id FROM song"))
+    asked = [ids[TIDE[2]["path"]], 99_999, ids[TIDE[0]["path"]]]
+    got = folders.tags_of(c, asked)
+    assert [(i, p) for i, p, _ in got] == [(asked[0], TIDE[2]["path"]), (asked[2], TIDE[0]["path"])]
+    assert got[0][2].albumartist == "lumen drift" and got[0][2].track == 3
+    assert folders.counts_of(c, ["Lumen Drift/Tide Tables", "nowhere"]) == {
+        "Lumen Drift/Tide Tables": 3, "nowhere": 0}  # fmt: skip

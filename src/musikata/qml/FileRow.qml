@@ -5,8 +5,8 @@ import "."
 // title, album, rating, time), or in a folder of songs (L08-folder-songs: file, track and title,
 // artist, genre, year, a value that differs from the rest of the folder marked), as `columns` and
 // `songs` say. Selected, it is highlighted; the song playing has its title in the accent. A click
-// selects it (Ctrl/⌘ and Shift as everywhere), a double click plays it. Its path-match chip
-// (R3.9) comes with slice 7.
+// selects it (Ctrl/⌘ and Shift as everywhere), a double click plays it. Its path-match chip (R3.9:
+// Match, Year missing, No tags…) ends the row, in the column `columns` has last.
 Rectangle {
     id: row
     signal tapped(int modifiers)
@@ -24,6 +24,7 @@ Rectangle {
     required property int rating
     required property string time
     required property var odd           // the fields whose values differ from the folder's
+    property var pathChip: ({})        // its path-match chip (R3.9): text and tone, {} for none
     required property bool playing
     required property bool selected
     height: songs ? 40 : 36
@@ -92,4 +93,12 @@ Rectangle {
         rating: row.rating
     }
     Cell { column: 4; visible: !row.songs; text: row.time; color: Theme.muted; horizontalAlignment: Text.AlignRight }
+    Chip {
+        objectName: "pathChip"
+        x: row.columns[row.columns.length - 1][0]
+        anchors.verticalCenter: parent.verticalCenter
+        visible: row.pathChip.text !== undefined
+        label: row.pathChip.text || ""
+        tone: row.pathChip.tone || "info"
+    }
 }

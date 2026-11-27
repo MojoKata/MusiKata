@@ -44,12 +44,19 @@ class Planned:
     """What a tool would do: `columns`, the fields it fills, in the order its preview shows them;
     `songs` (their tags as they are) and `new` (as they would be), in the order given; and, for
     each song, the fields written again even where their value stays (`rewritten`: R4.10's text
-    held as Latin-1, written as Unicode; none for a tool that changes values only)."""
+    held as Latin-1, written as Unicode; none for a tool that changes values only); and what the
+    preview notes under a song's file ("" for nothing: Infer from path's "Doesn't fit the
+    pattern", R3.4)."""
 
     columns: tuple[str, ...]
     songs: tuple[Song, ...]
     new: tuple[Tags, ...]
     rewritten: tuple[tuple[str, ...], ...] = ()
+    notes: tuple[str, ...] = ()
+
+    def note(self, i: int) -> str:
+        """What the preview notes under song `i`'s file ("" for nothing)."""
+        return self.notes[i] if i < len(self.notes) else ""
 
     def changed(self, i: int) -> tuple[str, ...]:
         """The columns whose value song `i` would change, or that it writes again."""

@@ -17,7 +17,8 @@ modification times kept as its settings say (settings.root_tags, R4.7.1, R4.7.2)
 What the panel says is decided here as plain data and text, tested without a window; which
 songs change, and how, is tags.edit's. The bulk tools of R4.5 are its ⋯ menu (`tools`): a tool
 opens its dialog (bulktools.BulkTool, `tool`) over the songs edited, in the list's order, and its
-save is saved here as the panel's own are, named for the tool in the change history. When the songs
+save is saved here as the panel's own are, named for the tool in the change history; Infer from
+path (R4.5.5) opens R3's own dialog over them (musikata.infer), which saves itself. When the songs
 edited hold text in the wrong encoding (R4.10), the menu has Fix encoding… too, which opens
 musikata.encodings' dialog over them."""
 
@@ -52,10 +53,11 @@ from musikata_core.tags import kept as kept_tags
 from musikata_core.tags import save as save_tags
 
 from .bridges import shown_path
-from .bulktools import ENCODING_TOOL, BulkTool, menu_of
+from .bulktools import ENCODING_TOOL, INFER_TOOL, BulkTool, menu_of
 from .encodings import FixEncoding
 from .folders import FolderModel
 from .history import LABELS, ChangeHistory
+from .infer import InferFromPath
 from .models import KINDS, Searcher, SongsModel, cover_url, plural, size_text, time_text, title_of
 from .preview import failed_text, progress_text
 
@@ -379,10 +381,12 @@ class EditTags(QObject):
         home: str = "",
         available: Callable[[], bool] = lambda: True,
         encodings: FixEncoding | None = None,
+        infer: InferFromPath | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._encodings = encodings  # Fix encoding…'s dialog (R4.10)
+        self._infer = infer  # Infer from path's (R4.5.5, R3)
         self._root, self._read, self._settings, self._home = root, read, tags_settings, home
         # the genres suggested beside the library's (R9.6): the root's list, else the built-in
         self._genre_list = (
@@ -514,6 +518,10 @@ class EditTags(QObject):
         if name == ENCODING_TOOL:
             if self._encodings is not None:
                 self._encodings.open_songs([s.id for s in self._songs])
+            return
+        if name == INFER_TOOL:
+            if self._infer is not None:
+                self._infer.open_songs([s.id for s in self._songs])
             return
         songs = [tools.Song(scanner.full_path(self._root, s.path), s.tags) for s in self._songs]
         undoable = self._history is not None and self._settings.history
@@ -897,7 +905,7 @@ class EditTags(QObject):
         self._searcher.wait()
         self._follow(None)
         self._saved = self._history = self._write = None
-        self._encodings = None
+        self._encodings = self._infer = None
         self._available = _gone
 
     # ---------- what QML reads ----------

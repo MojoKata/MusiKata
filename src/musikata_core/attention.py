@@ -24,10 +24,14 @@ What each group holds:
 - **Tags in the wrong text encoding** (`ENCODING`, R4.10): a song whose text its ID3 tag holds as
   Latin-1 another encoding reads far better (`song.encoding`, kept as it is read, A3.6), an entry
   each, its title and artist as that encoding reads them.
+- **Tags that differ from the path** (`PATH`, R3.9): a folder whose songs' tags differ from their
+  paths, or are missing where the paths give them, under the pattern detected for it
+  (`song.path_diff`, kept by the scan, folders.match_folder), an entry each, about the folder, with
+  how many of its files differ and the fields they differ in.
 - **Files that couldn't be read** (`UNREADABLE`): `song.error`.
 
-The groups owned by later pieces (tags that differ from the path, R3; playlist entries whose file
-is missing, R8.7; files whose tags say nothing, R16.6) join `KINDS` with their own finders.
+The groups owned by later pieces (playlist entries whose file is missing, R8.7; files whose tags
+say nothing, R16.6) join `KINDS` with their own finders.
 
 **Ignore** (R2.8): an entry the user dismisses is kept in the root's `ignored.json`
 (rootfiles.Dismissal, A2.8) by its kind and what it is about (a song by its path and audio hash, an
@@ -48,7 +52,7 @@ import unicodedata
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from . import art, duplicates, encodings, genres
+from . import art, duplicates, encodings, folders, genres, patterns
 from .rootfiles import Dismissal
 from .tags import Picture, Tags
 from .tags.tools import Planned, Song
@@ -65,13 +69,15 @@ ONE_FILE = "album-in-one-file"
 UNREADABLE = "unreadable"
 COPIES = "same-song"  # R2.12
 ENCODING = "wrong-encoding"  # R4.10
+PATH = "path-differs"  # R3.9
 # every kind this piece finds, in the order the view lists them
-KINDS = (COPIES, COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ENCODING,
+KINDS = (PATH, COPIES, COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ENCODING,
          ALBUM_DIFFERS, ONE_FILE, UNREADABLE)  # fmt: skip
 NAMES = (NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE)
 # kinds about a song (a group of copies: its first by path): dismissed by its path and audio hash
 BY_SONG = (ONE_FILE, UNREADABLE, COPIES, ENCODING)
-BY_ALBUM = (ALBUM_DIFFERS, COVER_NONE, COVER_SMALL)  # kinds about an album: by its folder
+# kinds about an album or a folder: by the folder ("." for the root's own)
+BY_ALBUM = (ALBUM_DIFFERS, COVER_NONE, COVER_SMALL, PATH)
 FIELDS = ("album", "albumartist", "year", "genre", "cover")  # what an album's songs differ in
 MIN_SIDE = 500  # R5.6: a cover smaller than this a side needs attention
 ONE_FILE_LENGTH = 20 * 60.0  # A2.6: an album in one file is 20 minutes or more
@@ -570,6 +576,46 @@ def album_songs(c: sqlite3.Connection, song: int) -> list[int]:
     ]
 
 
+ROOT_FOLDER = "."  # the root's own folder as an entry is about it (ignored.json's `about` has text)
+
+
+def folder_about(folder: str) -> str:
+    """What an entry about a folder is about: its path under the root, "." for the root's own."""
+    return folder or ROOT_FOLDER
+
+
+def folder_of(about: str) -> str:
+    """The folder an entry about a folder is about (`folder_about` the other way)."""
+    return "" if about == ROOT_FOLDER else about
+
+
+def _paths(c: sqlite3.Connection) -> list[Entry]:
+    """Folders whose songs' tags differ from their paths (R3.9, R2.8), by path: each with how many
+    of its files differ (`counts`: those, and its files), the fields they differ in, in the
+    preview's order, and the first of them (`song`)."""
+    differing: dict[str, list[tuple[int, str, object]]] = {}
+    for i, folder, diff in c.execute(
+        "SELECT id, folder, path_diff FROM song WHERE path_diff IS NOT NULL ORDER BY folder, path"
+    ):
+        differing.setdefault(str(folder or ""), []).append((int(i), str(folder or ""), diff))
+    out = []
+    for folder, songs in differing.items():
+        held, newest, album, artist = c.execute(
+            "SELECT COUNT(*), MAX(mtime_ns), MIN(album_id), coalesce(MIN(albumartist),"
+            " MIN(artist)) FROM song WHERE folder = ?",
+            (folder,),
+        ).fetchone()
+        named = {d.field for _, _, diff in songs for d in folders.diffs_of(diff)}
+        thumb = c.execute("SELECT thumb, mosaic FROM folder WHERE path = ?", (folder,)).fetchone()
+        out.append(Entry(
+            PATH, folder_about(folder), folder.rpartition("/")[2] or folder, artist or "", album,
+            songs[0][0], (thumb[0] or (thumb[1] or "").split(" ")[0] or None) if thumb else None,
+            fields=tuple(f for f in patterns.COLUMNS if f in named),
+            counts=(len(songs), int(held)), modified=_seconds(newest),
+        ))  # fmt: skip
+    return out
+
+
 def _unreadable(c: sqlite3.Connection) -> list[Entry]:
     return [
         Entry(UNREADABLE, path, path, song=i, error=error, hash=h, modified=_seconds(m))
@@ -588,6 +634,7 @@ def found(
     the same (R9.5); `min_side`: a cover smaller than this a side needs attention (R5.6)."""
     covers = _covers(c, min_side)
     by_kind: dict[str, list[Entry]] = {
+        PATH: _paths(c),
         COPIES: _copies(c),
         COVER_NONE: [e for e in covers if e.kind == COVER_NONE],
         COVER_SMALL: [e for e in covers if e.kind == COVER_SMALL],

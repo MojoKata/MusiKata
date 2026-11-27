@@ -3,8 +3,9 @@ import QtQuick.Controls.Basic
 import "."
 
 // The preview of a change to many files' tags before it is saved (R3.7; T01-infer-from-path), as
-// the Edit tags panel's bulk tools show it (R4.5) and Infer from path will: a row per file with the
-// columns the change fills. A value that will change shows the old value struck through in red
+// the Edit tags panel's bulk tools show it (R4.5) and Infer from path does (R3): a row per file with
+// the columns the change fills, and what the change notes under its name ("Doesn't fit the pattern",
+// R3.4). A value that will change shows the old value struck through in red
 // above the new one in green, "(empty)" in grey for none; each changed file has a checkbox, on at
 // first, and unchecking it leaves the file alone; a file with no change is dimmed, unchecked. The
 // unchanged files after the last change end in "+ 3 more files, unchanged". What it shows is the
@@ -70,6 +71,7 @@ Rectangle {
             required property bool changed
             required property bool checked
             required property var cells
+            required property string note
             width: list.width
             height: 50
             Accessible.role: Accessible.Row
@@ -88,15 +90,27 @@ Rectangle {
                 x: 56
                 height: parent.height
                 opacity: row.changed ? 1 : 0.55
-                Text {
+                Column {
                     width: table.fileWidth
-                    height: parent.height
-                    rightPadding: 12
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideMiddle
-                    text: row.file
-                    color: Theme.text
-                    font { family: Theme.sans; pixelSize: 14 }
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        width: parent.width
+                        rightPadding: 12
+                        elide: Text.ElideMiddle
+                        text: row.file
+                        color: Theme.text
+                        font { family: Theme.sans; pixelSize: 14 }
+                    }
+                    Text {
+                        objectName: "previewNote"
+                        width: parent.width
+                        rightPadding: 12
+                        visible: row.note !== ""
+                        elide: Text.ElideRight
+                        text: row.note
+                        color: Theme.warn
+                        font { family: Theme.sans; pixelSize: 12 }
+                    }
                 }
                 Repeater {
                     model: row.cells

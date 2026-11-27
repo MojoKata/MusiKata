@@ -32,6 +32,7 @@ from .edittags import EditTags
 from .encodings import FixEncoding
 from .genres import Genres
 from .history import ChangeHistory
+from .infer import InferFromPath
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
 # MusiKata maximized on a 1920 x 1080 screen (R6.2.1), less what a panel or taskbar takes
@@ -44,20 +45,20 @@ SIZES = (SHOT, DESIGN)
 # of the latest release has); one with no mockup takes the next number of its area (Artists, R2.6,
 # is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08). L03 and L07 show the Edit tags
 # panel (R4.2) as their mockups do, open on the songs selected with fields typed into it ("edit");
-# an album's page and an artist's show a search typed into the header over them, as their mockups
-# do (L02, L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the state dots and
-# chips of R3.9, the tint by a cover's colour). The first queues Glass Harbor, paused at its first
-# song, so every screen after it shows the now-playing bar (R6.5) and the playing album and song
-# marked, with no sound to wait on (Player.go). X03 has no mockup: the Change history panel (R4.9)
-# over Songs, listing the demo library's saves (demo_library.HISTORY). T07 has no mockup either: a
-# bulk tool's preview (R4.5, R3.7), Number tracks over L03's four songs. T02 is the Album art dialog
-# (R5.2) over Glass Harbor's page, as its mockup draws it. G01 is Genres (R9.1) with the banner of
-# the demo library's near duplicates (R9.5) and Electronic's ⋯ menu open, as its mockup draws it.
-# L09 is Needs attention (R2.8) with Same song twice chosen (R2.12), its groups of copies open and
-# the other groups folded after it, as its mockup draws it. L13 has no mockup: the Review… dialog
-# of Signal Fires' copies (R2.12) over it, drawn after T01's preview. T06 is Fix encoding… (R4.10)
-# over it, on the demo library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup
-# draws it.
+# an album's page and an artist's show a search typed into the header over them, as their mockups do
+# (L02, L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the tint by a cover's
+# colour). T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it. The
+# first queues Glass Harbor, paused at its first song, so every screen after it shows the
+# now-playing bar (R6.5) and the playing album and song marked, with no sound to wait on
+# (Player.go). X03 has no mockup: the Change history panel (R4.9) over Songs, listing the demo
+# library's saves (demo_library.HISTORY). T07 has no mockup either: a bulk tool's preview (R4.5,
+# R3.7), Number tracks over L03's four songs. T02 is the Album art dialog (R5.2) over Glass Harbor's
+# page, as its mockup draws it. G01 is Genres (R9.1) with the banner of the demo library's near
+# duplicates (R9.5) and Electronic's ⋯ menu open, as its mockup draws it. L09 is Needs attention
+# (R2.8) with Same song twice chosen (R2.12), its groups of copies open and the other groups folded
+# after it, as its mockup draws it. L13 has no mockup: the Review… dialog of Signal Fires' copies
+# (R2.12) over it, drawn after T01's preview. T06 is Fix encoding… (R4.10) over it, on the demo
+# library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup draws it.
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -104,6 +105,10 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         },
     ),
     ("L08-folder-songs", {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small"}),
+    (
+        "T01-infer-from-path",
+        {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small", "infer": True},
+    ),
     ("L12-search", {"view": "albums", "search": "lumen dri"}),
     (
         "N08-up-next",
@@ -174,6 +179,7 @@ class Tour(QObject):
         attention: Attention | None = None,
         copies: Duplicates | None = None,
         encodings: FixEncoding | None = None,
+        infer: InferFromPath | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -185,7 +191,7 @@ class Tour(QObject):
         self.win, self.library, self.out, self.done = window, library, out, done
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
-        self.encodings = encodings
+        self.encodings, self.infer = encodings, infer
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -231,6 +237,8 @@ class Tour(QObject):
             self.copies.go(step)
         if self.encodings is not None and "view" in step:
             self.encodings.go(step)
+        if self.infer is not None and "view" in step:
+            self.infer.go(step)
         self._size = 0
         self._at_size()
 

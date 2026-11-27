@@ -348,8 +348,9 @@ class RootTags:
     in files" (`rating_scale`, Windows Media's, or MusiKata's own POPM scale, R10.4.1); the
     Genre list (`genres`, R9.6: None until it is set, when the built-in one is suggested) and the
     genres the user has said are the same (`same_genres`, R9.5: groups of names, each offered for
-    a merge whatever their spelling), both edited in Settings (R13.3); what couldn't be used, for
-    the log."""
+    a merge whatever their spelling), both edited in Settings (R13.3); the user's own path
+    patterns (`patterns`, R3.3: the `patterns` group's `user`, tried before the presets, edited in
+    Settings, R13.4); what couldn't be used, for the log."""
 
     id3_version: str = "2.4"
     keep_modified_times: bool = False
@@ -360,6 +361,7 @@ class RootTags:
     problems: tuple[str, ...] = ()
     genres: tuple[str, ...] | None = None
     same_genres: tuple[tuple[str, ...], ...] = ()
+    patterns: tuple[str, ...] = ()
 
 
 def _days(value: object) -> int | None:
@@ -407,8 +409,8 @@ def root_path(root: str) -> str:
 
 def parse_root_tags(text: str) -> RootTags:
     """The `tags` group's id3_version, keep_modified_times, history, history_days, write_ratings,
-    rating_scale, genres and same_genres in the root's settings.json, `text`, whatever was written
-    there (A2.10): what
+    rating_scale, genres and same_genres, and the `patterns` group's user, in the root's
+    settings.json, `text`, whatever was written there (A2.10): what
     can't be used is named in `problems` and takes its default (R13.9). A version written as a
     number (2.3) or with a "v" ("v2.3"), days written as text ("90") or 90.0, and a scale in
     another case or with a space or "_" ("Windows Media", "MUSIKATA") are read as meant; a newer
@@ -469,9 +471,31 @@ def parse_root_tags(text: str) -> RootTags:
                 f"tags.genres isn't a list of genres: {group['genres']!r}; the built-in"
             )
     same = _same_genres(group.get("same_genres", []), problems)
+    user = _user_patterns(data.get("patterns", {}), problems)
     return RootTags(
-        str(version), keep, history, days, write_ratings, str(scale), tuple(problems), genres, same
-    )
+        str(version), keep, history, days, write_ratings, str(scale), tuple(problems), genres, same,
+        user,
+    )  # fmt: skip
+
+
+def _user_patterns(group: object, problems: list[str]) -> tuple[str, ...]:
+    """The `patterns` group's `user` (R3.3, R13.4): its patterns that are text and not blank, in
+    order, each once; what else it holds named in `problems` and passed by. A pattern R3.2 can't
+    use is kept as written: detection passes it by (patterns.patterns_of)."""
+    if not isinstance(group, dict):
+        problems.append(f"patterns isn't a group: {group!r}")
+        return ()
+    user = group.get("user", [])
+    if not isinstance(user, list):
+        problems.append(f"patterns.user isn't a list of patterns: {user!r}; none")
+        return ()
+    out: list[str] = []
+    for text in user:
+        if not isinstance(text, str) or not text.strip():
+            problems.append(f"patterns.user holds what isn't a pattern: {text!r}")
+        elif text.strip() not in out:
+            out.append(text.strip())
+    return tuple(out)
 
 
 def root_tags(root: str) -> RootTags:

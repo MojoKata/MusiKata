@@ -201,8 +201,14 @@ HISTORY = [
 ]  # fmt: skip
 UNDONE = {"Album on 6 songs": ("Laptop", "2026-11-25T21:31:20")}
 # the root's own settings.json (R13.9, A2.10): the genres the user has said are the same (R9.5), so
-# G01-genres' banner offers Tide Tables' Electronica beside its "electronic"
-ROOT_SETTINGS = {"format": 1, "tags": {"same_genres": [["Electronic", "Electronica"]]}}
+# G01-genres' banner offers Tide Tables' Electronica beside its "electronic"; and a path pattern of
+# the user's own (R3.3, R13.4), tried before the presets, so an album's folder is read for its
+# songs' artist, as T01-infer-from-path detects it on Tide Tables
+ROOT_SETTINGS = {
+    "format": 1,
+    "tags": {"same_genres": [["Electronic", "Electronica"]]},
+    "patterns": {"user": ["{artist}/{album}/{track} - {title}"]},
+}
 
 
 @dataclass

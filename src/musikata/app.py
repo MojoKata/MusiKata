@@ -30,6 +30,7 @@ from PySide6.QtQuick import QQuickWindow
 from shiboken6 import Shiboken
 
 from musikata_core import __version__, db, history, nowplaying, rootfiles, roots, settings, workers
+from musikata_core import folders as index_folders
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 from musikata_core.ratings import Writing, set_everything
@@ -45,6 +46,7 @@ from .encodings import FixEncoding
 from .firstrun import FirstRun, music_folder
 from .genres import Genres
 from .history import ChangeHistory
+from .infer import InferFromPath
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .plays import PlayCounts
 from .ratings import Ratings, file_writer
@@ -158,6 +160,7 @@ class Shell:
     names: NameMerge | None = None
     copies: Duplicates | None = None
     encodings: FixEncoding | None = None
+    infer: InferFromPath | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -167,7 +170,7 @@ class Shell:
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
-            self.copies, self.encodings,
+            self.copies, self.encodings, self.infer,
         )  # fmt: skip
 
 
@@ -186,14 +189,14 @@ def close_bridges(
     names: NameMerge | None = None,
     copies: Duplicates | None = None,
     encodings: FixEncoding | None = None,
+    infer: InferFromPath | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the Edit tags panel's, Album art's, the merges' and Fix encoding…'s saves
-    (stopped before
-    their next file) and threads, Needs attention's dismissals and watching, the
-    ratings' save and watching, the play counts (their file written), the change history's
-    thread, the watcher, the scan's thread and the worker processes, and the index; then deletes
-    them (`release`)."""
+    playback thread, the Edit tags panel's, Album art's, the merges', Fix encoding…'s and Infer
+    from path's saves (stopped before their next file) and threads, Needs attention's dismissals
+    and watching, the ratings' save and watching, the play counts (their file written), the change
+    history's thread, the watcher, the scan's thread and the worker processes, and the index; then
+    deletes them (`release`)."""
     if controls is not None:
         controls.close()
     player.close()
@@ -209,6 +212,8 @@ def close_bridges(
         copies.shut()
     if encodings is not None:
         encodings.shut()
+    if infer is not None:
+        infer.shut()
     if attention is not None:
         attention.close()
     if ratings is not None:
@@ -220,8 +225,8 @@ def close_bridges(
     library.close()
     index.close()
     release(
-        controls, counts, edit, art, genres, names, copies, encodings, attention, ratings, changes,
-        player, library,
+        controls, counts, edit, art, genres, names, copies, encodings, infer, attention, ratings,
+        changes, player, library,
     )  # fmt: skip
 
 
@@ -254,6 +259,11 @@ def load(
     was playing comes back, cued, and is kept from now on (R1.8, `keep_playing`)."""
     index = open_index(root, env, clock)
     missing = not os.path.isdir(root)
+    # the root's Tags settings (R13.3): the history's, and what a save writes with (R4.7.1, R4.7.2)
+    tags_settings = settings.root_tags(root) if not missing else settings.RootTags()
+    # the user's own path patterns (R3.3), which tags match path is worked out with (R3.9)
+    user = tags_settings.patterns
+    index.write(lambda c: index_folders.set_user_patterns(c, user)).result()
     cache = cache_of(index, env)
     library = Library(
         root, index, home_of(env), pool, clock=clock, watching=True, missing=missing, given=given,
@@ -282,8 +292,6 @@ def load(
     if keep:
         keep_playing(player, root, index, shared, env, clock, make)
         counts = count_plays(player, library, root, index, shared, clock, make)
-    # the root's Tags settings (R13.3): the history's, and what a save writes with (R4.7.1, R4.7.2)
-    tags_settings = settings.root_tags(root) if not missing else settings.RootTags()
     # where each rating goes (R10.3, R10.4): its file, or ratings.json, as the root's settings say
     index.write(lambda c: set_everything(c, not tags_settings.write_ratings))
     writing = Writing(root, index, file_writer(tags_settings), tags_settings.write_ratings, clock)
@@ -295,9 +303,15 @@ def load(
         root, index.read, writing, changes, saved=library.saved, undoable=tags_settings.history,
         available=lambda: bool(library.property("available")), model=library.property("attention"),
     )  # fmt: skip
+    # Infer from path (R3): from Folders, the selection bars, an album, the panel, Needs attention
+    infer = InferFromPath(
+        root, index.read, writing, changes, saved=library.saved, undoable=tags_settings.history,
+        available=lambda: bool(library.property("available")), home=home_of(env),
+    )  # fmt: skip
     edit = EditTags(
         root, index.read, tags_settings, changes, saved=library.saved, write=writing,
         home=home_of(env), available=lambda: bool(library.property("available")), encodings=fix,
+        infer=infer,
     )  # fmt: skip
     library.reloaded.connect(edit.refresh)  # a scan, a save or an undo changed the rows
     rating = rate_songs(library, player, root, index, writing, changes, clock, missing)
@@ -319,7 +333,7 @@ def load(
     changes.plays = plays_back(counts.change if counts is not None else None, make)  # R2.12
     needs, names, copies = attend(
         library, root, index, clock, edit, album_art, genre_tools, writing, changes, tags_settings,
-        missing, counts, fix,
+        missing, counts, fix, infer,
     )  # fmt: skip
     engine.setInitialProperties(
         {
@@ -334,6 +348,7 @@ def load(
             "names": names,
             "copies": copies,
             "encodings": fix,
+            "infer": infer,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -343,14 +358,14 @@ def load(
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
                       art=album_art, genres=genre_tools, attention=needs, names=names,
-                      copies=copies, encodings=fix)  # fmt: skip
+                      copies=copies, encodings=fix, infer=infer)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating, album_art, genre_tools, needs, names, copies, fix,
+        changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer,
     )  # fmt: skip
 
 
@@ -368,13 +383,14 @@ def attend(
     missing: bool = False,
     counts: PlayCounts | None = None,
     fix: FixEncoding | None = None,
+    infer: InferFromPath | None = None,
 ) -> tuple[Attention, NameMerge, Duplicates]:
     """Needs attention (R2.8): its list (Library's) told the genres the user has said are the
     same (R9.5); its actions on the Edit tags panel, Album art, the genres' merge and the merge of
     an artist's or an album's names (saved by `writing`, kept in `changes`), and Review… and Move
     the others to the trash for the same song more than once (R2.12: the kept copy's rating
     written by `writing`, its plays given on `counts`' rows, kept in `changes`), and Fix
-    encoding… on `fix` (R4.10); the root's
+    encoding… on `fix` (R4.10), and Infer from path on `infer` (R3); the root's
     ignored.json read into the index, off the GUI thread, and again when another computer changes
     it (A2.8). A root that isn't there (R2.10) lists what the index has."""
     model = library.property("attention")
@@ -389,7 +405,7 @@ def attend(
         saved=library.saved, available=lambda: bool(library.property("available")),
     )  # fmt: skip
     needs = Attention(root, index, model, clock, edit=edit, art=art, genres=genres, names=names,
-                      history=changes, copies=copies, encoding=fix,
+                      history=changes, copies=copies, encoding=fix, infer=infer,
                       watching=not missing)  # fmt: skip
     if not missing:
         needs.start()
@@ -766,10 +782,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         needs = session.shell.attention if session.shell is not None else None
         copies = session.shell.copies if session.shell is not None else None
         fix = session.shell.encodings if session.shell is not None else None
+        infer = session.shell.infer if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
-            copies=copies, encodings=fix,
+            copies=copies, encodings=fix, infer=infer,
         ).start()  # fmt: skip
     else:
         session.window.show()

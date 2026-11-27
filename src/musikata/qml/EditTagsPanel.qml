@@ -10,8 +10,8 @@ import "."
 // without showing (R4.8), read only. At its foot: R4.2's question when the selection changes, or it
 // closes, with changes not saved; a save's progress with Cancel (R4.7); the files that failed with
 // why, Retry and Dismiss; "3 fields will change on 4 songs", **Revert** and **Save to 4 files**.
-// The ⋯ menu holds the bulk tools of R4.5 (`tools`), each opening its dialog (ToolDialog); one that
-// can't be used now is faded and says why in its tooltip, as Infer from path does until R3 comes.
+// The ⋯ menu holds the bulk tools of R4.5 (`tools`), each opening its dialog (ToolDialog; Infer from
+// path, R3's own, InferDialog); one that can't be used now is faded and says why in its tooltip.
 // Esc or the × closes it. What it shows and does is the bridge's (musikata.edittags).
 Rectangle {
     id: panel

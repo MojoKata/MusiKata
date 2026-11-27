@@ -25,8 +25,11 @@ from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, Signal, Slot
 
 from musikata_core import folders as index_folders
+from musikata_core import patterns
+from musikata_core.tags.tools import text_of
 
 from .covers import mosaic_id
+from .history import LABELS
 from .models import (
     COVERS,
     PAGE,
@@ -51,39 +54,29 @@ MODES = [
     {"mode": "list", "label": "List", "icon": "list"},
 ]
 DEFAULT_MODE = "small"
-INFER = {
-    "label": "Infer from path",
-    "icon": "wand",
-    "later": "Tags from paths come in a later version",
-}
-# the selection bar's actions (R2.9.6) after Play: Edit tags (R4.2) and Album art (R5.2), by their
-# `action`, Album art only when the songs are one album (`selection_actions`), and those that come
-# with later slices, with what their tooltips say; the right-click menu holds Play next, Add to
-# queue (R7.2), Edit tags and Album art (when the row's songs are one album) until the slices that
-# fill the rest, and dragging (R6.10) comes whole with its own
+# the selection bar's actions (R2.9.6) after Play: Edit tags (R4.2), Infer from path (R3.1) and
+# Album art (R5.2), by their `action`, Album art only when the songs are one album
+# (`selection_actions`), and those that come with later slices, with what their tooltips say; the
+# right-click menu holds Play next, Add to queue (R7.2), Edit tags, Infer from path and Album art
+# (when the row's songs are one album) until the slices that fill the rest, and dragging (R6.10)
+# comes whole with its own
 EDIT = {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"}
 ART = {"label": "Album art", "icon": "image", "later": "", "action": "art"}
+INFER = {"label": "Infer from path", "icon": "wand", "later": "", "action": "infer"}
 LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
     EDIT,
-    {
-        "label": "Infer from path",
-        "icon": "wand",
-        "later": "Tags from paths come in a later version",
-    },
+    INFER,
     {"label": "Organize…", "icon": "arrow", "later": "Organizing files comes in a later version"},
 ]
-# a folder of songs' buttons (R2.9.7): Edit tags (R4.2), Album art (R5.2), and those of later
-# slices
-STRIP_LATER = [
-    {
-        "label": "Infer from path",
-        "icon": "wand",
-        "later": "Tags from paths come in a later version",
-    },
-    EDIT,
-    ART,
-]
+# a folder of songs' buttons (R2.9.7, L08): Infer from path (R3.1, the first), Edit tags (R4.2)
+# and Album art (R5.2)
+STRIP = [{**INFER, "primary": True}, EDIT, ART]
+# R3.9's states as Folders shows them: a folder's dot on its cover (R2.9.5) and a chip's tone
+TONES = {patterns.FIX: "warn", patterns.BARE: "err"}
+# how a song's tag differs from its path, said of the field (a chip, R3.9) and of files (the
+# strip's line, R2.9.7)
+CHIP_HOW = {"missing": "{} missing", "case": "{} case differs", "differs": "{} differs"}
 
 
 @dataclass
@@ -186,8 +179,7 @@ def art_line(image: str | None, embedded: int, songs: int) -> str:
 
 
 def art_chip(image: str | None, embedded: int, songs: int) -> dict[str, str]:
-    """A folder of songs' art chip (R2.9.7), its text and tone: whether its tags match the path
-    (R3.9) joins with slice 7."""
+    """A folder of songs' art chip (R2.9.7), its text and tone."""
     if embedded and embedded == songs:
         return {"text": f"Art embedded in {embedded} of {songs}", "tone": "ok"}
     if embedded:
@@ -197,6 +189,126 @@ def art_chip(image: str | None, embedded: int, songs: int) -> dict[str, str]:
     return {"text": "No art", "tone": "warn"}
 
 
+# ---------- tags match path (R3.9) ----------
+
+
+def field_label(field: str) -> str:
+    """A field as a chip names it: Artist, Album artist, Track, Genre."""
+    return LABELS.get(field, field)
+
+
+def file_chip(state: int | None, diffs: Sequence[patterns.Difference]) -> dict[str, str]:
+    """A file's path-match chip (R3.9, L05, L08): Match; Year missing, Artist case differs, Genre
+    differs for one field; for more, Case differs when they differ only in case, else 3 tags
+    differ, 3 tags missing; No tags; none ({}) when no pattern fits it."""
+    if state is None:
+        return {}
+    if state == patterns.BARE:
+        return {"text": "No tags", "tone": "err"}
+    if state == patterns.MATCH or not diffs:
+        return {"text": "Match", "tone": "ok"}
+    if len(diffs) == 1:
+        d = diffs[0]
+        return {"text": CHIP_HOW.get(d.how, "{} differs").format(field_label(d.field)),
+                "tone": "warn"}  # fmt: skip
+    hows = {d.how for d in diffs}
+    if hows == {"case"}:
+        return {"text": "Case differs", "tone": "warn"}
+    how = "missing" if hows == {"missing"} else "differ"
+    return {"text": f"{len(diffs)} tags {how}", "tone": "warn"}
+
+
+def folder_chip(state: int | None, fix: int) -> dict[str, str]:
+    """A folder's state chip on cards and in List (R2.9.5, L06): No tags, 3 to fix; none ({})
+    when its files all match."""
+    if state == patterns.BARE:
+        return {"text": "No tags", "tone": "err"}
+    if state == patterns.FIX and fix:
+        return {"text": f"{fix:,} to fix", "tone": "warn"}
+    return {}
+
+
+def match_chip(states: Sequence[int | None]) -> dict[str, str]:
+    """A folder of songs' or an album's chip (R2.9.7, L02, L08): Tags match path, or how many of
+    its files do (Tags match path: 7 of 9), amber when some can be fixed, red when one has no
+    tags; none ({}) when no pattern fits any."""
+    known = [s for s in states if s is not None]
+    if not known:
+        return {}
+    matched = sum(s == patterns.MATCH for s in known)
+    if matched == len(states):
+        return {"text": "Tags match path", "tone": "ok"}
+    tone = "err" if patterns.BARE in known else "warn"
+    return {"text": f"Tags match path: {matched} of {len(states)}", "tone": tone}
+
+
+def _files(n: int) -> str:
+    return plural(n, "file")
+
+
+def _says(field: str, value: str) -> str:
+    """What the path says of a field, in words: the album is from 2022; the artist is Lumen
+    Drift."""
+    if field == "year":
+        return f"the album is from {value}"
+    noun = {"genres": "genre", "albumartist": "album artist"}.get(field, field)
+    return f"the {noun} is {value}"
+
+
+def _how_text(field: str, how: str, values: Sequence[str], n: int, said: bool = False) -> str:
+    """What n files do with a field: have no year; spell the artist in lower case; have another
+    genre. `said`: the field the sentence has named already, spelled "it"."""
+    noun = {"genres": "genre", "albumartist": "album artist", "track": "track number",
+            "disc": "disc number", "tracktotal": "track total"}.get(field, field)  # fmt: skip
+    has = "has" if n == 1 else "have"
+    if how == "missing":
+        return f"{has} no {noun}"
+    if how == "case":
+        spells = "spells" if n == 1 else "spell"
+        it = "it" if said else f"the {noun}"
+        if all(v.islower() for v in values):
+            return f"{spells} {it} in lower case"
+        if all(v.isupper() for v in values):
+            return f"{spells} {it} in capitals"
+        return f"{spells} {it} in another case"
+    return f"{has} another {noun}"
+
+
+def path_line(rows: Sequence[tuple[Sequence[patterns.Difference], dict[str, str]]]) -> str:
+    """The strip's line when files differ from their path (R2.9.7, L08): what the path says, then
+    how many files differ and how: "The path says the album is from 2022, but 1 file has no year
+    and 1 spells the artist in lower case." Each row is a file's differences and its tags'
+    values (as the preview shows them), by field; "" when none differs."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    said: dict[str, set[str]] = {}
+    for diffs, tagged in rows:
+        for d in diffs:
+            groups.setdefault((d.field, d.how), []).append(tagged.get(d.field, ""))
+            said.setdefault(d.field, set()).add(d.value)
+    if not groups:
+        return ""
+    first = next(iter(groups))[0]
+    claimed = len(said[first]) == 1 and first not in ("title", "track", "disc")
+    parts = []
+    for n, ((field, how), olds) in enumerate(groups.items()):
+        count = _files(len(olds)) if n == 0 else f"{len(olds):,}"
+        it = claimed and field == first
+        parts.append(f"{count} {_how_text(field, how, olds, len(olds), it)}")
+    claim = (
+        f"The path says {_says(first, next(iter(said[first])))}, but "
+        if claimed
+        else "The tags differ from the path: "
+    )
+    return claim + and_text(parts) + "."
+
+
+def and_text(parts: Sequence[str]) -> str:
+    """Parts in a sentence: A; A and B; A, B and C."""
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 # ---------- the model ----------
 
 # a folder's row and a song's, as one list's columns: the kind (0 folder, 1 file), its id, its key
@@ -204,12 +316,13 @@ def art_chip(image: str | None, embedded: int, songs: int) -> dict[str, str]:
 FOLDER_COLUMNS = (
     "0 AS kind, id AS rid, id * 2 AS k, name_key AS nk, path, name, folders,"
     " songs_beneath AS songs, length, artist, album, year, thumb, mosaic, NULL AS title,"
-    " NULL AS track, NULL AS rating, NULL AS genre"
+    " NULL AS track, NULL AS rating, NULL AS genre, path_state AS state, path_fix AS fix"
 )
 FILE_COLUMNS = (
     "1, id, id * 2 + 1, name_key, path, NULL, NULL, NULL, length, artist, album, year, NULL,"
     " NULL, title, track, rating,"
-    " (SELECT group_concat(genre, '; ' ORDER BY position) FROM song_genre WHERE song_id = song.id)"
+    " (SELECT group_concat(genre, '; ' ORDER BY position) FROM song_genre WHERE song_id = song.id),"
+    " path_state, path_diff"
 )
 ORDER = "kind, nk, path"  # folders, then files, each by name (R2.9.2)
 
@@ -223,6 +336,7 @@ class FolderModel(PagedModel):
     roles = (
         "key", "kind", "path", "name", "line", "cover", "title", "numbered", "artist", "album",
         "genre", "year", "rating", "time", "third", "where", "odd", "playing", "selected",
+        "dot", "pathChip",
     )  # fmt: skip
     key = "k"
     selectionChanged = Signal()
@@ -279,7 +393,7 @@ class FolderModel(PagedModel):
 
     def _row(self, r: tuple[Any, ...]) -> dict[str, Any]:
         kind, _rid, k, _nk, path, name, folders, songs, length, artist, album, year = r[:12]
-        thumb, mosaic, title, track, rating, genre = r[12:]
+        thumb, mosaic, title, track, rating, genre, state, more = r[12:]
         where = where_text(path, self._folder) if self._query_of_search else ""
         if kind == 0:
             line = folder_line(folders, songs)
@@ -290,7 +404,7 @@ class FolderModel(PagedModel):
                 "artist": artist or "", "album": album or "", "genre": "",
                 "year": str(year) if year else "", "rating": 0, "time": time_text(length),
                 "third": where if self._query_of_search else album or "", "where": where,
-                "odd": [],
+                "odd": [], "dot": TONES.get(state, ""), "pathChip": folder_chip(state, more or 0),
             }  # fmt: skip
         shown = title_of(title, path)
         values = {"artist": artist, "genre": genre, "year": year}
@@ -303,6 +417,7 @@ class FolderModel(PagedModel):
             "third": where if self._query_of_search else album or "", "where": where,
             "odd": [] if self._query_of_search
             else [f for f, v in values.items() if v in self._common.get(f, [])],
+            "dot": "", "pathChip": file_chip(state, index_folders.diffs_of(more)),
         }  # fmt: skip
 
     def _value(self, row: dict[str, Any], name: str) -> Any:
@@ -598,9 +713,29 @@ class FolderView(QObject):
                 if p
             )
             values["artLine"] = art_line(image, embedded, songs)
-            values["chips"] = [art_chip(image, embedded, songs)]
+            states = c.execute("SELECT path_state FROM song WHERE folder = ?", (path,)).fetchall()
+            matched = match_chip([r[0] for r in states])
+            values["chips"] = [art_chip(image, embedded, songs)] + ([matched] if matched else [])
+            values["pathLine"] = path_line(self._differing(c, path))
         self._values = values
         self.changed.emit()
+
+    def _differing(
+        self, c: sqlite3.Connection, folder: str
+    ) -> list[tuple[tuple[patterns.Difference, ...], dict[str, str]]]:
+        """A folder's songs that differ from their path (R3.9): how, and their tags' values."""
+        out = []
+        diffs = {
+            str(p): index_folders.diffs_of(d)
+            for p, d in c.execute(
+                "SELECT path, path_diff FROM song WHERE folder = ? AND path_diff IS NOT NULL",
+                (folder,),
+            )
+        }
+        for _id, path, tags in index_folders.tags_in(c, folder):
+            if diffs.get(path):
+                out.append((diffs[path], {d.field: text_of(d.field, tags) for d in diffs[path]}))
+        return out
 
     # ---------- going between folders (R2.9.1) ----------
 
@@ -779,7 +914,8 @@ class FolderView(QObject):
     kicker = QtProperty(str, _value("kicker"), notify=changed)  # Folder · 9 songs · 312 MB · FLAC
     artLine = QtProperty(str, _value("artLine"), notify=changed)
     chips = QtProperty(list, _value("chips", []), notify=changed)
-    stripButtons = QtProperty(list, lambda self: STRIP_LATER, constant=True)
+    pathLine = QtProperty(str, _value("pathLine"), notify=changed)  # R2.9.7: how files differ
+    stripButtons = QtProperty(list, lambda self: STRIP, constant=True)
     laterActions = QtProperty(
         list,
         lambda self: selection_actions(self._model.selected_album() >= 0),

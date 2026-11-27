@@ -748,6 +748,7 @@ def test_album_art_opens_from_folders_bar_menu_and_strip_with_no_qml_warning(she
     folders.open("Lumen Drift")
     folders.select_paths(["Lumen Drift/Glass Harbor"])
     qtbot.waitUntil(lambda: bool(find(shell, "artSelection")), timeout=WAIT)
+    settled(shell, qtbot)  # the bar laid out: its actions apart, so the click is Album art's alone
     click(shell, find(shell, "artSelection")[0])
     qtbot.waitUntil(lambda: a.property("opened") and not a.property("loading"), timeout=WAIT)
     assert a.property("title") == "Album art · Glass Harbor"

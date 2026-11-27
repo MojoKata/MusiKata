@@ -461,7 +461,8 @@ def test_a_bulk_tool_saves_through_the_panel_as_one_entry_named_for_it(root, pan
 
 def test_the_tools_wait_on_changes_not_saved_and_infer_from_path_on_r3(root, panel, qtbot):
     """R4.5: a tool plans from the files' tags, so typed changes are saved or reverted first;
-    R4.5.5: Infer from path is shown, disabled, for later; a new selection closes a tool."""
+    R4.5.5: Infer from path is R3's own dialog, which a panel without it can't open; a new
+    selection closes a tool."""
     music, index, ids, paths = root
     opened(panel, qtbot, ids)
     tool = panel.property("tool")
@@ -495,8 +496,7 @@ def test_a_tools_save_waits_for_the_root_and_another_save(root, qtbot, qapp):
         e.runTool("number")
         there[0] = False
         assert {t["later"] for t in e.property("tools")} == {
-            "Saving waits until the music folder is back",
-            "Tags from paths come in a later version"}  # fmt: skip
+            "Saving waits until the music folder is back"}  # fmt: skip
         e.property("tool").save()  # it doesn't start: nothing written, the dialog left open
         assert [tags.read(p)[0].tracktotal for p in paths] == [9] * 4
         assert e.property("tool").property("opened")
@@ -812,7 +812,7 @@ def test_a_bulk_tool_opens_from_the_menu_previews_and_saves_with_no_qml_warning(
     settled(shell, qtbot)
     click(shell, find(shell, "editTools")[0])
     qtbot.waitUntil(lambda: bool(find(shell, "tool-replace")), timeout=WAIT)
-    assert find(shell, "tool-infer")[0].opacity() < 1  # R4.5.5: for later, saying so
+    assert find(shell, "tool-infer")[0].opacity() == 1  # R4.5.5: R3's dialog
     click(shell, find(shell, "tool-replace")[0])
     tool = e.property("tool")
     qtbot.waitUntil(lambda: bool(find(shell, "toolDialog")), timeout=WAIT)
@@ -897,6 +897,7 @@ def test_edit_tags_opens_from_an_album_a_songs_menu_the_selection_bar_and_folder
     qtbot.waitUntil(lambda: songs.rowCount() == 4, timeout=WAIT)
     songs.click(1, False, False)
     qtbot.waitUntil(lambda: bool(find(shell, "editSelection")), timeout=WAIT)
+    settled(shell, qtbot)  # the bar laid out: its actions apart, so the click is Edit tags' alone
     click(shell, find(shell, "editSelection")[0])
     qtbot.waitUntil(lambda: e.property("count") == 1 and not e.property("loading"), timeout=WAIT)
     e.editRow(songs, 2)  # the menu on a row not selected: that song
@@ -907,6 +908,7 @@ def test_edit_tags_opens_from_an_album_a_songs_menu_the_selection_bar_and_folder
     folders.open("Lumen Drift")
     folders.select_paths(["Lumen Drift/Tide Tables"])
     qtbot.waitUntil(lambda: bool(find(shell, "editSelection")), timeout=WAIT)
+    settled(shell, qtbot)  # the bar laid out: its actions apart, so the click is Edit tags' alone
     click(shell, find(shell, "editSelection")[0])
     qtbot.waitUntil(lambda: e.property("count") == 4 and not e.property("loading"), timeout=WAIT)
     assert e.property("line") == "Lumen Drift · 1 folder"

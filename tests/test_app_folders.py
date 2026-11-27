@@ -212,7 +212,9 @@ def test_a_folder_of_songs_has_its_strip_and_marks_the_values_that_differ(view):
     assert view.property("songsMode")
     assert view.property("kicker") == "Folder · 3 songs · 4.0 MB · FLAC 44.1 kHz"
     assert view.property("artLine") == "No cover"
-    assert view.property("chips") == [{"text": "No art", "tone": "warn"}]
+    assert view.property("chips") == [  # R3.9: no album or album artist where the path has them
+        {"text": "No art", "tone": "warn"}, {"text": "Tags match path: 0 of 3", "tone": "warn"}
+    ]  # fmt: skip
     assert rows(view, "numbered", "odd") == [
         ("1 · Neap Tide", []), ("2 · Spring Tide", ["genre"]), ("3 · Slack Water", ["artist"])
     ]  # fmt: skip
@@ -442,3 +444,96 @@ def test_the_song_playing_marks_its_folder_in_the_library(lib):
     lib.show_playing("Mara Okafor/Kindling/01.mp3")
     m = lib.property("folders").property("model")
     assert m.data(m.index(2), m._role("playing")) is True
+
+
+# ---------- tags match path (R3.9, R2.9.5, R2.9.7) ----------
+
+
+def test_a_files_chip_says_whether_its_tags_match_its_path_and_how_they_dont():
+    """R3.9, L05, L08: Match, Year missing, Artist case differs, Genre differs; more than one
+    field, Case differs or how many; No tags; none when no pattern fits."""
+    from musikata_core.patterns import BARE, FIX, MATCH, Difference
+
+    year = Difference("year", "missing", "2022")
+    artist = Difference("artist", "case", "Lumen Drift")
+    genre = Difference("genres", "differs", "Electronic")
+    title = Difference("title", "case", "Ebb & Flow")
+    assert folders.file_chip(MATCH, ()) == {"text": "Match", "tone": "ok"}
+    assert folders.file_chip(FIX, (year,)) == {"text": "Year missing", "tone": "warn"}
+    assert folders.file_chip(FIX, (artist,))["text"] == "Artist case differs"
+    assert folders.file_chip(FIX, (genre,))["text"] == "Genre differs"
+    assert folders.file_chip(FIX, (artist, title))["text"] == "Case differs"
+    assert folders.file_chip(FIX, (artist, year))["text"] == "2 tags differ"
+    assert folders.file_chip(FIX, (year, year))["text"] == "2 tags missing"
+    assert folders.file_chip(BARE, (year,)) == {"text": "No tags", "tone": "err"}
+    assert folders.file_chip(None, ()) == {}
+
+
+def test_a_folders_state_is_a_dot_and_a_chip_and_a_folder_of_songs_says_how_many_match():
+    """R2.9.5 (L04, L06): a dot amber or red, a chip "3 to fix" or "No tags", none when all
+    match; R2.9.7, L02 (L08): Tags match path, or 7 of 9."""
+    assert folders.folder_chip(1, 3) == {"text": "3 to fix", "tone": "warn"}
+    assert folders.folder_chip(2, 3) == {"text": "No tags", "tone": "err"}
+    assert folders.folder_chip(0, 0) == {} and folders.folder_chip(None, 0) == {}
+    assert folders.TONES == {1: "warn", 2: "err"}
+    assert folders.match_chip([0, 0, None]) == {"text": "Tags match path: 2 of 3", "tone": "warn"}
+    assert folders.match_chip([0, 0]) == {"text": "Tags match path", "tone": "ok"}
+    assert folders.match_chip([0, 2]) == {"text": "Tags match path: 1 of 2", "tone": "err"}
+    assert folders.match_chip([None]) == {} and folders.match_chip([]) == {}
+
+
+def test_the_strip_says_what_the_path_says_and_how_the_files_differ_as_l08_does():
+    """R2.9.7: "The path says the album is from 2022, but 1 file has no year and 1 spells the
+    artist in lower case."; files that differ in what varies file by file are counted alone."""
+    from musikata_core.patterns import Difference
+
+    year = Difference("year", "missing", "2022")
+    artist = Difference("artist", "case", "Lumen Drift")
+    assert folders.path_line([((year,), {"year": ""}), ((artist,), {"artist": "lumen drift"})]) \
+        == ("The path says the album is from 2022, but 1 file has no year and 1 spells the"
+            " artist in lower case.")  # fmt: skip
+    assert folders.path_line([((artist,), {"artist": "lumen drift"})]) == (
+        "The path says the artist is Lumen Drift, but 1 file spells it in lower case."
+    )
+    upper = [((artist,), {"artist": "LUMEN DRIFT"}), ((artist,), {"artist": "LUMEN DRIFT"})]
+    assert folders.path_line(upper).endswith("but 2 files spell it in capitals.")
+    odd = Difference("albumartist", "case", "Lumen Drift")
+    assert folders.path_line([((odd,), {"albumartist": "lUMEN dRIFT"})]).endswith(
+        "spells it in another case.")  # fmt: skip
+    titles = [((Difference("title", "differs", "Ebb"),), {"title": "Eb"}),
+              ((Difference("title", "missing", "Bore"), Difference("genres", "differs", "Pop")),
+               {"title": "", "genres": "Rock"})]  # fmt: skip
+    assert folders.path_line(titles) == (
+        "The tags differ from the path: 1 file has another title, 1 has no title and 1 has"
+        " another genre."
+    )
+    assert folders.path_line([]) == ""
+    assert folders.and_text(["a"]) == "a" and folders.and_text([]) == ""
+
+
+def test_folders_and_files_carry_their_path_match_and_the_strip_its_chip_and_line(tmp_path, qapp):
+    """R2.9.5: each folder's dot and chip; R3.9: each file's chip; R2.9.7: the strip's chip and
+    line; R2.9.6, R2.9.7: Infer from path on the selection bar and the strip."""
+    i = db.Index(str(tmp_path / "musikata.db"))
+    fill(i, [{"path": f"Lumen Drift/Tide Tables/0{n} - T{n}.flac", "title": f"T{n}", "track": n,
+              "albumartist": a, "album": "Tide Tables"}
+             for n, a in ((1, "Lumen Drift"), (2, "lumen drift"))])  # fmt: skip
+    v = folders.FolderView(i.read)
+    try:
+        assert rows(v, "name", "dot", "pathChip") == [
+            ("Lumen Drift", "warn", {"text": "1 to fix", "tone": "warn"})]  # fmt: skip
+        v.open("Lumen Drift/Tide Tables")
+        assert rows(v, "pathChip") == [
+            ({"text": "Match", "tone": "ok"},),
+            ({"text": "Album artist case differs", "tone": "warn"},),
+        ]
+        assert v.property("chips")[-1] == {"text": "Tags match path: 1 of 2", "tone": "warn"}
+        assert v.property("pathLine") == (
+            "The path says the album artist is Lumen Drift, but 1 file spells it in lower case."
+        )
+        assert v.property("stripButtons")[0]["action"] == "infer"
+        assert folders.INFER in folders.selection_actions(False)
+        assert folders.INFER["later"] == ""
+    finally:
+        v.property("model").wait()
+        i.close()

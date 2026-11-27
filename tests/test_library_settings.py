@@ -483,3 +483,30 @@ def test_the_genre_settings_broken_or_in_another_form(tags, problem):
     kept = settings.parse_root_tags(json.dumps({"format": 1, "tags": {
         "same_genres": [["Electronic"], ["Hip-Hop", "Rap"]]}}))  # fmt: skip
     assert kept.same_genres == (("Hip-Hop", "Rap"),) and len(kept.problems) == 1
+
+
+def test_the_roots_own_settings_give_the_users_path_patterns_tried_before_the_presets():
+    """R3.3, R13.4: the `patterns` group's `user`, as A2.10 names it, each once, in order."""
+    assert settings.RootTags().patterns == ()
+    found = settings.parse_root_tags(json.dumps({"format": 1, "patterns": {
+        "user": ["{artist}/{album}/{track} - {title}", " {artist} - {title} ",
+                 "{artist}/{album}/{track} - {title}", "{not a token}"],
+        "organize": "{albumartist}/{album}/{track} - {title}",
+    }}))  # fmt: skip
+    assert found.patterns == ("{artist}/{album}/{track} - {title}", "{artist} - {title}",
+                              "{not a token}")  # fmt: skip
+    assert found.problems == ()
+
+
+@pytest.mark.parametrize(
+    "group, problem",
+    [
+        ("{artist} - {title}", "patterns isn't a group"),
+        ({"user": "{artist} - {title}"}, "patterns.user isn't a list of patterns"),
+        ({"user": ["{title}", 5, None, "  "]}, "patterns.user holds what isn't a pattern"),
+    ],
+)
+def test_the_users_patterns_broken_or_in_another_form(group, problem):
+    found = settings.parse_root_tags(json.dumps({"format": 1, "patterns": group}))
+    assert [p for p in found.problems if problem in p]
+    assert found.patterns in ((), ("{title}",))

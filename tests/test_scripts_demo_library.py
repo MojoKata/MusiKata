@@ -196,7 +196,8 @@ def test_the_history_is_made_by_musikatas_own_batch_and_undo(tmp_path):
 
 def test_the_roots_settings_say_electronica_is_electronic_as_g01_offers_it(tmp_path):
     """G01-genres' banner (R9.5): Tide Tables' Electronica is offered with Electronic because the
-    root's settings say they are the same, as a user would (R13.3); held to their schema."""
+    root's settings say they are the same, as a user would (R13.3); and T01's pattern is the
+    user's own (R3.3, R13.4); held to their schema."""
     path = demo.root_settings(str(tmp_path / "Music"))
     with open(path, encoding="utf-8") as f:
         written = json.load(f)
@@ -204,6 +205,7 @@ def test_the_roots_settings_say_electronica_is_electronic_as_g01_offers_it(tmp_p
     with open(schema, encoding="utf-8") as f:
         jsonschema.validate(written, json.load(f))
     assert written["tags"]["same_genres"] == [["Electronic", "Electronica"]]
+    assert written["patterns"]["user"] == ["{artist}/{album}/{track} - {title}"]
 
 
 def test_l09s_copies_are_the_only_songs_of_one_audio_or_one_artist_and_title():

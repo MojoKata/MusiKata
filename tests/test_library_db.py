@@ -229,10 +229,35 @@ def test_an_index_of_slice_6_4_gains_the_text_encodings_and_its_songs_are_read_a
         step(c)
     c.execute("PRAGMA user_version = 9")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
-    assert db.migrate(c) == len(db.MIGRATIONS) == 10
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT mtime_ns, latin1, encoding FROM song").fetchall() == [(-1, None, None)]
     plan = c.execute(
         "EXPLAIN QUERY PLAN SELECT id FROM song WHERE encoding IS NOT NULL ORDER BY path"
     ).fetchall()
     assert any("song_encoding" in str(row) for row in plan)
+    c.close()
+
+
+def test_an_index_of_slice_6_gains_tags_match_path_and_its_songs_are_read_again(tmp_path):
+    """Version 11 (R3.9, A2.6, A2.7): each song's path-match state and how it differs, each
+    folder's worst state beneath it, and the user's own patterns; the states are worked out from
+    the tags and paths, so every song is read again, and Needs attention's group is found
+    through an index of its own."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:10]:
+        step(c)
+    c.execute("PRAGMA user_version = 10")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
+    c.execute("INSERT INTO folder (path, name, name_key, fold) VALUES ('', '', '', '')")
+    assert db.migrate(c) == len(db.MIGRATIONS) == 11
+    assert c.execute("SELECT mtime_ns, path_state, path_diff FROM song").fetchall() == [
+        (-1, None, None)
+    ]
+    assert c.execute("SELECT path_state, path_fix FROM folder").fetchall() == [(None, 0)]
+    assert c.execute("SELECT * FROM user_pattern").fetchall() == []
+    plan = c.execute(
+        "EXPLAIN QUERY PLAN SELECT id FROM song WHERE path_diff IS NOT NULL ORDER BY folder"
+    ).fetchall()
+    assert any("song_path_diff" in str(row) for row in plan)
     c.close()

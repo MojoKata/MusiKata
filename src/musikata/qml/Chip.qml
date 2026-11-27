@@ -1,21 +1,24 @@
 import QtQuick
 import "."
 
-// A chip: a genre to filter by (R2.6), chosen or not, or an album's state (`tone`: ok, warn, info).
+// A chip: a genre to filter by (R2.6), chosen or not, or an album's or a file's state (`tone`: ok,
+// warn, info, err).
 Rectangle {
     id: chip
     signal clicked()
     property string label
     property string tone: ""            // "" for a filter chip
     property bool chosen: false
-    property string icon: tone === "ok" ? "check" : tone === "warn" ? "attention" : tone === "info" ? "image" : ""
+    property string icon: tone === "ok" ? "check" : tone === "warn" || tone === "err" ? "attention"
+                        : tone === "info" ? "image" : ""
     readonly property color ink: tone === "ok" ? Theme.ok : tone === "warn" ? Theme.warn
-                                 : chosen ? Theme.text : Theme.cell
+                                 : tone === "err" ? Theme.err : chosen ? Theme.text : Theme.cell
     width: content.width + (tone ? 20 : 28)
     height: tone ? 26 : 32
     radius: height / 2
     color: tone === "ok" ? Qt.rgba(Theme.ok.r, Theme.ok.g, Theme.ok.b, 0.12)
          : tone === "warn" ? Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.12)
+         : tone === "err" ? Qt.rgba(Theme.err.r, Theme.err.g, Theme.err.b, 0.12)
          : chosen ? Theme.accentSoft : (hover.hovered && !tone ? Theme.hover : Theme.surface)
     border.color: chosen ? Theme.accent : (tone ? "transparent" : Theme.border)
     Accessible.role: tone ? Accessible.StaticText : Accessible.Button

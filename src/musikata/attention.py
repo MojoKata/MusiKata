@@ -16,15 +16,17 @@ entries, each with the action that fixes it, and Ignore.
   (musikata.duplicates).
 - **Tags in the wrong text encoding** (R4.10): an entry per song, named as the likely encoding
   reads it, whose Fix encoding…, or its group's, opens musikata.encodings' dialog.
+- **Tags that differ from the path** (R3.9): an entry per folder, saying how many of its files
+  differ and in what, whose Infer from path opens musikata.infer's dialog on its songs.
 - **The actions** (`Attention`): Edit tags (the Edit tags panel on the album's songs, R4.2), Album
   art (its dialog, R5.2), Review… (musikata.duplicates' dialog, R2.12), Fix encoding…
-  (musikata.encodings' dialog, R4.10), Merge (a genre's merge of
-  R9.4; for an artist's or an album's names, `NameMerge`: the same preview, saved through the
-  batch as one entry in the change history that Undo reverses), Show in folder (the system's file
-  manager, the file selected where the platform can, `reveal_command`), and Ignore: the entry kept
-  in the root's `.musikata/ignored.json` (rootfiles.save_ignored, read again and merged first) and
-  in the index, until its file changes. Another computer's dismissals are read again whenever the
-  watcher sees `.musikata` change.
+  (musikata.encodings' dialog, R4.10), Infer from path (musikata.infer's, R3), Merge (a genre's
+  merge of R9.4; for an artist's or an album's names, `NameMerge`: the same preview, saved through
+  the batch as one entry in the change history that Undo reverses), Show in folder (the system's
+  file manager, the file selected where the platform can, `reveal_command`), and Ignore: the entry
+  kept in the root's `.musikata/ignored.json` (rootfiles.save_ignored, read again and merged
+  first) and in the index, until its file changes. Another computer's dismissals are read again
+  whenever the watcher sees `.musikata` change.
 
 What a chip, a group's line and an entry say, and which actions an entry has, are decided here as
 plain data and text (`entry_row`, `group_row`, `chips_of`, …), tested without a window; what each
@@ -67,7 +69,8 @@ from musikata_core.tags.tools import Planned, Song
 
 from .duplicates import Duplicates, badge_text, bar_text, copy_rows, heading_text, move_label
 from .encodings import FixEncoding
-from .history import NAMES, ChangeHistory
+from .history import LABELS, NAMES, ChangeHistory
+from .infer import InferFromPath
 from .models import SHORT, Searcher, cover_url, plural, time_text
 from .preview import Preview, failed_text, footer_text, progress_text, save_text
 
@@ -95,6 +98,9 @@ class Group:
 
 
 GROUPS = (
+    Group("paths", "Tags differ from path", "TAGS THAT DIFFER FROM THE PATH",
+          "Infer from path fills or corrects the tags from each file's path; Undo puts them"
+          " back.", (attention.PATH,), "folder"),
     Group("copies", "Same song twice", "SAME SONG MORE THAN ONCE",
           "The kept copy takes the others' plays and highest rating.", (attention.COPIES,),
           "song"),
@@ -122,9 +128,10 @@ GROUPS = (
 BY_KEY = {g.key: g for g in GROUPS}
 GROUP_OF = {kind: g.key for g in GROUPS for kind in g.kinds}
 # the chips (L09-needs-attention): All, then a chip each, the groups no chip of their own has in
-# Other; a later piece's (R3's) comes in its place
+# Other
 CHIPS = (
     ("all", "All", tuple(g.key for g in GROUPS)),
+    ("paths", "Tags differ from path", ("paths",)),
     ("copies", "Same song twice", ("copies",)),
     ("covers", "Covers", ("covers",)),
     ("names", "Names", ("names",)),
@@ -133,7 +140,7 @@ CHIPS = (
     ("other", "Other", ("albums", "unreadable")),
 )
 FIELD_LABELS = {"album": "Album", "albumartist": "Album artist", "year": "Year", "genre": "Genre",
-                "cover": "Cover"}  # fmt: skip
+                "cover": "Cover", "track": "Track"}  # fmt: skip
 NAME_KINDS = {attention.NAMES_ARTIST: "Artist", attention.NAMES_ALBUM: "Album",
               attention.NAMES_GENRE: "Genre"}  # fmt: skip
 
@@ -200,6 +207,10 @@ def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dic
         detail = " · ".join(p for p in parts if p)
         actions = [_action("fix", "Fix encoding…")]
         icon = "album" if e.album is not None else "file"
+    elif e.kind == attention.PATH:
+        detail = path_detail(e)
+        actions = [_action("infer", "Infer from path")]
+        icon = "folder"
     elif e.kind == attention.ONE_FILE:
         detail = f"{who} · {time_text(e.length)} in one file, with {e.cue}"
         actions = []
@@ -218,6 +229,16 @@ def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dic
     }  # fmt: skip
 
 
+def path_detail(e: Entry) -> str:
+    """What a folder whose tags differ from its paths says (R2.8, R3.9): where it is, how many of
+    its files differ and in what: Lumen Drift · 2 of 9 files · Artist and Year."""
+    differing, files = (*e.counts, 0, 0)[:2]
+    where = attention.folder_of(e.about).rpartition("/")[0].replace("/", " › ")
+    fields = and_text([FIELD_LABELS.get(f, LABELS.get(f, f)) for f in e.fields])
+    parts = [where, f"{differing:,} of {plural(files, 'file')}" if files else "", fields]
+    return " · ".join(p for p in parts if p)
+
+
 def short_of(e: Entry) -> str:
     """An entry as a folded group's line names it: Kindling; Live at the Lantern (Mara Okafor),
     with a .cue; a file by its name."""
@@ -229,6 +250,8 @@ def short_of(e: Entry) -> str:
         )
     if e.kind == attention.UNREADABLE:
         return os.path.basename(e.about)
+    if e.kind == attention.PATH and e.about == attention.ROOT_FOLDER:
+        return "Your music folder"
     return e.title or e.about
 
 
@@ -914,9 +937,9 @@ class Attention(QObject):
     """Needs attention's actions (R2.8) on the entries of `model`: Edit tags on `edit` (the Edit
     tags panel, musikata.edittags), Album art on `art` (musikata.albumart), Merge on `genres`
     (musikata.genres) or `names` (`NameMerge`), Review… on `copies` (musikata.duplicates' dialog,
-    R2.12), Fix encoding… on `encoding` (musikata.encodings' dialog, R4.10), Show in folder
-    through `reveal` (a command, or
-    the folder opened by `open_folder`), and Ignore. A dismissal is written into the root's
+    R2.12), Fix encoding… on `encoding` (musikata.encodings' dialog, R4.10), Infer from path on
+    `infer` (musikata.infer's, R3), Show in folder through `reveal` (a command, or the folder
+    opened by `open_folder`), and Ignore. A dismissal is written into the root's
     ignored.json (read again and merged first) and the index on `executor` (its own thread when
     None) at `clock`'s time, or the index only when `.musikata` can't be written (R1.5.2); the
     list is found again then. With `watching`, `.musikata` is watched for another computer's
@@ -939,6 +962,7 @@ class Attention(QObject):
         history: ChangeHistory | None = None,
         copies: Duplicates | None = None,
         encoding: FixEncoding | None = None,
+        infer: InferFromPath | None = None,
         watching: bool = True,
         executor: Executor | None = None,
         reveal: Callable[[str], list[str] | None] | None = None,
@@ -950,6 +974,7 @@ class Attention(QObject):
         self._root, self._index, self._model, self._clock = root, index, model, clock
         self._edit, self._art, self._genres, self._names = edit, art, genres, names
         self._history, self._copies, self._encoding = history, copies, encoding
+        self._infer = infer
         self._watching = watching
         self._executor = executor
         self._reveal = reveal or (lambda p: reveal_command(p, sys.platform, shutil.which))
@@ -1017,7 +1042,7 @@ class Attention(QObject):
     @Slot(int, str)
     def act(self, row: int, action: str) -> None:
         """An entry's action (row `row` of the list): "edit", "art", "merge", "review", "fix",
-        "folder" or "ignore"; or a group's (its line's row): "fix", on its first entry."""
+        "infer", "folder" or "ignore"; or a group's (its line's row): "fix", on its first entry."""
         e = self._model.entry_at(row)
         if e is None:
             first = self._model.first_of(row)
@@ -1038,9 +1063,11 @@ class Attention(QObject):
             self._copies.open(e)
         elif action == "fix" and self._encoding is not None:
             self._encoding.open(e)
+        elif action == "infer" and self._infer is not None:
+            self._infer.open(e)
         elif action == "folder":
             self.show_in_folder(scanner.full_path(self._root, e.about))
-        elif action not in ("edit", "art", "merge", "review", "fix"):
+        elif action not in ("edit", "art", "merge", "review", "fix", "infer"):
             raise ValueError(f"no such action: {action}")
 
     def show_in_folder(self, path: str) -> None:
@@ -1106,7 +1133,7 @@ class Attention(QObject):
             self._executor.shutdown(wait=True)
             self._executor = None
         self._edit = self._art = self._genres = self._names = self._history = None
-        self._copies = self._encoding = None
+        self._copies = self._encoding = self._infer = None
 
 
 def _open_folder(folder: str) -> None:
