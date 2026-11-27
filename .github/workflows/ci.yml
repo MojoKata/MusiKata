@@ -197,7 +197,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.again.outputs.page_url }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -206,7 +206,16 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
         with:
           path: site/
+      # GitHub's list of a run's artifacts can lag the upload by a moment, and deploy-pages asks for
+      # it at once ("No artifacts named github-pages were found", 4 of 8 master runs by Nov 27,
+      # the upload finalized 0.3 s before): it is asked again once, 30 s on
       - id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - id: again
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
 
   # the AppImage (A6.3), built in its Ubuntu 22.04 container and started once in an Ubuntu 24.04 one:
