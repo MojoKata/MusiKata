@@ -58,7 +58,9 @@ SIZES = (SHOT, DESIGN)
 # (R2.8) with Same song twice chosen (R2.12), its groups of copies open and the other groups folded
 # after it, as its mockup draws it. L13 has no mockup: the Review… dialog of Signal Fires' copies
 # (R2.12) over it, drawn after T01's preview. T06 is Fix encoding… (R4.10) over it, on the demo
-# library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup draws it.
+# library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup draws it. P01 is Road
+# Trip's page (R8.2) with the sidebar's playlists (R6.3), as its mockup draws it but the drag, which
+# is R8.5's.
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -129,6 +131,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         {"view": "attention", "attention": "copies", "review": "Signal Fires"},
     ),
     ("T06-fix-encoding", {"view": "attention", "attention": "copies", "fix": "Маяк"}),
+    ("P01-playlist-drag", {"view": "playlist", "playlist": "Road Trip"}),
     ("X03-change-history", {"view": "songs", "select": [], "history": True}),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),

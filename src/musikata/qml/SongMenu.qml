@@ -7,13 +7,18 @@ import "."
 // row is in it (the model's songs_at decides); Edit tags (R4.2, R2.9.6), the same way, when the
 // view gives it the panel; Infer from path (R3.1, R2.9.6), the same way, when the view gives it the
 // dialog; and in Folders, Album art (R5.2, R2.9.6) when those songs are one album (the model's
-// albumAt says which). The rest of R2.9.6's comes with the slices that build them.
+// albumAt says which). With `playlists` (R8): Add to playlist, its submenu of the playlists, and New
+// playlist from selection (R8.3), the same way; on a playlist's page (`inPlaylist`), Remove from
+// playlist (R8.6). The rest of R2.9.6's comes with the slices that build them.
 Menu {
     id: menu
     required property var player
     property var edit: null           // the Edit tags panel's bridge
     property var infer: null          // Infer from path's dialog
     property var art: null            // the Album art dialog's bridge, in Folders
+    property var playlists: null      // the playlists' bridge (musikata.playlists)
+    property var playlistList: null   // the playlists Add to playlist lists (library.playlists)
+    property bool inPlaylist: false   // a playlist's page: Remove from playlist (R8.6)
     property var songs                 // the list's model: what a row's songs are
     property int row: -1
     property int album: -1             // the album the row's songs are on, -1 for none
@@ -34,6 +39,29 @@ Menu {
         objectName: "addToQueue"
         text: qsTr("Add to queue")
         onTriggered: menu.player.addToQueue(menu.songs, menu.row)
+    }
+    AddToPlaylistMenu {
+        id: addMenu
+        objectName: "addToPlaylist"
+        enabled: menu.playlists !== null
+        playlists: menu.playlists
+        list: menu.playlistList
+        songs: menu.songs
+        row: menu.row
+    }
+    MenuItem {
+        objectName: "newFromSelection"
+        text: qsTr("New playlist from selection")
+        visible: menu.playlists !== null
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.playlists.createFrom(menu.songs, menu.row)
+    }
+    MenuItem {
+        objectName: "removeFromPlaylist"
+        text: qsTr("Remove from playlist")
+        visible: menu.playlists !== null && menu.inPlaylist
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.playlists.removeRow(menu.songs, menu.row)
     }
     MenuItem {
         objectName: "editTags"

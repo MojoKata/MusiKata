@@ -515,3 +515,55 @@ def root_tags(root: str) -> RootTags:
     for problem in found.problems:
         log.warning("%s: %s", path, problem)
     return found
+
+
+# ---------- the root's own settings.json: the playlists folder (R8.1, R13.6) ----------
+
+PLAYLISTS_FOLDER = "Playlists"  # R8.1: under the music root, by default
+
+
+def parse_root_playlists(text: str) -> tuple[str, tuple[str, ...]]:
+    """The `playlists` group's `folder` in the root's settings.json, `text` (R13.6, A2.10): where
+    new playlists are made, a folder under the root with `/` (`\\` read as `/`, the `/` at its
+    ends taken off); what can't be one (not text, empty, absolute, leading out of the root through
+    `..`, or hidden, which the scan passes by, R2.3.1) is named in the problems and takes the
+    default, `Playlists`. (folder, problems)."""
+    try:
+        data = json.loads(text.removeprefix("﻿"))
+    except ValueError:
+        return PLAYLISTS_FOLDER, ("it isn't JSON: the playlists folder is Playlists",)
+    group = data.get("playlists", {}) if isinstance(data, dict) else {}
+    if not isinstance(group, dict):
+        return PLAYLISTS_FOLDER, (f"playlists isn't a group: {group!r}",)
+    value = group.get("folder", PLAYLISTS_FOLDER)
+    slashed = value.replace("\\", "/").strip() if isinstance(value, str) else ""
+    folder = slashed.strip("/")
+    parts = folder.split("/")
+    if (
+        not folder
+        or slashed.startswith("/")
+        or (len(folder) > 1 and folder[1] == ":")
+        or any(not p.strip() or p in (".", "..") or p.startswith(".") for p in parts)
+    ):
+        return PLAYLISTS_FOLDER, (
+            f"playlists.folder isn't a folder under the music root: {value!r}; Playlists",
+        )
+    return "/".join(p.strip() for p in parts), ()
+
+
+def root_playlists(root: str) -> str:
+    """The playlists folder of the root (`parse_root_playlists`) from its settings.json; the
+    default when it has none or it can't be read, each problem logged."""
+    path = root_path(root)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return PLAYLISTS_FOLDER
+    except OSError as e:
+        log.warning("couldn't read %s: %s; the playlists folder is Playlists", path, e)
+        return PLAYLISTS_FOLDER
+    folder, problems = parse_root_playlists(text)
+    for problem in problems:
+        log.warning("%s: %s", path, problem)
+    return folder

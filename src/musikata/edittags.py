@@ -497,6 +497,7 @@ class EditTags(QObject):
                 "songs": library.property("songs"),
                 "artist": library.property("artist").property("others"),
                 "genre": library.property("genrePage").property("songs"),
+                "playlist": library.property("playlistPage").property("songs"),
             }.get(view)
         if model is None:
             self.edit_songs([], "")

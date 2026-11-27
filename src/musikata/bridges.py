@@ -2,7 +2,8 @@
 them (R2.6, R6.3), the header (R6.4: the view's title and count, the search, the view mode and the
 sort), Albums with its genre chips and Artists, an album's and an artist's pages, Genres and a
 genre's page (genres.py's, R9.1), Folders (its open folder and list are folders.py's, R2.9),
-Needs attention and its count in the sidebar (its list is attention.py's, R2.8), and the scans,
+Needs attention and its count in the sidebar (its list is attention.py's, R2.8), the sidebar's
+playlists and a playlist's page (playlists.py's, R6.3, R8.2), and the scans,
 run one at a time on a thread of their own with the worker processes reading the files (A1.3,
 A2.2): the root's, and the partial ones of the folders the watcher names (A2.4, R2.4); the root's
 card, and a root that isn't there (R2.1.1, R2.10).
@@ -76,6 +77,7 @@ from .nowplaying import (
     song_of_path,
 )
 from .player import Engine, PlaybackThread, gain_of
+from .playlists import PlaylistList, PlaylistPage
 from .plays import PlayCounts
 
 log = logging.getLogger(__name__)
@@ -480,7 +482,7 @@ SEARCH_HINTS = {
 EMPTY_NOUNS = {
     "albums": "albums", "artists": "artists", "songs": "songs", "folders": "folders or songs",
     "genres": "genres", "album": "songs", "artist": "albums or songs", "genre": "albums or songs",
-    "attention": "entries",
+    "attention": "entries", "playlist": "songs",
 }  # fmt: skip
 # the view modes each view has (R6.4; Albums' grid and list, R2.6; Folders' four, R2.9.4): its
 # name, label and icon
@@ -586,10 +588,13 @@ class Library(QObject):
         self._album = AlbumPage(index.read, self, self._searcher)
         self._artist = ArtistPage(index.read, self, self._searcher)
         self._genre_page = GenrePage(index.read, self, self._searcher)
-        self._pages: dict[str, AlbumPage | ArtistPage | GenrePage] = {
+        self._playlist_list = PlaylistList(index.read, self)  # the sidebar's (R6.3)
+        self._playlist_page = PlaylistPage(index.read, self, self._searcher)  # R8.2
+        self._pages: dict[str, AlbumPage | ArtistPage | GenrePage | PlaylistPage] = {
             "album": self._album,
             "artist": self._artist,
             "genre": self._genre_page,
+            "playlist": self._playlist_page,
         }
         for page in self._pages.values():
             for model, _ in page.lists():
@@ -638,6 +643,7 @@ class Library(QObject):
         self._genres.refresh()
         self._folders.reload()
         self._attention.refresh()  # the sidebar's count, always current (A2.6)
+        self._playlist_list.refresh()  # the sidebar's playlists (R6.3)
         c = self._index.read()
         self._counts = counts(c)
         self._unreadable = (
@@ -703,6 +709,18 @@ class Library(QObject):
         if artist_id >= 0 and self._artist.load(artist_id, ""):
             self._history.append(current)
             self._go("artist", "")
+
+    @Slot(int)
+    def openPlaylist(self, playlist: int) -> None:  # noqa: N802
+        """Opens a playlist's page (R8.2, P01-playlist-drag) from the sidebar, as a view of its
+        own: the pages opened on the way and every search forgotten."""
+        if not self._playlist_page.load(playlist, ""):
+            return
+        self._history.clear()
+        for model in self._lists.values():
+            if model.searching():
+                model.set_search("")
+        self._go("playlist", "")
 
     @Slot(str)
     def openGenre(self, name: str) -> None:  # noqa: N802
@@ -814,6 +832,9 @@ class Library(QObject):
             self.show("genres")
             self.openGenre(step["genre"])
             self.setSearch(step.get("search", ""))
+        elif view == "playlist":
+            r = c.execute("SELECT id FROM playlist WHERE name = ?", (step["playlist"],)).fetchone()
+            self.openPlaylist(r[0] if r else -1)
         else:
             self.show(view)
             self.setSearch(step.get("search", ""))
@@ -1162,7 +1183,7 @@ class Library(QObject):
     def show_ratings(self, ratings: Mapping[int, int]) -> None:
         """The ratings being saved, by song id, shown at once in every list of songs (R10.2)."""
         for model in (self._songs, self._album.property("songs"), self._artist.property("others"),
-                      self._genre_page.property("songs"),
+                      self._genre_page.property("songs"), self._playlist_page.property("songs"),
                       self._folders.property("model")):  # fmt: skip
             model.show_ratings(ratings)
 
@@ -1179,6 +1200,7 @@ class Library(QObject):
         self._album.property("songs").refresh()
         self._artist.property("others").refresh()
         self._genre_page.property("songs").refresh()
+        self._playlist_page.property("songs").refresh()
         self._attention.refresh()  # a group of copies shows each copy's plays (R2.12)
 
     @Slot(str)
@@ -1199,6 +1221,7 @@ class Library(QObject):
         self._album.property("songs").set_playing(self._playing)
         self._artist.property("others").set_playing(self._playing)
         self._genre_page.property("songs").set_playing(self._playing)
+        self._playlist_page.property("songs").set_playing(self._playing)
         self._albums.set_playing(album)
         self._artist.property("albums").set_playing(album)
         self._genre_page.property("albums").set_playing(album)
@@ -1338,7 +1361,8 @@ class Library(QObject):
         return self._search
 
     def _get_searchable(self) -> bool:
-        return self._view in VIEWS or self._view in self._pages
+        """Whether the view has the header (R6.4): a playlist's page has none (P01)."""
+        return self._view != "playlist" and (self._view in VIEWS or self._view in self._pages)
 
     def _get_on_page(self) -> bool:
         return self._view in self._pages
@@ -1398,7 +1422,7 @@ class Library(QObject):
 
     def _get_section(self) -> str:
         """The sidebar's item highlighted: the view open, or the one a page was opened from."""
-        if self._view in VIEWS:
+        if self._view in VIEWS or self._view == "playlist":
             return self._view
         return next((v for v, _, _ in self._history if v in VIEWS), "albums")
 
@@ -1446,6 +1470,8 @@ class Library(QObject):
     artist = QtProperty(QObject, _get_artist, constant=True)  # the artist page's
     genreList = QtProperty(QObject, _get_genre_list, constant=True)  # the Genres view's (R9.1)
     genrePage = QtProperty(QObject, _get_genre_page, constant=True)  # a genre's page
+    playlists = QtProperty(QObject, lambda self: self._playlist_list, constant=True)  # R6.3
+    playlistPage = QtProperty(QObject, lambda self: self._playlist_page, constant=True)  # R8.2
     folders = QtProperty(QObject, _get_folders, constant=True)  # Folders' open folder (R2.9)
     attention = QtProperty(QObject, _get_attention, constant=True)  # Needs attention's (R2.8)
     attentionCount = QtProperty(str, _get_attention_count, notify=changed)
@@ -1678,6 +1704,35 @@ class Player(QObject):
             self.queue.set_shuffle(True)
             self._remember(shuffle=True)
         self.play_songs(*self._album(album_id), start=None)
+
+    @Slot(int)
+    def playPlaylist(self, playlist: int) -> None:  # noqa: N802
+        """A playlist's Play (R7.1, R8.2): its songs in its order from its first, the missing
+        entries passed by."""
+        self.play_songs(*self._playlist(playlist), start=None)
+
+    @Slot(int)
+    def shufflePlaylist(self, playlist: int) -> None:  # noqa: N802
+        """A playlist's Shuffle (R8.2): shuffle on, and the playlist from a song at random."""
+        if not self.queue.shuffle:
+            self.queue.set_shuffle(True)
+            self._remember(shuffle=True)
+        self.play_songs(*self._playlist(playlist), start=None)
+
+    def _playlist(self, playlist: int) -> tuple[list[int], str]:
+        if self._read is None:
+            return [], ""
+        c = self._read()
+        ids = [
+            r[0]
+            for r in c.execute(
+                "SELECT song.id FROM playlist_entry JOIN song ON song.path = playlist_entry.path"
+                " WHERE playlist_id = ? ORDER BY position",
+                (playlist,),
+            )
+        ]
+        r = c.execute("SELECT name FROM playlist WHERE id = ?", (playlist,)).fetchone()
+        return ids, r[0] if r else ""
 
     @Slot(str)
     def playGenre(self, name: str) -> None:  # noqa: N802

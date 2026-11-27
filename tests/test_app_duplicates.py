@@ -41,7 +41,17 @@ from musikata.duplicates import (
     question_of,
 )
 from musikata.history import ChangeHistory, undone_text
-from musikata_core import attention, db, duplicates, history, ratings, rootfiles, scanner, settings
+from musikata_core import (
+    attention,
+    db,
+    duplicates,
+    history,
+    playlists,
+    ratings,
+    rootfiles,
+    scanner,
+    settings,
+)
 from musikata_core import tags as tags_core
 from musikata_core.attention import Entry
 from musikata_core.duplicates import Copy, Group
@@ -746,3 +756,34 @@ def test_the_play_counts_change_this_computers_rows_through_their_keeping(root, 
         assert counts.change(lambda c, me: me).result() == ME
     finally:
         counts.close()
+
+
+def test_the_playlists_naming_a_copy_moved_to_the_trash_are_pointed_at_the_copy_kept(
+    root, tmp_path
+):
+    """R2.12, R8: every playlist naming a copy moved names the copy kept instead, in the same
+    step (playlists.Store.repoint); one that fails is logged and the move stands."""
+    music, index, paths, rel, ids = root
+    exact = next(g for g in duplicates.found(index.read()) if not g.likely)
+    os.makedirs(os.path.join(music, "Playlists"), exist_ok=True)
+    with open(os.path.join(music, "Playlists", "Mix.m3u8"), "w", encoding="utf-8") as f:
+        f.write(f"../{rel['rip']}\n../{rel['moon']}\n")
+    store = playlists.Store(music, index)
+    found = {"Playlists": [playlists.Found("Mix.m3u8", 1, 1)]}
+    playlists.refresh(music, index, found, lambda folder: True)
+    w = ratings.Writing(music, index, write_file, True, FakeClock(NOW))
+    plan = duplicates.plan(exact, ids[rel["signal"]], {ids[rel["rip"]]})
+    remove, trash = copies_app.remover(music, index), Trash(str(tmp_path / "Trash"))
+    out = copies_app.move(music, [plan], trash, remove, w, None, repoint=store.repoint)
+    assert [c.path for c in out.trashed] == [rel["rip"]]
+    named = [p for (p,) in index.read().execute(
+        "SELECT path FROM playlist_entry ORDER BY position")]  # fmt: skip
+    assert named == [rel["signal"], rel["moon"]]
+
+    def broken(moves):
+        raise OSError("the playlists folder can't be written")
+
+    likely = next(g for g in duplicates.found(index.read()) if g.likely)
+    plan = duplicates.plan(likely, ids[rel["moon"]], {ids[rel["radio"]]})
+    out = copies_app.move(music, [plan], trash, remove, w, None, repoint=broken)
+    assert [c.path for c in out.trashed] == [rel["radio"]]

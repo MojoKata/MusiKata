@@ -22,8 +22,9 @@ trash.
   and the files moved noted), whose message offers Undo and says that Undo can't take files out
   of the trash (R2.11). Once the files have gone, a step that fails is logged, the steps after it
   still run, and the message says what wasn't done: rows not taken out stay listed until the next
-  scan, which takes out the songs whose file is gone. Playlists naming a copy moved are slice 7's
-  (R8, #24).
+  scan, which takes out the songs whose file is gone. Every playlist naming a copy moved is
+  pointed at the copy kept (playlists.Store.repoint, `repoint`, R8); a playlist can't be put back
+  by Undo, as the copy it named is in the trash.
 
 What each says is decided here as plain data and text, tested without a window; what a group holds
 and the plan of a move are musikata_core.duplicates'."""
@@ -32,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -251,11 +252,13 @@ def move(
     write: Callable[[Job], Written],
     record: history.Recording | None,
     plays: PlaysChange | None = None,
+    repoint: Callable[[Mapping[str, str]], object] | None = None,
 ) -> Moved:
     """R2.12's Move the others to the trash, on the calling thread (never the GUI's): each copy
     of `plans` that goes moved to the trash (`trash`); this computer's plays of those moved given
     to the copy kept (`plays`, rootfiles.Keeping.change; None: none are counted); their rows taken
-    out of the index (`remove`, scanner.remove); the kept copy given their highest rating
+    out of the index (`remove`, scanner.remove); the playlists naming them pointed at the copy
+    kept (`repoint`, playlists.Store.repoint, R8); the kept copy given their highest rating
     (`write`, ratings.Writing); all one entry (`record`; None: the history is off), the rating a
     file of it and the plays and the files moved noted. Once a file has gone, a step that fails
     is logged and noted in what it gives (`Moved`), and the steps after it still run."""
@@ -305,6 +308,11 @@ def move(
                 " scan takes them out"
             )
             out.listed = True
+    if done and repoint is not None:
+        try:
+            repoint({c.path: p.kept.path for p, went in done for c in went})
+        except Exception:  # noqa: BLE001  (logged; the playlists show the entries missing)
+            log.exception("the playlists naming the copies moved to the trash weren't changed")
     jobs = []
     for p, went in done:
         best = duplicates.plan(duplicates.Group((p.kept, *went), False), p.kept.song,
@@ -355,7 +363,8 @@ class Duplicates(QObject):
     first (R2.11), then the move on `executor` (its own thread when None), written by `write`
     (ratings.Writing), kept in `changes` (None: no entry, no message), the files moved to the
     trash by `trash`, the plays given through `plays` (rootfiles.Keeping.change; None: none), the
-    rows taken out by `remove`; then `done` is told (Library.reload) on this thread. `available`
+    rows taken out by `remove`, the playlists naming them pointed at the copy kept by `repoint`
+    (playlists.Store.repoint); then `done` is told (Library.reload) on this thread. `available`
     says whether the root is there (R2.10)."""
 
     changed = Signal()
@@ -375,9 +384,11 @@ class Duplicates(QObject):
         available: Callable[[], bool] = lambda: True,
         executor: Executor | None = None,
         parent: QObject | None = None,
+        repoint: Callable[[Mapping[str, str]], object] | None = None,
     ) -> None:
         super().__init__(parent)
         self._root, self._model, self._write, self._remove = root, model, write, remove
+        self._repoint = repoint
         self._changes, self._plays, self._trash = changes, plays, trash
         self._done, self._saved, self._available = done, saved, available
         self._executor = executor
@@ -460,10 +471,11 @@ class Duplicates(QObject):
         record = self._changes.recording() if self._changes is not None else None
         root, trash, remove, write, plays = (self._root, self._trash, self._remove, self._write,
                                              self._plays)  # fmt: skip
+        repoint = self._repoint
 
         def job() -> None:
             try:
-                out = move(root, plans, trash, remove, write, record, plays)
+                out = move(root, plans, trash, remove, write, record, plays, repoint)
             except Exception as e:  # noqa: BLE001  (logged; the message says it failed)
                 log.exception("moving copies to the trash failed")
                 out = Moved(failed=[("the copies", f"weren't moved: {e}")])
@@ -513,6 +525,7 @@ class Duplicates(QObject):
             self._executor.shutdown(wait=True)
             self._executor = None
         self._changes = self._saved = self._done = self._write = self._plays = None
+        self._repoint = None
         self._available = _gone
 
     # ---------- what QML reads ----------

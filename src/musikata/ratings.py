@@ -210,6 +210,7 @@ class Ratings(QObject):
             "album": library.property("album").property("songs"),
             "artist": library.property("artist").property("others"),
             "genre": library.property("genrePage").property("songs"),
+            "playlist": library.property("playlistPage").property("songs"),
             "folders": library.property("folders").property("model"),
         }.get(view)
         songs = target_of(model)[0] if model is not None else []

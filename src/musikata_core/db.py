@@ -260,8 +260,32 @@ def _v11(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
+def _v12(c: sqlite3.Connection) -> None:
+    """Playlists (A2.1's playlist and playlist_entry, R8): a row per `.m3u` or `.m3u8` file under
+    the root, by its path, with its name and its sort key, its kind, the size and modification
+    time it was read at, the encoding it was read in, how many of its entries name their file by
+    an absolute path, and a smart playlist's rule (R8.9; NULL: none); and a row per entry, in
+    order, with its path as written, the path under the root it resolves to (NULL: outside the
+    root), and its #EXTINF's seconds and text. A song is an entry's by that path, so an entry whose
+    path no song has is missing (R8.7). Filled by the next scan, so nothing needs reading again."""
+    c.execute(
+        "CREATE TABLE playlist (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
+        " name TEXT NOT NULL, name_key TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL,"
+        " mtime_ns INTEGER NOT NULL, encoding TEXT NOT NULL, absolute INTEGER NOT NULL DEFAULT 0,"
+        " rule TEXT)"
+    )
+    c.execute("CREATE INDEX playlist_order ON playlist (name_key, path)")
+    c.execute(
+        "CREATE TABLE playlist_entry (id INTEGER PRIMARY KEY, playlist_id INTEGER NOT NULL"
+        " REFERENCES playlist (id) ON DELETE CASCADE, position INTEGER NOT NULL,"
+        " written TEXT NOT NULL, path TEXT, seconds INTEGER, title TEXT NOT NULL DEFAULT '')"
+    )
+    c.execute("CREATE INDEX playlist_entry_order ON playlist_entry (playlist_id, position)")
+    c.execute("CREATE INDEX playlist_entry_path ON playlist_entry (path)")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12,
 ]  # fmt: skip
 
 

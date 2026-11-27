@@ -3,12 +3,14 @@ import QtQuick.Controls.Basic
 import "."
 
 // The sidebar (R6.3): the app's icon and name, the library's views (Albums, Artists, Songs,
-// Genres, Folders, and Needs attention with its count, R2.8), and the music root's card at the
-// bottom (R2.1.1): its path, its line, and its dot, red with the card when the root isn't there
-// (R2.10).
+// Genres, Folders, and Needs attention with its count, R2.8), Playlists with + (R8.3) and each
+// playlist with its count, its right-click menu Rename, Duplicate and Delete playlist… (R8.4), and
+// the music root's card at the bottom (R2.1.1): its path, its line, and its dot, red with the card
+// when the root isn't there (R2.10).
 Rectangle {
     id: side
     required property var library
+    property var playlists: null      // what changes them (musikata.playlists)
     width: 232
     color: Theme.side
 
@@ -73,6 +75,74 @@ Rectangle {
             active: side.library.section === modelData[0]
             badge: modelData[0] === "attention" ? side.library.attentionCount : ""
             onClicked: side.library.show(modelData[0])
+        }
+    }
+
+    Text {
+        id: playlistsTitle
+        x: 22
+        y: 90 + 6 * 36 + 18
+        text: qsTr("PLAYLISTS")
+        color: Theme.faint
+        font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
+    }
+    Item {  // + (R8.3): New playlist, its name selected for editing
+        objectName: "newPlaylist"
+        x: side.width - 22 - width + 6
+        anchors.verticalCenter: playlistsTitle.verticalCenter
+        width: 24
+        height: 24
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("New playlist")
+        HoverHandler { id: plusHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: if (side.playlists) side.playlists.create() }
+        Rectangle { anchors.fill: parent; radius: 6; color: Theme.hover; visible: plusHover.hovered }
+        Icon { anchors.centerIn: parent; name: "plus"; size: 15; color: Theme.muted }
+    }
+    ListView {
+        id: playlistsList
+        objectName: "sidePlaylists"
+        y: playlistsTitle.y + playlistsTitle.height + 10
+        width: side.width
+        height: Math.max(0, card.y - 10 - y)
+        clip: true
+        spacing: 4
+        boundsBehavior: Flickable.StopAtBounds
+        model: side.library.playlists
+        delegate: PlaylistItem {
+            required property int playlistId
+            objectName: "side-playlist"
+            width: playlistsList.width
+            active: side.library.view === "playlist" && side.library.playlistPage.id === playlistId
+            editing: side.playlists !== null && side.playlists.editing === playlistId
+            onClicked: side.library.openPlaylist(playlistId)
+            onMenu: playlistMenu.openFor(playlistId, this)
+            onRenamed: (text) => side.playlists.rename(playlistId, text)
+            onCancelled: side.playlists.cancelRename()
+        }
+        ScrollBar.vertical: ScrollBar { }
+    }
+    Menu {  // a playlist's right-click menu (R8.4)
+        id: playlistMenu
+        property int playlist: -1
+        function openFor(id, parent) {
+            playlistMenu.playlist = id
+            playlistMenu.popup()
+        }
+        MenuItem {
+            objectName: "renamePlaylist"
+            text: qsTr("Rename")
+            onTriggered: side.playlists.startRename(playlistMenu.playlist)
+        }
+        MenuItem {
+            objectName: "duplicatePlaylist"
+            text: qsTr("Duplicate")
+            onTriggered: side.playlists.duplicate(playlistMenu.playlist)
+        }
+        MenuItem {
+            objectName: "deletePlaylist"
+            text: qsTr("Delete playlist…")
+            onTriggered: side.playlists.askDelete(playlistMenu.playlist)
         }
     }
 

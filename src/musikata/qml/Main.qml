@@ -26,7 +26,9 @@ import "."
 // window too, as Infer from path (R3) does from Folders, an album's page, the selection bars, the
 // right-click menus, the panel's ⋯ menu and Needs attention. A star clicked
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
-// selection's (R10.2).
+// selection's (R10.2). A playlist of the sidebar opens its page (R8.2, P01-playlist-drag); Delete
+// playlist asks first, over the window (R8.4, R6.8); Find (R8.7) and Export… (R8.8) open their
+// dialogs over the whole window.
 Window {
     id: win
     required property var library
@@ -41,6 +43,7 @@ Window {
     required property var copies
     required property var encodings
     required property var infer
+    required property var playlists
     width: 1280
     height: 800
     minimumWidth: 960
@@ -52,12 +55,14 @@ Window {
                                   || win.names.opened || win.copies.opened
                                   || win.copies.question.title !== undefined
                                   || win.encodings.opened || win.infer.opened
+                                  || win.playlists.opened
 
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
         id: sidebar
         anchors { left: parent.left; top: parent.top; bottom: bar.top }
         library: win.library
+        playlists: win.playlists
     }
     ViewHeader {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -162,18 +167,20 @@ Window {
         }
         sourceComponent: ({
             albums: albums, album: album, artists: artists, artist: artist, songs: songs,
-            genres: genreList, genre: genre, folders: folders, attention: needs
+            genres: genreList, genre: genre, folders: folders, attention: needs,
+            playlist: playlist
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists } }
     Component { id: artists; ArtistsView { library: win.library } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists } }
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres } }
-    Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres } }
-    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer } }
+    Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists } }
+    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists } }
 
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -228,6 +235,21 @@ Window {
         objectName: "inferOverlay"
         anchors.fill: parent
         infer: win.infer
+    }
+    FindDialog {
+        objectName: "findOverlay"
+        anchors.fill: parent
+        playlists: win.playlists
+    }
+    ExportDialog {
+        objectName: "exportOverlay"
+        anchors.fill: parent
+        playlists: win.playlists
+    }
+    CopiesQuestion {  // Delete playlist's question (R8.4, R6.8)
+        objectName: "playlistQuestion"
+        anchors.fill: parent
+        copies: win.playlists
     }
     Shortcut {
         sequence: "Ctrl+E"

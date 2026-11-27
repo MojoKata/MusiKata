@@ -13,6 +13,7 @@ Item {
     id: page
     required property var library
     required property var player
+    property var playlists: null  // Add to playlist and New playlist from selection (R8)
     property var edit: null
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // Album art (R5.4): an image dropped on an album's cover
@@ -205,6 +206,6 @@ Item {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 14 }
     }
-    SongMenu { id: songMenu; player: page.player; edit: page.edit }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit; playlists: page.playlists; playlistList: page.library.playlists }
     GenreMenu { id: genreMenu; library: page.library; player: page.player; genres: page.genres }
 }

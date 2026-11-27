@@ -12,7 +12,7 @@ SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's 
 | `artist` | Each artist, names that differ only in case as one (R2.5.4): the name shown, its sort key (R2.13), cached counts |
 | `folder` | One row per folder under the root that has audio beneath it: path, parent, counts of subfolders and songs (direct and beneath), its own cover's source, the mosaic's sources, the worst path-match state beneath it (A2.7) |
 | `playlist` | One row per playlist file: path, modification time, smart rule (R8.9) |
-| `playlist_entry` | Playlist, position, the path as written, the song it resolves to (or none: missing, R8.7) |
+| `playlist_entry` | Playlist, position, the path as written, the path under the root it resolves to (none: outside the root), and its `#EXTINF`; its song is the one at that path, found by the index on `song.path` as it is read, so a scan that adds, moves or removes songs needs no pass over the entries (none: missing, R8.7) |
 | `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/<computer id>/plays.json`, a file per computer (A2.8) |
 | `rating` | The ratings kept beside the files (R10.3), from `.musikata/ratings.json` (A2.8), each linked to its song; the song's own row holds its file's rating apart from the one it shows, which is its entry here when ratings.json keeps its rating (`ratings`) |
 | `change` / `change_file` | The change history (R4.9), indexed from `.musikata/history/` (A3.5) |
