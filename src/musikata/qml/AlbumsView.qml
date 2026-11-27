@@ -8,6 +8,7 @@ Item {
     id: view
     required property var library
     required property var player
+    property var art: null  // Album art (R5.4): an image dropped on a cover
     readonly property bool listMode: view.library.albumsMode === "list"
 
     Flickable {  // the genre chips (R2.6)
@@ -91,6 +92,7 @@ Item {
                 playing: cell.playing
                 onOpen: view.library.openAlbum(cell.albumId)
                 onPlay: view.player.playAlbum(cell.albumId)
+                onImageDropped: (urls) => { if (view.art) view.art.dropOnAlbum(cell.albumId, urls) }
             }
         }
         ScrollBar.vertical: ScrollBar { }
@@ -150,6 +152,7 @@ Item {
                 width: rows.width
                 columns: table.columns
                 onOpen: view.library.openAlbum(albumId)
+                onImageDropped: (urls) => { if (view.art) view.art.dropOnAlbum(albumId, urls) }
             }
             ScrollBar.vertical: ScrollBar { }
         }

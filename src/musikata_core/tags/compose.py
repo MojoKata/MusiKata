@@ -21,7 +21,8 @@ from .fields import Picture, Tags
 TEXT = ("title", "artist", "album", "albumartist", "composer", "comment", "artistsort",
         "albumartistsort", "albumsort")  # fmt: skip
 NUMBERS = ("track", "tracktotal", "disc", "disctotal")
-FIELDS = (*TEXT, *NUMBERS, "year", "genres", "compilation", "rating", "cover")
+FIELDS = (*TEXT, *NUMBERS, "year", "genres", "compilation", "rating", "cover", "others")
+PICTURES = ("cover", "others")  # the fields that are pictures, which Tags doesn't hold
 
 # R10.4: the POPM value (user Windows Media Player 9 Series) for 0 to 5 stars
 POPM_VALUES = (0, 1, 64, 128, 196, 255)
@@ -38,7 +39,9 @@ def normalize(changes: Mapping[str, object]) -> dict[str, object]:
     """A save's changes, by R4.1 field (`FIELDS`), as the writers take them: text stripped, and
     None when empty; numbers above 0, else None; the year, an int or a date ("2003-05-01"), as
     a pair (year, full date or None); genres each once, as parse.genres reads them; the rating
-    0 to 5, 0 cleared; the cover a Picture, or None to remove it. Raises ValueError for a field
+    0 to 5, 0 cleared; the cover a Picture, or None to remove it; `others`, the pictures a song
+    has but its front cover (R5.3: none, to remove them; an undo's, to put them back), a tuple of
+    Pictures. Raises ValueError for a field
     that isn't one, or a value of the wrong kind: a caller's mistake, not the file's."""
     out: dict[str, object] = {}
     for name, value in changes.items():
@@ -69,6 +72,12 @@ def normalize(changes: Mapping[str, object]) -> dict[str, object]:
             if value is not None and not isinstance(value, Picture):
                 raise ValueError(f"a cover is a Picture, not {value!r}")
             out[name] = value if value is None or value.data else None
+        elif name == "others":
+            if isinstance(value, str | bytes) or not isinstance(value, Sequence):
+                raise ValueError(f"others are a list of pictures, not {value!r}")
+            if not all(isinstance(p, Picture) and p.data for p in value):
+                raise ValueError(f"others are pictures with their bytes, not {value!r}")
+            out[name] = tuple(value)
         else:
             raise ValueError(f"{name!r} isn't a field MusiKata writes")
     return out
@@ -99,7 +108,7 @@ def _year(value: object) -> tuple[int | None, str | None]:
 def effective(change: Change, before: Tags) -> dict[str, object]:
     """What of a normalized change differs from the file as read (`before`): only that is
     written, so a field already as asked keeps its form. A year the file's full date already has
-    keeps the date (R4.1). The cover is always written: Tags doesn't hold its bytes."""
+    keeps the date (R4.1). The pictures are always written: Tags doesn't hold their bytes."""
     out: dict[str, object] = {}
     for name, value in change.items():
         if name == "year":
@@ -109,7 +118,7 @@ def effective(change: Change, before: Tags) -> dict[str, object]:
         elif name == "rating":
             if value == (before.rating or 0):
                 continue
-        elif name != "cover" and value == getattr(before, name):
+        elif name not in PICTURES and value == getattr(before, name):
             continue
         out[name] = value
     return out
@@ -117,14 +126,14 @@ def effective(change: Change, before: Tags) -> dict[str, object]:
 
 def expected(before: Tags, change: Change) -> Tags:
     """The tags the file should read back as once `change` (`effective`) is written. Whether it
-    has a cover is left as it was: write.py checks the pictures themselves."""
+    has a cover is left as it was: safe.py checks the pictures themselves."""
     fields: dict[str, object] = {}
     for name, value in change.items():
         if name == "year":
             fields["year"], fields["date"] = _year_of(value)
         elif name == "rating":
             fields["rating"] = value or None
-        elif name != "cover":
+        elif name not in PICTURES:
             fields[name] = value
     return replace(before, **fields)  # type: ignore[arg-type]
 
@@ -313,13 +322,27 @@ def mp4(change: Change, before: Tags) -> dict[str, object]:
 # ---------- pictures ----------
 
 
-def pictures_after(before: Sequence[Picture], cover: Picture | None, typed: bool) -> list[Picture]:
-    """A song's pictures once its cover is set (`cover`) or removed (None): the new cover first,
-    as the front cover, and the others as they were. `typed`: the kind numbers its pictures (ID3,
-    FLAC, Vorbis comments), so each front cover gives way; MP4's covr doesn't, so its first, the
-    one shown as the cover (R5.1), does."""
-    rest = [p for p in before if p.type != FRONT] if typed else list(before[1:])
-    return ([cover] if cover is not None else []) + rest
+def pictures_after(before: Sequence[Picture], change: Change, typed: bool) -> list[Picture]:
+    """A song's pictures once `change` is written: its front cover set (`cover`, a Picture) or
+    removed (None), first, and its other pictures (`others`) as given; what the change doesn't
+    name as it was, the front cover still first. `typed`: the kind numbers its pictures (ID3,
+    FLAC, Vorbis comments), so each front cover gives way to a new one; MP4's covr doesn't, so its
+    first, the one shown as the cover (R5.1), does."""
+    fronts = [p for p in before if p.type == FRONT] if typed else list(before[:1])
+    rest = others_of(before, typed)
+    if "cover" in change:
+        cover = cast(Picture | None, change["cover"])
+        fronts = [cover] if cover is not None else []
+    if "others" in change:
+        rest = list(cast(Sequence[Picture], change["others"]))
+    return fronts + rest
+
+
+def others_of(pictures: Sequence[Picture], typed: bool) -> list[Picture]:
+    """A song's pictures but its front cover (R5.3's "other embedded images"): where the kind
+    numbers its pictures (`typed`), those that aren't front covers; in MP4's covr, all but the
+    first."""
+    return [p for p in pictures if p.type != FRONT] if typed else list(pictures[1:])
 
 
 def cover_of(pictures: Sequence[Picture], typed: bool) -> Picture | None:

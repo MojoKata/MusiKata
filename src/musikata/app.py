@@ -35,6 +35,7 @@ from musikata_core.clock import Clock, SystemClock
 from musikata_core.ratings import Writing, set_everything
 
 from . import garbage, media
+from .albumart import AlbumArt, ArtImages
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
 from .edittags import EditTags
@@ -147,6 +148,7 @@ class Shell:
     changes: ChangeHistory | None = None
     edit: EditTags | None = None
     ratings: Ratings | None = None
+    art: AlbumArt | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -155,7 +157,7 @@ class Shell:
         Shiboken.delete(self.engine)
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
-            self.edit, self.ratings,
+            self.edit, self.ratings, self.art,
         )  # fmt: skip
 
 
@@ -168,9 +170,11 @@ def close_bridges(
     changes: ChangeHistory | None = None,
     edit: EditTags | None = None,
     ratings: Ratings | None = None,
+    art: AlbumArt | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the Edit tags panel's save (stopped before its next file) and threads, the
+    playback thread, the Edit tags panel's and Album art's saves (stopped before their next file)
+    and threads, the
     ratings' save and watching, the play counts (their file written), the change history's
     thread, the watcher, the scan's thread and the worker processes, and the index; then deletes
     them (`release`)."""
@@ -179,6 +183,8 @@ def close_bridges(
     player.close()
     if edit is not None:
         edit.close()
+    if art is not None:
+        art.shut()
     if ratings is not None:
         ratings.close()
     if counts is not None:
@@ -187,7 +193,7 @@ def close_bridges(
         changes.close()
     library.close()
     index.close()
-    release(controls, counts, edit, ratings, changes, player, library)
+    release(controls, counts, edit, art, ratings, changes, player, library)
 
 
 def release(*objects: QObject | None) -> None:
@@ -264,22 +270,36 @@ def load(
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
+    thumbs = ArtImages()
+    engine.addImageProvider("albumart", thumbs)
+    album_art = AlbumArt(
+        root, index.read, writing, changes, saved=library.saved, images=thumbs,
+        available=lambda: bool(library.property("available")),
+    )  # fmt: skip
     engine.setInitialProperties(
-        {"library": library, "player": player, "history": changes, "edit": edit, "ratings": rating}
+        {
+            "library": library,
+            "player": player,
+            "history": changes,
+            "edit": edit,
+            "ratings": rating,
+            "art": album_art,
+        }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
         Shiboken.delete(engine)
         # none left for a collection (A1.3)
-        close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating)
+        close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
+                      art=album_art)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating,
+        changes, edit, rating, album_art,
     )  # fmt: skip
 
 
@@ -646,9 +666,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         player = session.shell.player if session.shell is not None else None
         changes = session.shell.changes if session.shell is not None else None
         edit = session.shell.edit if session.shell is not None else None
+        album_art = session.shell.art if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
-            history=changes, edit=edit,
+            history=changes, edit=edit, art=album_art,
         ).start()  # fmt: skip
     else:
         session.window.show()

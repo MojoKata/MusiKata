@@ -41,7 +41,17 @@ KINDS = {
 # the mockups' albums (docs/mockups/src/render.py, ALBUMS; tests/test_scripts_demo_library.py
 # holds the two together): artist, album, year, genre, cover seed, songs, kind, folder, what's odd
 ALBUMS = [
-    ("Lumen Drift", "Glass Harbor", 2019, "Electronic", 11, 10, "flac", "2019 - Glass Harbor", ""),
+    (
+        "Lumen Drift",
+        "Glass Harbor",
+        2019,
+        "Electronic",
+        11,
+        10,
+        "flac",
+        "2019 - Glass Harbor",
+        "embedded-too large-cover back",
+    ),
     ("The Paper Lanterns", "Northbound Static", 2021, "Indie Rock", 23, 12, "mp3", "", "id3v23"),
     ("Mara Okafor", "Salt & Ember", 2018, "Soul", 37, 11, "aac", "", "small-cover"),
     ("Kestrel Union", "Low Orbit", 2022, "Synthwave", 41, 9, "mp3", "2022 - Low Orbit", "track-04"),
@@ -197,6 +207,7 @@ class Song:
     shape: set[str] = field(default_factory=set)
     tone: int = 440
     cover: tuple[int, int] | None = None  # embedded: (seed, size)
+    back: tuple[int, int] | None = None  # a back cover embedded too (R5.2): (seed, size)
 
 
 @dataclass
@@ -204,6 +215,8 @@ class Library:
     songs: list[Song]
     covers: dict[str, tuple[int, int]]  # folder -> (seed, size) of its cover.jpg
     playlists: dict[str, list[str]]  # path -> entries, as written
+    # folder -> its other images: (name, seed, size), a PNG (T02's back.png, R5.2)
+    images: dict[str, list[tuple[str, int, int]]] = field(default_factory=dict)
 
 
 def _titles(rng: random.Random, n: int) -> list[str]:
@@ -222,9 +235,11 @@ def _album(row, rng: random.Random, lib: Library) -> None:
         else _titles(rng, count)
     )
     ext = KINDS[kind][0]
-    size = 300 if "small-cover" in odd else 600
+    size = 300 if "small-cover" in odd else 1200 if "large-cover" in odd else 600
     if "embedded" not in odd and "no-cover" not in odd:
         lib.covers[folder] = (seed, size)
+    if "back" in odd:  # T02: a back cover beside cover.jpg, and a smaller one in two songs
+        lib.images[folder] = [("back.png", 311, 1400)]
     for n, title in enumerate(titles[:count], 1):
         tags: dict[str, object] = {
             "title": title,
@@ -257,7 +272,8 @@ def _album(row, rng: random.Random, lib: Library) -> None:
                 tags,
                 odd & {"id3v23", "id3v1-too", "track-04", "lower-keys"},
                 220 + (seed * 7 + n * 31) % 660,
-                (seed, size) if "embedded" in odd else None,
+                (seed, size) if odd & {"embedded", "embedded-too"} else None,
+                (211, 500) if "back" in odd and n in (3, 7) else None,
             )
         )
 
@@ -405,6 +421,23 @@ def cover_jpeg(seed: int, size: int) -> bytes:
     return b"".join(bytes(p) for p in [*ctx.encode(frame), *ctx.encode(None)])
 
 
+def cover_png(seed: int, size: int) -> bytes:
+    """A made-up picture as a PNG: diagonal stripes of two colours from the seed (PyAV's PNG)."""
+    import av
+    import numpy as np
+
+    rng = random.Random(seed)
+    a, b = (np.array([rng.randrange(40, 230) for _ in range(3)], np.uint8) for _ in range(2))
+    stripes = (np.add.outer(np.arange(size), np.arange(size)) // max(1, size // 12)) % 2
+    img = np.where(stripes[..., None] == 0, a, b).astype(np.uint8)
+    ctx = av.CodecContext.create("png", "w")
+    ctx.width = ctx.height = size
+    ctx.pix_fmt = "rgb24"
+    ctx.time_base = fractions.Fraction(1, 25)
+    frame = av.VideoFrame.from_ndarray(img, format="rgb24")
+    return b"".join(bytes(p) for p in [*ctx.encode(frame), *ctx.encode(None)])
+
+
 def tag(path: str, song: Song) -> None:
     """The song's tags, written the way its shape says (A3.2's mapping)."""
     t = song.tags
@@ -502,6 +535,13 @@ def _tag_vorbis(path: str, song: Song) -> None:
             audio.add_picture(pic)
         else:
             audio["METADATA_BLOCK_PICTURE"] = base64.b64encode(pic.write()).decode()
+    if song.back and song.kind == "flac":  # a back cover beside the front (R5.2)
+        back = Picture()
+        back.type, back.mime, back.desc = 4, "image/jpeg", "Back"
+        back.width = back.height = song.back[1]
+        back.depth = 24
+        back.data = cover_jpeg(*song.back)
+        audio.add_picture(back)
     audio.save()
 
 
@@ -542,7 +582,7 @@ def before_history(song: Song, saves: list = HISTORY) -> Song:
     for _computer, _when, _what, album, name, before, after in saves:
         if after is None and tags.get("album") == album:
             tags[name] = before
-    return Song(song.path, song.kind, tags, song.shape, song.tone, song.cover)
+    return Song(song.path, song.kind, tags, song.shape, song.tone, song.cover, song.back)
 
 
 def history(music: str, lib: Library, saves: list = HISTORY, undone: dict = UNDONE) -> list[str]:
@@ -624,6 +664,10 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
     for folder, (cseed, size) in lib.covers.items():
         with open(os.path.join(music, folder, "cover.jpg"), "wb") as f:
             f.write(cover_jpeg(cseed, size))
+    for folder, images in lib.images.items():
+        for name, iseed, size in images:
+            with open(os.path.join(music, folder, name), "wb") as f:
+                f.write(cover_png(iseed, size))
     for rel, lines in lib.playlists.items():
         path = os.path.join(music, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)

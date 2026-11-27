@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, tzinfo
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
-from musikata_core import db, history, rootfiles, scanner, settings, watch
+from musikata_core import art, db, history, rootfiles, scanner, settings, watch
 from musikata_core.clock import Clock
 from musikata_core.history import Lost, Plan, Recording, Row
 from musikata_core.tags import Job, Outcome, Written
@@ -44,9 +44,12 @@ LABELS = {
     "year": "Year", "genres": "Genre", "composer": "Composer", "comment": "Comment",
     "compilation": "Compilation", "rating": "Rating", "artistsort": "Artist sort",
     "albumartistsort": "Album artist sort", "albumsort": "Album sort", "cover": "Cover",
+    "others": "Other pictures",
 }  # fmt: skip
 RATE = "rate"  # a save of ratings (R10.2)
-ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs"}  # an entry
+ART = "album-art"  # a save of the Album art dialog, or Save cover to folder (R5.3, R5.5)
+ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
+           ART: "Album art"}  # fmt: skip  # an entry
 # with no description, by its action
 
 
@@ -132,6 +135,11 @@ def value_text(field: str, value: object) -> str:
     """A field's value as the question shows it: — for none, genres joined, stars, Yes or No."""
     if field == "cover":
         return "a cover" if value else "no cover"
+    if field == "others":  # the other pictures' hashes (R5.3)
+        n = len(value) if isinstance(value, tuple | list) else 0
+        return (
+            "no other pictures" if not n else "1 other picture" if n == 1 else f"{n} other pictures"
+        )
     if value is None or value == "" or value == []:
         return "—"
     if isinstance(value, bool):
@@ -476,7 +484,7 @@ class ChangeHistory(QObject):
         self._busy = False
         self._own = self._own or own  # its entries named as this computer's from now on
         if out.saved and self._saved is not None:  # their rows, on this thread (Library.saved)
-            self._saved(out.saved)
+            self._saved(art.written_songs(out.saved))  # a cover.jpg's folder is rescanned
         self._message = {"text": undone_text(out, what, skipped), "undo": out.entry or ""}
         self._timer.start()
         self.messageChanged.emit()

@@ -145,7 +145,8 @@ def _v6(c: sqlite3.Connection) -> None:
     root's `.musikata/history/`, by its file's name, with when and on which computer it was saved,
     what the save was and the entry it undoes, if any; and a row per file it touched, in its
     order, with the file's path and audio hash, the fields it changed (by name, comma-separated)
-    and the old cover it keeps (history/images/<hash>). Filled from the entries' files, so nothing
+    and the old covers it keeps (history/images/<hash>, space-separated: the cover, or
+    image, and the other pictures, R5.3). Filled from the entries' files, so nothing
     needs reading again."""
     c.execute(
         "CREATE TABLE change (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,"

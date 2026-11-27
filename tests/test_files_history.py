@@ -23,7 +23,7 @@ from fakes import FakeClock, fill, wav
 from hypothesis import given
 from hypothesis import strategies as st
 
-from musikata_core import db, history, ratings, scanner, tags
+from musikata_core import art, db, history, ratings, scanner, tags
 from musikata_core.history import Broken, Current, Entry, FileChange, Recording
 from musikata_core.tags import AudioInfo, Batch, Job, Picture, Tags, Written
 
@@ -765,3 +765,181 @@ def test_a_rating_kept_beside_the_files_is_undone_where_it_is_kept(tmp_path):
         assert history.looking(lambda p: None)(path, False).tags.rating is None
     finally:
         i.close()
+
+
+# ---------- album art (R5.3): other pictures removed, and cover.jpg ----------
+
+
+class Trash:
+    """The system's trash, as a folder: what it was given, by name."""
+
+    def __init__(self, folder):
+        self.folder, self.got = str(folder), []
+        os.makedirs(self.folder, exist_ok=True)
+
+    def __call__(self, path):
+        self.got.append(os.path.basename(path))
+        os.replace(path, os.path.join(self.folder, f"{len(self.got)}-{os.path.basename(path)}"))
+        return True
+
+
+def art_save(root, clock, jobs, trash, description="Album art: Neap"):
+    rec = Recording(root, lambda: ME, clock)
+    write = art.writer(
+        lambda job: tags.save(job.path, job.changes, audio_hash=scanner.audio_hash), trash
+    )
+    out = Batch(jobs, write, record=rec, action="album-art", description=description).run()
+    clock.advance(seconds=1)
+    return out
+
+
+def art_undo(root, i, clock, name, trash, overwrite=False):
+    e = history.read(history.folder_of(root), name)
+    p = history.plan(e, root, history.finder(i.read()))
+    write = lambda job: tags.save(job.path, job.changes, audio_hash=scanner.audio_hash)  # noqa: E731
+    rec = Recording(root, lambda: ME, clock, e.name)
+    out = history.undo(p, root, overwrite, write, rec, trash=trash)
+    clock.advance(seconds=1)
+    return p, out
+
+
+def test_an_album_art_save_is_one_entry_and_undo_puts_back_the_covers_pictures_and_cover_jpg(
+    library, tmp_path
+):
+    """R5.3 and R4.9: the cover embedded, the other pictures removed and cover.jpg written are one
+    entry, valid under its schema; the old cover.jpg goes to the trash (Principle 5) and is kept
+    in history/images; Undo puts every picture and the old cover.jpg back, and Redo the new."""
+    root, i, clock, paths = library
+    trash = Trash(tmp_path / "trash")
+    back = Picture(4, "image/png", b"\x89PNG\r\n\x1a\nback", "Back")
+    tags.save(paths[0], {"others": (back,)}, audio_hash=scanner.audio_hash)
+    before = [(p.type, p.data) for p in tags.pictures(paths[0])]
+    jpg = os.path.join(root, "LD", "cover.jpg")
+    with open(jpg, "wb") as f:
+        f.write(b"\xff\xd8old cover.jpg")
+    new = Picture(3, "image/jpeg", demo.cover_jpeg(99, 16))
+    jobs = [Job(paths[0], {"cover": new, "others": ()}), Job(jpg, {"image": new.data})]
+    out = art_save(root, clock, jobs, trash)
+    assert out.failed == [] and out.entry is not None and trash.got == ["cover.jpg"]
+    assert [(p.type, p.data) for p in tags.pictures(paths[0])] == [(3, new.data)]
+    with open(jpg, "rb") as f:
+        assert f.read() == new.data
+    with open(os.path.join(history.folder_of(root), out.entry), encoding="utf-8") as f:
+        doc = json.load(f)
+    valid(doc)
+    song, image = doc["files"]
+    assert song["pictures"] == [{"type": 4, "mime": "image/png", "desc": "Back",
+                                 "image": history.image_hash(back.data)}]  # fmt: skip
+    assert song["new_pictures"] == []
+    assert image == {"path": "LD/cover.jpg", "image": history.image_hash(b"\xff\xd8old cover.jpg"),
+                     "new_image": history.image_hash(new.data)}  # fmt: skip
+    assert history.load_image(history.folder_of(root), image["image"]) == b"\xff\xd8old cover.jpg"
+    entry = history.read(history.folder_of(root), out.entry)
+    assert [f.fields() for f in entry.files] == [["cover", "others"], ["cover"]]
+    p, undone = art_undo(root, i, clock, out.entry, trash)
+    assert p.changed == [] and undone.failed == []
+    assert sorted((p.type, p.data) for p in tags.pictures(paths[0])) == sorted(before)
+    assert [p.desc for p in tags.pictures(paths[0]) if p.type == 4] == ["Back"]
+    with open(jpg, "rb") as f:
+        assert f.read() == b"\xff\xd8old cover.jpg"
+    art_undo(root, i, clock, undone.entry, trash)  # redone
+    with open(jpg, "rb") as f:
+        assert f.read() == new.data
+    assert [(p.type, p.data) for p in tags.pictures(paths[0])] == [(3, new.data)]
+
+
+def test_a_cover_jpg_that_wasnt_there_goes_to_the_trash_when_undone_and_one_changed_since_asks(
+    library, tmp_path
+):
+    """Undoing a cover.jpg written where there was none moves it to the trash; one changed since
+    is R4.9.1's question, as a field is."""
+    root, i, clock, paths = library
+    trash = Trash(tmp_path / "trash")
+    jpg = os.path.join(root, "LD", "cover.jpg")
+    out = art_save(root, clock, [Job(jpg, {"image": b"\xff\xd8new"})], trash)
+    assert trash.got == []
+    p, undone = art_undo(root, i, clock, out.entry, trash)
+    assert not os.path.exists(jpg) and trash.got == ["cover.jpg"] and undone.failed == []
+    out = art_save(root, clock, [Job(jpg, {"image": b"\xff\xd8new"})], trash)
+    with open(jpg, "wb") as f:
+        f.write(b"\xff\xd8someone else's")
+    p, kept = art_undo(root, i, clock, out.entry, trash)
+    (changed,) = p.changed
+    assert [(x.field, x.now, x.back) for x in changed.lost] == [
+        ("cover", history.image_hash(b"\xff\xd8someone else's"), None)
+    ]
+    assert kept.saved == [] and os.path.exists(jpg)
+
+
+def test_other_pictures_changed_since_would_be_lost():
+    kept = history.KeptPicture(4, "image/png", "", H1)
+    c = FileChange("a.flac", None, {}, {}, others=(kept,), new_others=())
+    assert history.lost(c, Current(Tags(), None, ())) == ()
+    assert history.lost(c, Current(Tags(), None, (H1,))) == ()
+    (lost,) = history.lost(c, Current(Tags(), None, (H2,)))
+    assert (lost.field, lost.now, lost.back) == ("others", (H2,), (H1,))
+
+
+def test_shapes_of_pictures_and_images_in_an_entry_each_read_for_what_can_be_used(caplog):
+    """testing.md's `history` shapes for R5.3's files: `pictures` not a list, a picture not an
+    object, its type text or a bool, its image not a hash; `new_pictures` with what isn't a hash;
+    `image` not a hash, `null` (there was none), in upper case; `new_image` missing."""
+    doc = entry_doc(files=[
+        {"path": "a.flac", "pictures": [{"type": 4, "mime": 5, "desc": None, "image": H1.upper()},
+                                        {"type": None, "image": H2}],
+         "new_pictures": [H2, "nope", 3]},
+        {"path": "b.flac", "fields": {"title": "T"}, "pictures": "back"},
+        {"path": "c.flac", "pictures": [{"type": "4", "image": H1}]},
+        {"path": "d.flac", "pictures": [{"type": True, "image": H1}]},
+        {"path": "e.flac", "pictures": [["not", "an", "object"]]},
+        {"path": "f/cover.jpg", "image": H1.upper()},
+        {"path": "g/cover.jpg", "image": None, "new_image": H2},
+        {"path": "h/cover.jpg", "image": "not a hash"},
+        {"path": "i/cover.jpg", "image": H1, "new_image": "nope"},
+    ])  # fmt: skip
+    found = parse(doc)
+    a, b, f, g, i = found.files
+    assert a.others == (history.KeptPicture(4, "", "", H1), history.KeptPicture(None, "", "", H2))
+    assert a.new_others == (H2,) and a.fields() == ["others"] and a.kept() == [H1, H2]
+    assert (b.path, b.others, b.old) == ("b.flac", None, {"title": "T"})
+    assert (f.image, f.old_cover, f.new_cover, f.fields(), f.kept()) == (
+        True,
+        H1,
+        None,
+        ["cover"],
+        [H1],
+    )
+    assert (g.old_cover, g.new_cover, g.kept()) == (None, H2, [])
+    assert (i.path, i.old_cover, i.new_cover) == ("i/cover.jpg", H1, None)
+    said = "\n".join(found.problems)
+    for problem in ("b.flac: pictures isn't a list", "c.flac: a picture isn't",
+                    "d.flac: a picture isn't", "e.flac: a picture isn't",
+                    "h/cover.jpg: image isn't a cover's hash", "i/cover.jpg: new_image isn't",
+                    "c.flac: no field it can put back"):  # fmt: skip
+        assert problem in said, problem
+    again = parse(history.document(found))
+    assert again.files == found.files
+
+
+def test_the_old_pictures_and_images_an_entry_keeps_are_never_pruned(tmp_path, index):
+    folder = str(tmp_path / "history")
+    now = datetime(2026, 11, 25, 12, tzinfo=UTC)
+    picture = history.keep_image(folder, b"\x89PNG\r\n\x1a\nback")
+    image = history.keep_image(folder, b"\xff\xd8old cover.jpg")
+    ancient = (now - timedelta(days=2)).timestamp()
+    for digest in (picture, image):
+        os.utime(history.image_path(folder, digest), (ancient, ancient))
+    files = [{"path": "a.flac", "pictures": [{"type": 4, "image": picture}], "new_pictures": []},
+             {"path": "cover.jpg", "image": image, "new_image": None}]  # fmt: skip
+    write_entry(folder, history.name_for(now, ME), entry_doc(files=files))
+    started = history.start(index, folder, now, 90)
+    assert started.pruned == [] and history.covers(index.read()) == {picture, image}
+
+
+def test_an_image_file_that_cant_be_read_isnt_undone_and_says_why(tmp_path):
+    root = str(tmp_path / "Music")
+    os.makedirs(os.path.join(root, "cover.jpg"))  # a folder where the image was
+    entry = Entry(NAME, WHEN, ME, "album-art", "", (FileChange("cover.jpg", None, {}, {}, False,
+                  None, H1, image=True),))  # fmt: skip
+    (f,) = history.plan(entry, root, lambda h: []).files
+    assert f.why.startswith("it can't be read")

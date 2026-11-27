@@ -203,11 +203,40 @@ def test_any_frame_converted_there_and_back_is_itself(data, status):
 def test_the_cover_set_or_removed_leaves_the_other_pictures_after_it():
     front, back = Picture(3, "image/jpeg", b"old"), Picture(4, "image/jpeg", b"back")
     new = Picture(3, "image/png", b"new")
-    assert compose.pictures_after([back, front], new, typed=True) == [new, back]
-    assert compose.pictures_after([back, front], None, typed=True) == [back]
+    assert compose.pictures_after([back, front], {"cover": new}, typed=True) == [new, back]
+    assert compose.pictures_after([back, front], {"cover": None}, typed=True) == [back]
     mp4 = [Picture(None, "image/jpeg", b"one"), Picture(None, "image/png", b"two")]
-    assert compose.pictures_after(mp4, new, typed=False) == [new, mp4[1]]
-    assert compose.pictures_after(mp4, None, typed=False) == [mp4[1]]
+    assert compose.pictures_after(mp4, {"cover": new}, typed=False) == [new, mp4[1]]
+    assert compose.pictures_after(mp4, {"cover": None}, typed=False) == [mp4[1]]
+
+
+def test_the_other_pictures_removed_or_put_back_leave_the_cover_first():
+    front, back = Picture(3, "image/jpeg", b"old"), Picture(4, "image/jpeg", b"back")
+    artist = Picture(8, "image/png", b"artist")
+    assert compose.pictures_after([back, front, artist], {"others": ()}, typed=True) == [front]
+    assert compose.pictures_after([front], {"others": (back, artist)}, True) == [
+        front,
+        back,
+        artist,
+    ]
+    assert compose.others_of([back, front, artist], typed=True) == [back, artist]
+    new = Picture(3, "image/png", b"new")
+    both = {"cover": new, "others": ()}
+    assert compose.pictures_after([back, front], both, typed=True) == [new]
+    mp4 = [Picture(None, "image/jpeg", b"one"), Picture(None, "image/png", b"two")]
+    assert compose.pictures_after(mp4, {"others": ()}, typed=False) == [mp4[0]]
+    assert compose.others_of(mp4, typed=False) == [mp4[1]]
+
+
+def test_other_pictures_are_a_list_of_pictures_with_bytes():
+    back = Picture(4, "image/jpeg", b"back")
+    assert compose.normalize({"others": [back]}) == {"others": (back,)}
+    assert compose.normalize({"others": ()}) == {"others": ()}
+    for wrong in ("back", b"back", [b"back"], [Picture(4, "image/jpeg", b"")], back):
+        with pytest.raises(ValueError, match="others are"):
+            compose.normalize({"others": wrong})
+    assert compose.effective({"others": ()}, Tags()) == {"others": ()}
+    assert compose.expected(Tags(title="A"), {"others": ()}) == Tags(title="A")
 
 
 def test_an_images_size_is_read_from_a_png_or_a_jpeg():

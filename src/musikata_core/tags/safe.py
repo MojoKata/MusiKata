@@ -51,7 +51,9 @@ class Written:
     index takes without reading it again (A2.4). What the change history keeps of it (A3.5):
     the tags it read as `before`, the fields `changed` (compose.FIELDS' names; none when the
     change left every field as it was and nothing was written), and, when the cover changed, the
-    cover it had (`cover_before`, None: none) and the one it has now (`cover_after`)."""
+    cover it had (`cover_before`, None: none) and the one it has now (`cover_after`); when its
+    other pictures changed (R5.3), those it had (`others_before`) and has now (`others_after`;
+    both None when they didn't change)."""
 
     path: str
     tags: Tags
@@ -63,6 +65,8 @@ class Written:
     changed: tuple[str, ...] = ()
     cover_before: Picture | None = None
     cover_after: Picture | None = None
+    others_before: tuple[Picture, ...] | None = None
+    others_after: tuple[Picture, ...] | None = None
 
 
 def tmp_path(path: str) -> str:
@@ -116,11 +120,12 @@ def save(
         if not change:
             return Written(path, before, info, original_hash, st.st_size, st.st_mtime_ns, before)
         typed = info.kind not in ("aac", "alac")
-        wanted = old_cover = None
-        if "cover" in change:
+        wanted = old_cover = old_others = None
+        if any(name in change for name in compose.PICTURES):
             had = pictures(path)
             old_cover = compose.cover_of(had, typed)
-            wanted = compose.pictures_after(had, normalized["cover"], typed)  # type: ignore[arg-type]
+            old_others = tuple(compose.others_of(had, typed))
+            wanted = compose.pictures_after(had, change, typed)
         step = "copying"
         write.copy(path, tmp, change)
         step = "writing"
@@ -128,9 +133,10 @@ def save(
         flush(tmp)
         step = "checking"
         tags, tmp_info = read(tmp, path)
-        check(path, compose.expected(before, change), tags, "cover" in change)
+        check(path, compose.expected(before, change), tags, wanted is not None)
         if wanted is not None and not same_pictures(wanted, pictures(tmp, path), typed):
-            raise WriteError(path, LEFT_AS_IT_WAS.format("its cover didn't read back as written"))
+            what = "cover" if "cover" in change else "pictures"
+            raise WriteError(path, LEFT_AS_IT_WAS.format(f"its {what} didn't read back as written"))
         new_hash = audio_hash(tmp, tmp_info.kind)
         if new_hash != original_hash:
             raise WriteError(path, LEFT_AS_IT_WAS.format("its audio didn't read back the same"))
@@ -156,11 +162,14 @@ def save(
             remove(tmp)
     log.info("wrote the tags of %s: %s", path, ", ".join(sorted(change)))
     new_cover: Picture | None = normalized.get("cover")  # type: ignore[assignment]
+    new_others: tuple[Picture, ...] | None = normalized.get("others")  # type: ignore[assignment]
     return Written(
         path, tags, tmp_info, new_hash, done.st_size, done.st_mtime_ns, before,
         tuple(f for f in compose.FIELDS if f in change),
         old_cover if "cover" in change else None,
         new_cover if "cover" in change else None,
+        old_others if "others" in change else None,
+        new_others if "others" in change else None,
     )  # fmt: skip
 
 
@@ -190,15 +199,21 @@ def check(path: str, want: Tags, got: Tags, cover: bool) -> None:
 
 
 def same_pictures(want: Sequence[Picture], got: Sequence[Picture], typed: bool) -> bool:
-    """Whether a song's pictures read back as `want` (compose.pictures_after): the cover first,
-    the others in any order, by their bytes and, where the kind has them, their types."""
+    """Whether a song's pictures read back as `want` (compose.pictures_after): its cover (where
+    the kind numbers its pictures, its first front cover; in MP4's covr, its first picture) the
+    same, and all of them, in any order, by their bytes and, where the kind has them, their
+    types."""
 
     def key(p: Picture) -> tuple[int | None, bytes]:
         return (p.type if typed else None), p.data
 
-    if [key(p) for p in want[:1]] != [key(p) for p in got[:1]]:
+    def cover(pictures: Sequence[Picture]) -> bytes | None:
+        found = compose.cover_of(pictures, typed)
+        return found.data if found is not None else None
+
+    if cover(want) != cover(got):
         return False
-    return Counter(map(key, want[1:])) == Counter(map(key, got[1:]))
+    return Counter(map(key, want)) == Counter(map(key, got))
 
 
 def remove(tmp: str) -> None:

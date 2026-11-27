@@ -713,7 +713,9 @@ class EditTags(QObject):
     def _start(self, jobs: list[Job], description: str) -> None:
         record = self._history.recording() if self._history is not None else None
         write = self._write or self._save_one
-        batch = Batch(jobs, write, self._progressed.emit, record=record, description=description)
+        batch: Batch[Written] = Batch(
+            jobs, write, self._progressed.emit, record=record, description=description
+        )
         self._batch, self._progress, self._failed = batch, (0, len(jobs)), []
         if self._executor is None:
             self._executor = ThreadPoolExecutor(1, thread_name_prefix="edit tags")
@@ -952,6 +954,7 @@ class EditTags(QObject):
     suggestFor = QtProperty(str, lambda self: self._suggest_for, notify=suggestionsChanged)
     tools = QtProperty(list, _menu, notify=fieldsChanged)  # R4.5's bulk tools, the ⋯ menu
     tool = QtProperty(QObject, lambda self: self._bulk, constant=True)  # the tool open
+    ids = QtProperty(list, lambda self: list(self._ids), notify=changed)  # the songs edited
 
 
 def _gone() -> bool:

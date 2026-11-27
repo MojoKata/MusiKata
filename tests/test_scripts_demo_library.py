@@ -52,6 +52,19 @@ def test_the_plan_holds_every_kind_and_the_faults_needs_attention_shows():
     ]
 
 
+def test_glass_harbor_has_t02s_art_its_cover_embedded_and_in_the_folder_and_back_covers():
+    """T02 (R5.2): cover.jpg the same as the songs' cover at 1200 × 1200, back.png beside it, and
+    a smaller back cover embedded in two of its songs."""
+    lib = demo.plan()
+    folder = "Lumen Drift/2019 - Glass Harbor"
+    songs = [s for s in lib.songs if s.path.startswith(folder + "/")]
+    assert lib.covers[folder] == (11, 1200) and {s.cover for s in songs} == {(11, 1200)}
+    assert lib.images[folder] == [("back.png", 311, 1400)]
+    assert [os.path.basename(s.path) for s in songs if s.back] == [
+        "03 - Small Hours.flac", "07 - Lowlight.flac"]  # fmt: skip
+    assert demo.cover_png(311, 32)[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_the_folders_have_every_shape_of_folder_cover():
     """R5.8: artists with one, two, three and five albums, and albums a level further down."""
     folders = {os.path.dirname(s.path) for s in demo.plan().songs}

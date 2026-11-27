@@ -13,6 +13,7 @@ Item {
     required property var player
     property var edit: null
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
+    property var art: null  // Album art (R5.4): an image dropped on an album's cover
     readonly property var artist: library.artist
     readonly property var others: artist.others
     focus: true
@@ -124,6 +125,7 @@ Item {
                         width: 150
                         onOpen: page.library.openAlbum(albumId)
                         onPlay: page.player.playAlbum(albumId)
+                        onImageDropped: (urls) => { if (page.art) page.art.dropOnAlbum(albumId, urls) }
                     }
                 }
             }

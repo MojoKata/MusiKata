@@ -15,8 +15,10 @@ import "."
 // Undo, shows at the foot of the view (R6.7). Edit tags (R4.2) docks its panel in the same place,
 // under Change history while that is open; Ctrl+E (⌘E) opens it on the open view's selection, and
 // the views open it from their buttons, selection bars and right-click menus. A bulk tool of its ⋯
-// menu (R4.5) opens its dialog over the whole window. While a modal dialog is open over the window
-// (`modal`: a bulk tool's), the window's shortcuts don't act on what is behind it. A star clicked
+// menu (R4.5) opens its dialog over the whole window, as Album art (R5.2) does from an album's page,
+// the panel's cover or an image dropped on an album's cover (R5.4). While a modal dialog is open over
+// the window (`modal`: a bulk tool's, Album art's), the window's shortcuts don't act on what is
+// behind it, nor does a click reach it. A star clicked
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2).
 Window {
@@ -26,6 +28,7 @@ Window {
     required property var history
     required property var edit
     required property var ratings
+    required property var art
     width: 1280
     height: 800
     minimumWidth: 960
@@ -33,14 +36,16 @@ Window {
     title: win.library.windowTitle
     color: Theme.bg
     // a modal dialog is open over the window: its shortcuts are the dialog's, not the window's
-    readonly property bool modal: win.edit.tool.opened
+    readonly property bool modal: win.edit.tool.opened || win.art.opened
 
     Sidebar {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         id: sidebar
         anchors { left: parent.left; top: parent.top; bottom: bar.top }
         library: win.library
     }
     ViewHeader {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         id: header
         objectName: "header"
         anchors { left: sidebar.right; right: dock.left; top: parent.top }
@@ -49,6 +54,7 @@ Window {
         history: win.history
     }
     Item {  // the panel docked on the right: Change history over Edit tags
+        enabled: !win.modal  // nothing behind a dialog takes a click
         id: dock
         anchors { right: parent.right; top: parent.top; bottom: bar.top }
         width: win.history.opened || win.edit.opened ? Math.min(380, Math.max(320, win.width * 0.3)) : 0
@@ -58,6 +64,7 @@ Window {
             visible: win.edit.opened && !win.history.opened
             focus: visible
             edit: win.edit
+            art: win.art
         }
         ChangeHistoryPanel {
             objectName: "historyPanel"
@@ -67,6 +74,7 @@ Window {
         }
     }
     Column {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         id: banners
         anchors {
             left: sidebar.right; right: dock.left; leftMargin: 28; rightMargin: 28
@@ -129,6 +137,7 @@ Window {
         onActivated: header.openSearch()
     }
     Loader {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         id: view
         objectName: "view"
         anchors {
@@ -141,14 +150,15 @@ Window {
             folders: folders
         })[win.library.view]
     }
-    Component { id: albums; AlbumsView { library: win.library; player: win.player } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art } }
     Component { id: artists; ArtistsView { library: win.library } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art } }
     Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
     Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
 
     UpNext {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         objectName: "upNext"
         anchors { right: parent.right; bottom: bar.top; rightMargin: 16; bottomMargin: 12 }
         width: Math.min(420, win.width - sidebar.width - 32)
@@ -157,12 +167,14 @@ Window {
         player: win.player
     }
     MessageBar {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         objectName: "message"
         anchors { horizontalCenter: view.horizontalCenter; bottom: bar.top; bottomMargin: 16 }
         maxWidth: view.width - 48
         history: win.history
     }
     NowPlayingBar {
+        enabled: !win.modal  // nothing behind a dialog takes a click
         id: bar
         objectName: "nowPlayingBar"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
@@ -173,6 +185,11 @@ Window {
         objectName: "toolOverlay"
         anchors.fill: parent
         tool: win.edit.tool
+    }
+    AlbumArtDialog {
+        objectName: "artOverlay"
+        anchors.fill: parent
+        art: win.art
     }
     Shortcut {
         sequence: "Ctrl+E"

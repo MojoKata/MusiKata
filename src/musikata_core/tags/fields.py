@@ -3,7 +3,7 @@ the audio is (A3.2)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -50,8 +50,11 @@ class AudioInfo:
 class Picture:
     """A picture embedded in a song (R5.1): its type as ID3 and FLAC number them (3 is the front
     cover; None when the format has no types, as MP4's covr), its MIME type as the file gives it
-    (it may be wrong or empty), and its bytes."""
+    (it may be wrong or empty), and its bytes; and its description, where the format has one (ID3
+    and FLAC: what tells two of a song's pictures apart, kept when it is written back), which two
+    pictures' being the same doesn't depend on."""
 
     type: int | None
     mime: str
     data: bytes
+    desc: str = field(default="", compare=False)

@@ -4,7 +4,7 @@ import "."
 
 // The Edit tags panel (R4.2 to R4.4, R4.6 to R4.8; L03-songs-bulk-edit), docked on the right: its
 // heading and ×, the cover with what is edited ("Tide Tables", "Lumen Drift · 4 songs") and its
-// art's chip; a field for each tag (TagField: shared, or mixed with the values in use), the rating
+// art's chip, a click on the cover, or an image dropped on it, opening Album art (R5.2, R5.4); a field for each tag (TagField: shared, or mixed with the values in use), the rating
 // set by its stars (R10.2), and **More fields** (Composer, Comment, the sort names,
 // Compilation), closed until opened and open from then on. For one song, its file and the tags kept
 // without showing (R4.8), read only. At its foot: R4.2's question when the selection changes, or it
@@ -16,6 +16,7 @@ import "."
 Rectangle {
     id: panel
     required property var edit
+    property var art: null  // the Album art dialog (R5.2)
     property bool loading: panel.edit.loading  // the tour waits while its songs are read
     readonly property real pad: 24
     readonly property real inner: width - 2 * pad
@@ -127,6 +128,12 @@ Rectangle {
                     source: panel.edit.cover
                     sourceSide: 128
                     emptyText: ""
+                    takesImages: panel.art !== null
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Album art")
+                    onImageDropped: (urls) => panel.art.dropOnSongs(panel.edit.ids, panel.edit.title, urls)
+                    HoverHandler { enabled: panel.art !== null; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { enabled: panel.art !== null; onTapped: panel.art.openSongs(panel.edit.ids, panel.edit.title) }
                 }
                 Text {
                     id: editTitle

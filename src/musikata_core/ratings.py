@@ -504,6 +504,7 @@ class Writing:
             written.size if written else song.size, written.mtime_ns if written else song.mtime_ns,
             before, tuple(f for f in compose.FIELDS if f in changed),
             written.cover_before if written else None, written.cover_after if written else None,
+            written.others_before if written else None, written.others_after if written else None,
         )  # fmt: skip
 
     def _now(self) -> str:

@@ -4,7 +4,9 @@ import "."
 
 // An album's cover (R5.1), or the dashed "No album art" tile when it has none or it can't be shown
 // (R5.7), under rounded corners drawn in the colour behind it (`matte`). The thumbnail loads off the
-// GUI thread (covers.py); `loading` says it hasn't arrived yet, for the tour to wait on.
+// GUI thread (covers.py); `loading` says it hasn't arrived yet, for the tour to wait on. An album's
+// cover (`takesImages`) takes an image dropped on it, outlined while one is dragged over it, and
+// hands on the files' addresses (`imageDropped`): the album's art is set from it (R5.4, R6.10).
 Item {
     id: cover
     property string source            // image://covers/<name>, or "" for none
@@ -13,6 +15,8 @@ Item {
     property color matte: Theme.bg
     property string emptyText: qsTr("No album art")
     property string emptyIcon: "image"
+    property bool takesImages: false
+    signal imageDropped(var urls)
     readonly property bool loading: image.status === Image.Loading
     readonly property bool shown: image.status === Image.Ready
 
@@ -77,5 +81,22 @@ Item {
         visible: cover.shown && cover.radius > 0
         radius: cover.radius
         matte: cover.matte
+    }
+    DropArea {
+        id: drop
+        anchors.fill: parent
+        enabled: cover.takesImages
+        onDropped: (event) => {
+            if (event.hasUrls)
+                cover.imageDropped(event.urls)
+        }
+    }
+    Rectangle {  // an image dragged over it
+        anchors.fill: parent
+        visible: drop.containsDrag
+        radius: cover.radius
+        color: "transparent"
+        border.color: Theme.accent
+        border.width: 2
     }
 }

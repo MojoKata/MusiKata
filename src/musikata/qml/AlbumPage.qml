@@ -5,8 +5,9 @@ import "."
 // An album's page (R2.6, L02-album), under the header (R6.4) with its way back and the search box,
 // which filters its songs (R2.7): the cover, the line over the title, the title,
 // the artist (a click opens their page), songs, length and format; Play and Shuffle, Edit tags (the
-// panel for its songs, R4.2), and Album art, which comes with a later slice; the album's state
-// chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
+// panel for its songs, R4.2), Album art (its dialog, R5.2) and ⋯, whose Save cover to folder writes
+// the embedded cover as cover.jpg (R5.5); an image dropped on the cover opens Album art with it
+// (R5.4); the album's state chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
 // rest shuffled (R7.1, R7.3); a song's double click plays it and the rest after it, its right click
 // opens its menu (R7.2). Its songs are selected as the Songs list's are (R2.6), clicks and keys
 // forwarded to the model; Enter plays the selection from its first song, the rest of the album after
@@ -17,6 +18,7 @@ Item {
     required property var player
     property var edit: null
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
+    property var art: null  // the Album art dialog (R5.2)
     readonly property var album: library.album
     readonly property var tracks: album.songs
     readonly property bool loading: art.loading
@@ -44,6 +46,8 @@ Item {
         radius: 12
         sourceSide: 512
         source: page.album.cover
+        takesImages: page.art !== null
+        onImageDropped: (urls) => page.art.dropOnAlbum(page.album.id, urls)
     }
 
     Item {
@@ -129,7 +133,31 @@ Item {
                 icon: "genre"
                 onClicked: page.edit.editAlbum(page.album.id, page.tracks)
             }
-            Btn { label: qsTr("Album art"); icon: "image"; later: qsTr("Album art comes in a later version") }
+            Btn {
+                objectName: "albumArt"
+                label: qsTr("Album art")
+                icon: "image"
+                later: page.library.playNote  // the root isn't there (R2.10)
+                onClicked: page.art.openAlbum(page.album.id)
+            }
+            Btn {
+                id: albumMore
+                objectName: "albumMore"
+                width: 36
+                label: ""
+                icon: "more"
+                Accessible.name: qsTr("More for this album")
+                onClicked: albumMenu.popup(albumMore, 0, albumMore.height)
+                Menu {
+                    id: albumMenu
+                    MenuItem {
+                        objectName: "saveCoverToFolder"
+                        text: qsTr("Save cover to folder")
+                        enabled: page.library.playNote === ""
+                        onTriggered: page.art.saveToFolder(page.album.id)
+                    }
+                }
+            }
         }
         Row {
             anchors.top: buttons.bottom
