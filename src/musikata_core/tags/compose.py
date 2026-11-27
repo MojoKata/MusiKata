@@ -23,6 +23,8 @@ TEXT = ("title", "artist", "album", "albumartist", "composer", "comment", "artis
 NUMBERS = ("track", "tracktotal", "disc", "disctotal")
 FIELDS = (*TEXT, *NUMBERS, "year", "genres", "compilation", "rating", "cover", "others")
 PICTURES = ("cover", "others")  # the fields that are pictures, which Tags doesn't hold
+LATIN1 = "latin1"  # not a field: the text fields a change writes as Latin-1 (A3.6; Undo's)
+ID3_KINDS = ("mp3", "wav", "aiff")  # the kinds whose tags are ID3, where text has an encoding
 
 # R10.4: the POPM value (user Windows Media Player 9 Series) for 0 to 5 stars
 POPM_VALUES = (0, 1, 64, 128, 196, 255)
@@ -41,11 +43,18 @@ def normalize(changes: Mapping[str, object]) -> dict[str, object]:
     a pair (year, full date or None); genres each once, as parse.genres reads them; the rating
     0 to 5, 0 cleared; the cover a Picture, or None to remove it; `others`, the pictures a song
     has but its front cover (R5.3: none, to remove them; an undo's, to put them back), a tuple of
-    Pictures. Raises ValueError for a field
+    Pictures; `latin1` (LATIN1), not a field, the text fields an ID3 tag is to hold as Latin-1, as
+    it did before a save Undo puts back (A3.6), in TEXT's order. Raises ValueError for a field
     that isn't one, or a value of the wrong kind: a caller's mistake, not the file's."""
     out: dict[str, object] = {}
     for name, value in changes.items():
-        if name in TEXT:
+        if name == LATIN1:
+            if isinstance(value, str) or not isinstance(value, Sequence):
+                raise ValueError(f"latin1 is a list of text fields, not {value!r}")
+            if not all(v in TEXT for v in value):
+                raise ValueError(f"latin1 names text fields, not {value!r}")
+            out[name] = tuple(f for f in TEXT if f in value)
+        elif name in TEXT:
             if value is not None and not isinstance(value, str):
                 raise ValueError(f"{name} is text, not {value!r}")
             out[name] = parse.text([value or ""])
@@ -105,13 +114,40 @@ def _year(value: object) -> tuple[int | None, str | None]:
     return year, date
 
 
+def latin1_text(value: object) -> bool:
+    """Whether a text field's value is held as Latin-1 when asked to be (A3.6): text beyond ASCII
+    that Latin-1 can hold. Other text is written as Unicode whatever is asked."""
+    if not isinstance(value, str) or value.isascii():
+        return False
+    try:
+        value.encode("latin-1")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def latin1_of(change: Change) -> tuple[str, ...]:
+    """The text fields of a normalized change written as Latin-1 (`latin1_text`), in TEXT's
+    order."""
+    asked = cast(Sequence[str], change.get(LATIN1) or ())
+    return tuple(f for f in TEXT if f in asked and f in change and latin1_text(change[f]))
+
+
 def effective(change: Change, before: Tags) -> dict[str, object]:
     """What of a normalized change differs from the file as read (`before`): only that is
     written, so a field already as asked keeps its form. A year the file's full date already has
-    keeps the date (R4.1). The pictures are always written: Tags doesn't hold their bytes."""
+    keeps the date (R4.1). The pictures are always written: Tags doesn't hold their bytes. Text
+    the file holds as it is asked but in another encoding (as Latin-1, asked as Unicode, or the
+    other way, `latin1_of`) is written: its bytes change (R4.10)."""
     out: dict[str, object] = {}
+    latin1 = latin1_of(change)
     for name, value in change.items():
-        if name == "year":
+        if name == LATIN1:
+            continue
+        if name in TEXT:
+            if value == getattr(before, name) and (name in latin1) == (name in before.latin1):
+                continue
+        elif name == "year":
             year, date = _year_of(value)
             if (year, date) == (before.year, before.date) or (date is None and year == before.year):
                 continue
@@ -121,14 +157,23 @@ def effective(change: Change, before: Tags) -> dict[str, object]:
         elif name not in PICTURES and value == getattr(before, name):
             continue
         out[name] = value
+    if latin1 and any(f in out for f in latin1):
+        out[LATIN1] = tuple(f for f in latin1 if f in out)
     return out
 
 
 def expected(before: Tags, change: Change) -> Tags:
     """The tags the file should read back as once `change` (`effective`) is written. Whether it
-    has a cover is left as it was: safe.py checks the pictures themselves."""
+    has a cover is left as it was: safe.py checks the pictures themselves. The text it writes is
+    held as Latin-1 where the change asks it to be (`latin1_of`), as Unicode elsewhere."""
     fields: dict[str, object] = {}
+    latin1 = latin1_of(change)
+    fields["latin1"] = tuple(
+        f for f in TEXT if (f in latin1) or (f in before.latin1 and f not in change)
+    )
     for name, value in change.items():
+        if name == LATIN1:
+            continue
         if name == "year":
             fields["year"], fields["date"] = _year_of(value)
         elif name == "rating":

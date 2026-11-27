@@ -14,8 +14,11 @@ entries, each with the action that fixes it, and Ignore.
   each group, duplicates.initial at first, changed by its radio buttons and checkboxes), and the
   selection bar's Move N to the trash over every group's; Review… opens the group in its dialog
   (musikata.duplicates).
+- **Tags in the wrong text encoding** (R4.10): an entry per song, named as the likely encoding
+  reads it, whose Fix encoding…, or its group's, opens musikata.encodings' dialog.
 - **The actions** (`Attention`): Edit tags (the Edit tags panel on the album's songs, R4.2), Album
-  art (its dialog, R5.2), Review… (musikata.duplicates' dialog, R2.12), Merge (a genre's merge of
+  art (its dialog, R5.2), Review… (musikata.duplicates' dialog, R2.12), Fix encoding…
+  (musikata.encodings' dialog, R4.10), Merge (a genre's merge of
   R9.4; for an artist's or an album's names, `NameMerge`: the same preview, saved through the
   batch as one entry in the change history that Undo reverses), Show in folder (the system's file
   manager, the file selected where the platform can, `reveal_command`), and Ignore: the entry kept
@@ -55,7 +58,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QDesktopServices
 
-from musikata_core import attention, db, duplicates, rootfiles, scanner, watch
+from musikata_core import attention, db, duplicates, encodings, rootfiles, scanner, watch
 from musikata_core.attention import Entry
 from musikata_core.clock import Clock
 from musikata_core.duplicates import Plan
@@ -63,6 +66,7 @@ from musikata_core.tags import Batch, Failed, Job, Outcome, Written
 from musikata_core.tags.tools import Planned, Song
 
 from .duplicates import Duplicates, badge_text, bar_text, copy_rows, heading_text, move_label
+from .encodings import FixEncoding
 from .history import NAMES, ChangeHistory
 from .models import SHORT, Searcher, cover_url, plural, time_text
 from .preview import Preview, failed_text, footer_text, progress_text, save_text
@@ -102,6 +106,10 @@ GROUPS = (
     Group("names", "Names", "NAMES THAT DIFFER ONLY IN CASE OR SPACING",
           "Merge writes the name chosen into every song with another spelling; Undo puts them"
           " back.", attention.NAMES, "name"),
+    Group("encoding", "Wrong encoding", "TAGS IN THE WRONG TEXT ENCODING",
+          "Saved as Latin-1 but read better another way: Fix encoding… writes the reading chosen"
+          " as Unicode, and Undo puts the old bytes back.", (attention.ENCODING,), "song",
+          {"name": "fix", "label": "Fix encoding…", "later": ""}),
     Group("one-file", "Album in one file", "ALBUM IN ONE FILE",
           "It plays as one song; splitting it into its tracks comes in a later version.",
           (attention.ONE_FILE,), "album"),
@@ -114,12 +122,13 @@ GROUPS = (
 BY_KEY = {g.key: g for g in GROUPS}
 GROUP_OF = {kind: g.key for g in GROUPS for kind in g.kinds}
 # the chips (L09-needs-attention): All, then a chip each, the groups no chip of their own has in
-# Other; the later pieces' (R3's, R2.12's, R4.10's) come in their places
+# Other; a later piece's (R3's) comes in its place
 CHIPS = (
     ("all", "All", tuple(g.key for g in GROUPS)),
     ("copies", "Same song twice", ("copies",)),
     ("covers", "Covers", ("covers",)),
     ("names", "Names", ("names",)),
+    ("encoding", "Wrong encoding", ("encoding",)),
     ("one-file", "Album in one file", ("one-file",)),
     ("other", "Other", ("albums", "unreadable")),
 )
@@ -186,6 +195,11 @@ def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dic
         detail = f"{who} · Its songs' {fields} differ" if fields else who
         actions = [_action("edit", "Edit tags"), _action("art", "Album art…")]
         icon = "album"
+    elif e.kind == attention.ENCODING:
+        parts = [e.artist, e.album_title, f"Reads as {encodings.label_of(e.key)}"]
+        detail = " · ".join(p for p in parts if p)
+        actions = [_action("fix", "Fix encoding…")]
+        icon = "album" if e.album is not None else "file"
     elif e.kind == attention.ONE_FILE:
         detail = f"{who} · {time_text(e.length)} in one file, with {e.cue}"
         actions = []
@@ -586,6 +600,18 @@ class AttentionModel(QAbstractListModel):
             return None
         return self._entries[self._rows[row][2]]
 
+    def first_of(self, row: int) -> Entry | None:
+        """The first entry of the group whose line is row `row` (the search's), for the group's
+        own action; None for an entry's row."""
+        if not 0 <= row < len(self._rows) or self._rows[row][0] != "group":
+            return None
+        key = self._rows[row][1]
+        return next((e for e in self._entries if GROUP_OF[e.kind] == key), None)
+
+    def entry_of_kind(self, kind: str, title: str) -> Entry | None:
+        """The first entry of `kind` titled `title`, as last found (the tour's)."""
+        return next((e for e in self._all if e.kind == kind and e.title == title), None)
+
     def row(self, n: int) -> dict[str, Any] | None:
         """Row n as the view shows it, made when first asked for."""
         if not 0 <= n < len(self._rows):
@@ -888,7 +914,8 @@ class Attention(QObject):
     """Needs attention's actions (R2.8) on the entries of `model`: Edit tags on `edit` (the Edit
     tags panel, musikata.edittags), Album art on `art` (musikata.albumart), Merge on `genres`
     (musikata.genres) or `names` (`NameMerge`), Review… on `copies` (musikata.duplicates' dialog,
-    R2.12), Show in folder through `reveal` (a command, or
+    R2.12), Fix encoding… on `encoding` (musikata.encodings' dialog, R4.10), Show in folder
+    through `reveal` (a command, or
     the folder opened by `open_folder`), and Ignore. A dismissal is written into the root's
     ignored.json (read again and merged first) and the index on `executor` (its own thread when
     None) at `clock`'s time, or the index only when `.musikata` can't be written (R1.5.2); the
@@ -911,6 +938,7 @@ class Attention(QObject):
         names: NameMerge | None = None,
         history: ChangeHistory | None = None,
         copies: Duplicates | None = None,
+        encoding: FixEncoding | None = None,
         watching: bool = True,
         executor: Executor | None = None,
         reveal: Callable[[str], list[str] | None] | None = None,
@@ -921,7 +949,7 @@ class Attention(QObject):
         super().__init__(parent)
         self._root, self._index, self._model, self._clock = root, index, model, clock
         self._edit, self._art, self._genres, self._names = edit, art, genres, names
-        self._history, self._copies = history, copies
+        self._history, self._copies, self._encoding = history, copies, encoding
         self._watching = watching
         self._executor = executor
         self._reveal = reveal or (lambda p: reveal_command(p, sys.platform, shutil.which))
@@ -988,10 +1016,13 @@ class Attention(QObject):
 
     @Slot(int, str)
     def act(self, row: int, action: str) -> None:
-        """An entry's action (row `row` of the list): "edit", "art", "merge", "review",
-        "folder" or "ignore"."""
+        """An entry's action (row `row` of the list): "edit", "art", "merge", "review", "fix",
+        "folder" or "ignore"; or a group's (its line's row): "fix", on its first entry."""
         e = self._model.entry_at(row)
         if e is None:
+            first = self._model.first_of(row)
+            if action == "fix" and first is not None and self._encoding is not None:
+                self._encoding.open(first)
             return
         if action == "ignore":
             self.ignore(e)
@@ -1005,9 +1036,11 @@ class Attention(QObject):
             self._names.open(e)
         elif action == "review" and self._copies is not None:
             self._copies.open(e)
+        elif action == "fix" and self._encoding is not None:
+            self._encoding.open(e)
         elif action == "folder":
             self.show_in_folder(scanner.full_path(self._root, e.about))
-        elif action not in ("edit", "art", "merge", "review"):
+        elif action not in ("edit", "art", "merge", "review", "fix"):
             raise ValueError(f"no such action: {action}")
 
     def show_in_folder(self, path: str) -> None:
@@ -1073,7 +1106,7 @@ class Attention(QObject):
             self._executor.shutdown(wait=True)
             self._executor = None
         self._edit = self._art = self._genres = self._names = self._history = None
-        self._copies = None
+        self._copies = self._encoding = None
 
 
 def _open_folder(folder: str) -> None:

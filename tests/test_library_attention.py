@@ -537,3 +537,100 @@ def test_merging_names_puts_the_chosen_one_in_every_field_that_has_another_chang
     assert album.columns == ("album",) and album.new[0].album == "Glass Harbor"
     with pytest.raises(ValueError, match="no merge"):
         attention.merge_names(songs, "names-genre", ["x"], "y")
+
+
+# ---------- tags in the wrong text encoding (R4.10, A3.6) ----------
+
+
+def cp1251(text):
+    """Windows-1251 read as Latin-1, as an old tagger's tags read (Ìàÿê for Маяк)."""
+    return text.encode("cp1251").decode("latin-1")
+
+
+def misread(title, artist="Северный Ветер", album="Тихая Гавань", track=None):
+    return Tags(title=cp1251(title), artist=cp1251(artist), album=cp1251(album), track=track,
+                latin1=("title", "artist", "album"))  # fmt: skip
+
+
+def test_a_song_in_the_wrong_encoding_is_an_entry_named_as_it_reads(index):
+    """R4.10, A2.6: a song whose Latin-1 text another encoding reads far better is an entry of
+    its own, found by a query over what the scan keeps, named as that encoding reads it; a
+    song in Unicode, or real French in Latin-1, isn't one. Ignore keeps it by its path and
+    hash, until its file changes."""
+    put(index, [
+        ("SV/TG/08.mp3", misread("Маяк", track=8), None, 200.0, None),
+        ("SV/TG/01.mp3", misread("Утро", track=1), None, 200.0, None),
+        ("SV/U.mp3", Tags(title="Маяк", artist="Северный Ветер"), None, 200.0, None),
+        ("FR/E.mp3", Tags(title="L'été indien", latin1=("title",)), None, 200.0, None),
+    ])  # fmt: skip
+    c = index.read()
+    assert c.execute("SELECT path, latin1, encoding FROM song ORDER BY path").fetchall() == [
+        ("FR/E.mp3", "title", None),
+        ("SV/TG/01.mp3", "title,artist,album", "cp1251"),
+        ("SV/TG/08.mp3", "title,artist,album", "cp1251"),
+        ("SV/U.mp3", None, None),
+    ]
+    got = [e for e in attention.find(c) if e.kind == attention.ENCODING]
+    assert [(e.about, e.title, e.artist, e.album_title, e.key, e.fields) for e in got] == [
+        ("SV/TG/01.mp3", "Утро", "Северный Ветер", "Тихая Гавань", "cp1251",
+         ("title", "artist", "album")),
+        ("SV/TG/08.mp3", "Маяк", "Северный Ветер", "Тихая Гавань", "cp1251",
+         ("title", "artist", "album")),
+    ]  # fmt: skip
+    assert got[0].album is not None and got[0].song is not None and got[0].modified == 2.0
+    kept = attention.dismissal_of(got[1], T1)
+    assert (kept.kind, kept.about, kept.hash, kept.modified) == (
+        "wrong-encoding", "SV/TG/08.mp3", "SV/TG/08.mp3", 2.0
+    )  # fmt: skip
+    index.write(lambda c: rootfiles.load_ignored(c, [kept])).result()
+    left = [e.about for e in attention.find(c, rootfiles.dismissals(c))
+            if e.kind == attention.ENCODING]  # fmt: skip
+    assert left == ["SV/TG/01.mp3"]
+
+
+def test_fix_encodings_songs_are_read_with_their_latin_1_fields_and_their_albums(index):
+    """What Fix encoding… plans from (R4.10): the songs asked for, in that order, with the text
+    fields their tags hold and which are Latin-1; and the songs of a song's album, in its order
+    (it alone when it is on none)."""
+    put(index, [
+        ("SV/TG/08.mp3", misread("Маяк", track=8), None, 200.0, None),
+        ("SV/TG/01.mp3", misread("Утро", track=1), None, 200.0, None),
+        ("Loose.mp3", Tags(title="Loose"), None, 200.0, None),
+    ])  # fmt: skip
+    c = index.read()
+    ids = dict(c.execute("SELECT path, id FROM song"))
+    found = attention.encoded_songs(c, [ids["SV/TG/08.mp3"], 999, ids["Loose.mp3"]])
+    assert [(p, t.title, t.latin1) for _i, p, t in found] == [
+        ("SV/TG/08.mp3", cp1251("Маяк"), ("title", "artist", "album")),
+        ("Loose.mp3", "Loose", ()),
+    ]
+    assert attention.album_songs(c, ids["SV/TG/08.mp3"]) == [ids["SV/TG/01.mp3"],
+                                                             ids["SV/TG/08.mp3"]]  # fmt: skip
+    assert attention.album_songs(c, ids["Loose.mp3"]) == [ids["Loose.mp3"]]
+    assert attention.album_songs(c, 999) == [999]
+    assert attention.latin1_of("title,year,album") == ("title", "album")
+    assert attention.latin1_of(None) == ()
+
+
+def test_the_scan_keeps_latin_1_text_and_a_fix_written_takes_the_song_out(index, tmp_path):
+    """A3.6: the scan reads which fields are Latin-1 and flags the song; once the fix is written
+    as Unicode, the row MusiKata updates itself (scanner.wrote) has neither."""
+    from musikata_core import encodings
+    from musikata_core import tags as tags_core
+
+    music = tmp_path / "Music"
+    wav(music / "a.wav", 1)
+    f = mutagen.wave.WAVE(str(music / "a.wav"))
+    f.add_tags()
+    f.tags.add(mutagen.id3.TIT2(encoding=0, text=cp1251("Маяк")))
+    f.tags.add(mutagen.id3.TPE1(encoding=0, text=cp1251("Северный Ветер")))
+    f.save(v2_version=3)
+    scan(music, index)
+    c = index.read()
+    assert c.execute("SELECT latin1, encoding FROM song").fetchone() == ("title,artist", "cp1251")
+    tags, _ = tags_core.read(str(music / "a.wav"))
+    fixed, names = encodings.fixed(tags, "cp1251")
+    w = tags_core.save(str(music / "a.wav"), {n: getattr(fixed, n) for n in names},
+                       audio_hash=scanner.audio_hash)  # fmt: skip
+    index.write(lambda c: scanner.wrote(c, str(music), [w])).result()
+    assert c.execute("SELECT title, latin1, encoding FROM song").fetchone() == ("Маяк", None, None)

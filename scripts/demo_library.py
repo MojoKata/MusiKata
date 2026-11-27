@@ -116,6 +116,9 @@ MORE_ALBUMS = [
             ("Night Ferry", 2024, 449, "vorbis", "compilation no-albumartist"),
         )
     ],
+    # T06-fix-encoding (R4.10): tags saved as Windows-1251 in Latin-1 frames by an old tagger, and
+    # the files named from them, so they read as gibberish (Ìàÿê for Маяк)
+    ("Северный Ветер", "Тихая Гавань", 2009, "Rock", 457, 9, "mp3", "", "id3v23 cp1251"),
 ]
 GLASS = [
     "Tidewater",
@@ -129,6 +132,8 @@ GLASS = [
     "Breakers",
     "Harbor Lights (Reprise)",
 ]
+HARBOR = ["Тихая гавань", "Причал", "Туман", "Шторм", "Белые ночи", "Огни", "Прилив", "Маяк",
+          "Утро"]  # fmt: skip  # Тихая Гавань's (T06)
 TIDE = [
     "Neap Tide",
     "Spring Tide",
@@ -232,12 +237,15 @@ def _titles(rng: random.Random, n: int) -> list[str]:
 def _album(row, rng: random.Random, lib: Library) -> None:
     artist, album, year, genre, seed, count, kind, folder, odd = row
     odd = set(odd.split())
-    folder = f"{artist}/{folder or album}" if artist != "Various Artists" else folder
+    named = as_latin1 if "cp1251" in odd else str  # files named from tags read as gibberish
+    folder = f"{named(artist)}/{named(folder or album)}" if artist != "Various Artists" else folder
     titles = (
         GLASS
         if album == "Glass Harbor"
         else TIDE
         if album == "Tide Tables"
+        else HARBOR
+        if album == "Тихая Гавань"
         else _titles(rng, count)
     )
     ext = KINDS[kind][0]
@@ -268,7 +276,7 @@ def _album(row, rng: random.Random, lib: Library) -> None:
         if "compilation" in odd:
             tags["artist"] = f"{rng.choice(WORDS)} {rng.choice(WORDS)}"
             tags["compilation"] = True
-        if "no-albumartist" in odd:
+        if "no-albumartist" in odd or "cp1251" in odd:  # T06's old tagger wrote none
             del tags["albumartist"]
         if "tide" in odd:  # the mockups' Tide Tables (N03, L05): the faults Needs attention shows
             tags["genre"] = [{2: "electronic", 5: "Electronica"}.get(n, "Electronic")]
@@ -278,15 +286,21 @@ def _album(row, rng: random.Random, lib: Library) -> None:
             tags["genre"] = [f"{genre}; Ambient"]
         lib.songs.append(
             Song(
-                f"{folder}/{n:02d} - {title}.{ext}",
+                f"{folder}/{n:02d} - {named(title)}.{ext}",
                 kind,
                 tags,
-                odd & {"id3v23", "id3v1-too", "track-04", "lower-keys"},
+                odd & {"id3v23", "id3v1-too", "track-04", "lower-keys", "cp1251"},
                 220 + (seed * 7 + n * 31) % 660,
                 (seed, size) if odd & {"embedded", "embedded-too"} else None,
                 (211, 500) if "back" in odd and n in (3, 7) else None,
             )
         )
+
+
+def as_latin1(text: str) -> str:
+    """Text saved as Windows-1251 and read as Latin-1, as R4.10's gibberish is: Ìàÿê for
+    Маяк."""
+    return text.encode("cp1251").decode("latin-1")
 
 
 ONE_FILE_SECONDS = 52 * 60 + 8  # Live at the Lantern's length (L07-folders-list)
@@ -537,11 +551,13 @@ def _tag_id3(path: str, song: Song) -> None:
         tags = id3.ID3()
     v23 = "id3v23" in song.shape
     total = t.get("tracktotal")
+    # an old tagger's Windows-1251 in frames marked Latin-1 (R4.10, A3.6), else Unicode
+    encoding, text = (0, as_latin1) if "cp1251" in song.shape else (3, str)
     if t.get("title"):
-        tags.add(id3.TIT2(encoding=3, text=str(t["title"])))
+        tags.add(id3.TIT2(encoding=encoding, text=text(str(t["title"]))))
     for key, frame in (("artist", id3.TPE1), ("album", id3.TALB), ("albumartist", id3.TPE2)):
         if t.get(key):
-            tags.add(frame(encoding=3, text=str(t[key])))
+            tags.add(frame(encoding=encoding, text=text(str(t[key]))))
     if t.get("track"):
         track = f"{t['track']:02d}" if "track-04" in song.shape else f"{t['track']}/{total}"
         tags.add(id3.TRCK(encoding=3, text=track))

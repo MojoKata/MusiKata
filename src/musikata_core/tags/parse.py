@@ -253,6 +253,7 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
         rg_album_gain=gains["rg_album_gain"],
         rg_album_peak=gains["rg_album_peak"],
         has_cover=has_cover,
+        latin1=(),  # read.py's to say (A3.6)
     )
 
 
@@ -316,6 +317,7 @@ def from_id3(
         rg_album_gain=replaygain(txxx("REPLAYGAIN_ALBUM_GAIN")),
         rg_album_peak=replaygain(txxx("REPLAYGAIN_ALBUM_PEAK")),
         has_cover=has_cover,
+        latin1=(),  # read.py's to say (A3.6)
     )
     return with_replaygain(tags, rva2_replaygain(rva2))
 
@@ -363,6 +365,7 @@ def from_mp4(
         rg_album_gain=replaygain(freeform("replaygain_album_gain")),
         rg_album_peak=replaygain(freeform("replaygain_album_peak")),
         has_cover=has_cover,
+        latin1=(),  # read.py's to say (A3.6)
     )
 
 

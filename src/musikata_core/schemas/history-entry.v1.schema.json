@@ -196,6 +196,13 @@
           "trashed": {
             "type": "boolean",
             "description": "True when the save moved this file to the system's trash (R2.11, R2.12): Undo can't take it out"
+          },
+          "latin1": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The fields of fields whose old value the file's ID3 tag held as Latin-1, its bytes a character each (A3.6): Undo writes them as Latin-1 again, the old bytes back (R4.10)"
           }
         },
         "required": [

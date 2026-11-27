@@ -52,9 +52,10 @@ ART = "album-art"  # a save of the Album art dialog, or Save cover to folder (R5
 GENRE = "genres"  # a genre renamed or merged (R9.4, R9.5)
 NAMES = "names"  # an artist's or an album's names merged, from Needs attention (R2.8)
 COPIES = "copies"  # a song's other copies moved to the trash (R2.12)
+ENCODING = "encoding"  # text in the wrong encoding written as Unicode (R4.10)
 ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
            ART: "Album art", GENRE: "Genres", NAMES: "Names merged",
-           COPIES: "Copies moved to the trash"}  # fmt: skip  # an entry
+           COPIES: "Copies moved to the trash", ENCODING: "Encoding fixed"}  # fmt: skip  # an entry
 # with no description, by its action
 
 

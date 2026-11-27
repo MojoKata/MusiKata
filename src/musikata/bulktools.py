@@ -44,15 +44,20 @@ TOOLS = (
                            "track ripped apart from its album."),
     ("infer", "Infer from path", ""),
 )  # fmt: skip
+ENCODING_TOOL = "encoding"  # R4.10's Fix encoding…, beside the tools when the songs need it
+ENCODING_LABEL = "Fix encoding…"
 LABEL = {name: label for name, label, _ in TOOLS}
 ABOUT = {name: about for name, _, about in TOOLS}
 SOURCE_LIST = 500  # the songs Copy from… offers to copy from, in the list's order
 
 
-def menu_of(songs: int, unsaved: bool, saving: bool) -> list[dict[str, str]]:
+def menu_of(
+    songs: int, unsaved: bool, saving: bool, encoding: bool = False
+) -> list[dict[str, str]]:
     """The ⋯ menu's items (R4.5): each tool's name and label, and why it can't be used now ("" when
     it can): a save going on, changes typed and not saved (a tool plans from the files' tags),
-    fewer than two songs to copy between; Infer from path comes in a later version (R3)."""
+    fewer than two songs to copy between; Infer from path comes in a later version (R3). When the
+    songs hold text in the wrong encoding (`encoding`), Fix encoding… after them (R4.10)."""
     out = []
     for name, label, _ in TOOLS:
         later = (
@@ -67,6 +72,9 @@ def menu_of(songs: int, unsaved: bool, saving: bool) -> list[dict[str, str]]:
             else ""
         )
         out.append({"name": name, "label": label, "later": later})
+    if encoding:
+        later = SAVING if saving else UNSAVED if unsaved else ""
+        out.append({"name": ENCODING_TOOL, "label": ENCODING_LABEL, "later": later})
     return out
 
 

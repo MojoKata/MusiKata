@@ -21,7 +21,9 @@ import "."
 // behind it, nor does a click reach it. A genre's Rename… and Merge into… (R9.4) open the same
 // dialog as a bulk tool, over the whole window, as Needs attention's Merge of an artist's or an
 // album's names does (R2.8). Needs attention's Review… of a song's copies opens its dialog over the
-// whole window (R2.12), and moving copies to the trash asks first, over it (R2.11). A star clicked
+// whole window (R2.12), and moving copies to the trash asks first, over it (R2.11). Fix encoding…
+// (R4.10), from Needs attention or the Edit tags panel's ⋯ menu, opens its dialog over the whole
+// window too. A star clicked
 // in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
 // selection's (R10.2).
 Window {
@@ -36,6 +38,7 @@ Window {
     required property var attention
     required property var names
     required property var copies
+    required property var encodings
     width: 1280
     height: 800
     minimumWidth: 960
@@ -46,6 +49,7 @@ Window {
     readonly property bool modal: win.edit.tool.opened || win.art.opened || win.genres.opened
                                   || win.names.opened || win.copies.opened
                                   || win.copies.question.title !== undefined
+                                  || win.encodings.opened
 
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -212,6 +216,11 @@ Window {
         objectName: "questionOverlay"
         anchors.fill: parent
         copies: win.copies
+    }
+    FixEncodingDialog {
+        objectName: "fixOverlay"
+        anchors.fill: parent
+        fix: win.encodings
     }
     Shortcut {
         sequence: "Ctrl+E"

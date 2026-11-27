@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import dataclasses
 import logging
 import os
 import struct
@@ -22,7 +23,7 @@ import mutagen.oggopus
 import mutagen.oggvorbis
 import mutagen.wave
 
-from . import parse
+from . import compose, parse
 from .fields import AudioInfo, Picture, Tags
 
 log = logging.getLogger(__name__)
@@ -213,7 +214,25 @@ def _id3(tags: mutagen.id3.ID3 | None) -> Tags:
         for f in tags.getall("RVA2")
         if f.channel == 1  # the master volume: the only one ReplayGain writes
     ]
-    return parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2)
+    found = parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2)
+    return dataclasses.replace(found, latin1=latin1_of(tags, found))
+
+
+def latin1_of(tags: mutagen.id3.ID3, found: Tags) -> tuple[str, ...]:
+    """The text fields of `found` (read from `tags`) whose frame is marked Latin-1 (encoding 0),
+    beyond ASCII, in compose.TEXT's order (A3.6): Mutagen decodes such a frame a character a
+    byte, so its text is its bytes. The comment's frame is the one parse.from_id3 read it from."""
+    frames: dict[str, Any] = {name: tags.get(fid) for name, fid in parse.ID3.items()}
+    for f in tags.getall("COMM"):
+        if parse.is_comment(f.desc) and f.text and str(f.text[0]).strip():
+            frames["comment"] = f
+            break
+    out = []
+    for name in compose.TEXT:
+        frame, value = frames.get(name), getattr(found, name)
+        if frame is not None and int(frame.encoding) == 0 and value and not value.isascii():
+            out.append(name)
+    return tuple(out)
 
 
 def _ape_replaygain(path: str) -> dict[str, float | None]:

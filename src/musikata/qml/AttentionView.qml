@@ -4,7 +4,8 @@ import "."
 
 // Needs attention (R2.8, L09-needs-attention): the chips across the top, All and a chip per group
 // with its count; then each group, a line folded with its count and its first entries and the
-// group's own action (Find covers online, a later version's), or open, its heading and note over
+// group's own action (Fix encoding… on its first entry; Find covers online, a later version's), or
+// open, its heading and note over
 // its entries, each with the action that fixes it and Ignore. A group's line opens or folds it.
 // A group of copies (R2.12, L09's Same song twice) is drawn whole: its cover, title, artist and
 // lengths, Exact copies or Likely, Review… and Ignore, and a row per copy with Keep (a radio
@@ -163,6 +164,7 @@ Item {
                             label: modelData.label
                             later: modelData.later
                             height: 34
+                            onClicked: view.attention.act(row.index, modelData.name)
                         }
                     }
                 }

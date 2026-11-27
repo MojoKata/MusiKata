@@ -29,6 +29,7 @@ from .attention import Attention
 from .bridges import Library, Player
 from .duplicates import Duplicates
 from .edittags import EditTags
+from .encodings import FixEncoding
 from .genres import Genres
 from .history import ChangeHistory
 
@@ -54,7 +55,9 @@ SIZES = (SHOT, DESIGN)
 # the demo library's near duplicates (R9.5) and Electronic's ⋯ menu open, as its mockup draws it.
 # L09 is Needs attention (R2.8) with Same song twice chosen (R2.12), its groups of copies open and
 # the other groups folded after it, as its mockup draws it. L13 has no mockup: the Review… dialog
-# of Signal Fires' copies (R2.12) over it, drawn after T01's preview.
+# of Signal Fires' copies (R2.12) over it, drawn after T01's preview. T06 is Fix encoding… (R4.10)
+# over it, on the demo library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup
+# draws it.
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -120,6 +123,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         "L13-same-song-review",
         {"view": "attention", "attention": "copies", "review": "Signal Fires"},
     ),
+    ("T06-fix-encoding", {"view": "attention", "attention": "copies", "fix": "Маяк"}),
     ("X03-change-history", {"view": "songs", "select": [], "history": True}),
     ("X01-first-run", {"state": "first-run"}),
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
@@ -169,6 +173,7 @@ class Tour(QObject):
         genres: Genres | None = None,
         attention: Attention | None = None,
         copies: Duplicates | None = None,
+        encodings: FixEncoding | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -180,6 +185,7 @@ class Tour(QObject):
         self.win, self.library, self.out, self.done = window, library, out, done
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
+        self.encodings = encodings
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -223,6 +229,8 @@ class Tour(QObject):
             self.attention.go(step)
         if self.copies is not None and "view" in step:
             self.copies.go(step)
+        if self.encodings is not None and "view" in step:
+            self.encodings.go(step)
         self._size = 0
         self._at_size()
 

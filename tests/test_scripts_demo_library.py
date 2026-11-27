@@ -227,3 +227,24 @@ def test_l09s_copies_are_the_only_songs_of_one_audio_or_one_artist_and_title():
     ]  # fmt: skip
     assert set(demo.PLAYS) == {demo.SIGNAL_FIRES, demo.SIGNAL_COPY, demo.MOONPULL,
                                demo.MOONPULL_COPY}  # fmt: skip
+
+
+def test_t06s_album_is_windows_1251_in_latin_1_frames_and_its_files_named_from_them(tmp_path):
+    """R4.10, T06-fix-encoding: Северный Ветер's Тихая Гавань, nine songs whose ID3v2.3 tags an
+    old tagger saved as Windows-1251 in frames marked Latin-1, and whose files it named from the
+    gibberish they read as (08 - Ìàÿê.mp3); MusiKata flags them."""
+    sys.path.insert(0, os.path.join(ROOT, "src"))
+    from musikata_core import encodings
+    from musikata_core import tags as tags_core
+
+    lib = demo.plan()
+    harbor = [s for s in lib.songs if "cp1251" in s.shape]
+    assert len(harbor) == 9 and {s.kind for s in harbor} == {"mp3"}
+    assert harbor[7].path == "Ñåâåðíûé Âåòåð/Òèõàÿ Ãàâàíü/08 - Ìàÿê.mp3"
+    assert harbor[7].tags["title"] == "Маяк" and "id3v23" in harbor[7].shape
+    path = str(tmp_path / "08.mp3")
+    demo.encode(path, "mp3", 0.2, 440)
+    demo.tag(path, harbor[7])
+    t, _ = tags_core.read(path)
+    assert t.title == "Ìàÿê" and t.latin1 == ("title", "artist", "album")
+    assert encodings.flag(t) == "cp1251"

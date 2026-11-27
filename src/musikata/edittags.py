@@ -17,7 +17,9 @@ modification times kept as its settings say (settings.root_tags, R4.7.1, R4.7.2)
 What the panel says is decided here as plain data and text, tested without a window; which
 songs change, and how, is tags.edit's. The bulk tools of R4.5 are its ⋯ menu (`tools`): a tool
 opens its dialog (bulktools.BulkTool, `tool`) over the songs edited, in the list's order, and its
-save is saved here as the panel's own are, named for the tool in the change history."""
+save is saved here as the panel's own are, named for the tool in the change history. When the songs
+edited hold text in the wrong encoding (R4.10), the menu has Fix encoding… too, which opens
+musikata.encodings' dialog over them."""
 
 from __future__ import annotations
 
@@ -32,7 +34,7 @@ from typing import Any
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, Signal, Slot
 
-from musikata_core import albums, scanner, search, settings
+from musikata_core import albums, attention, scanner, search, settings
 from musikata_core.genres import BUILT_IN as BUILT_IN_GENRES
 from musikata_core.tags import (
     Batch,
@@ -50,7 +52,8 @@ from musikata_core.tags import kept as kept_tags
 from musikata_core.tags import save as save_tags
 
 from .bridges import shown_path
-from .bulktools import BulkTool, menu_of
+from .bulktools import ENCODING_TOOL, BulkTool, menu_of
+from .encodings import FixEncoding
 from .folders import FolderModel
 from .history import LABELS, ChangeHistory
 from .models import KINDS, Searcher, SongsModel, cover_url, plural, size_text, time_text, title_of
@@ -87,13 +90,14 @@ class Song:
     size: int | None = None
     album_id: int | None = None
     folder: str | None = None
+    encoding: str | None = None  # the encoding its Latin-1 text reads far better in (R4.10)
 
 
 TAG_COLUMNS = ("title", "artist", "album", "albumartist", "track", "tracktotal", "disc",
                "disctotal", "year", "date", "composer", "comment", "compilation", "rating",
                "artistsort", "albumartistsort", "albumsort", "has_cover")  # fmt: skip
 SONG_COLUMNS = ("id", "path", "kind", "length", "bitrate", "sample_rate", "size", "album_id",
-                "folder", *TAG_COLUMNS)  # fmt: skip
+                "folder", "latin1", "encoding", *TAG_COLUMNS)  # fmt: skip
 
 
 def read_songs(c: sqlite3.Connection, ids: Sequence[int]) -> list[Song]:
@@ -116,10 +120,11 @@ def read_songs(c: sqlite3.Connection, ids: Sequence[int]) -> list[Song]:
             values = {k: row[k] for k in TAG_COLUMNS}
             values["compilation"] = bool(values["compilation"])
             values["has_cover"] = bool(values["has_cover"])
-            tags = Tags(**values, genres=tuple(genres.get(row["id"], ())))
+            tags = Tags(**values, genres=tuple(genres.get(row["id"], ())),
+                        latin1=attention.latin1_of(row["latin1"]))  # fmt: skip
             found[row["id"]] = Song(
                 row["id"], row["path"], tags, row["kind"], row["length"], row["bitrate"],
-                row["sample_rate"], row["size"], row["album_id"], row["folder"],
+                row["sample_rate"], row["size"], row["album_id"], row["folder"], row["encoding"],
             )  # fmt: skip
     return [found[i] for i in ids if i in found]
 
@@ -373,9 +378,11 @@ class EditTags(QObject):
         executor: Executor | None = None,
         home: str = "",
         available: Callable[[], bool] = lambda: True,
+        encodings: FixEncoding | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
+        self._encodings = encodings  # Fix encoding…'s dialog (R4.10)
         self._root, self._read, self._settings, self._home = root, read, tags_settings, home
         # the genres suggested beside the library's (R9.6): the root's list, else the built-in
         self._genre_list = (
@@ -504,12 +511,17 @@ class EditTags(QObject):
         if item is None or item["later"] or not self._songs:
             log.info("bulk tool %r not opened: %s", name, item["later"] if item else "no such tool")
             return
+        if name == ENCODING_TOOL:
+            if self._encodings is not None:
+                self._encodings.open_songs([s.id for s in self._songs])
+            return
         songs = [tools.Song(scanner.full_path(self._root, s.path), s.tags) for s in self._songs]
         undoable = self._history is not None and self._settings.history
         self._bulk.open(name, songs, options, undoable)
 
     def _menu(self) -> list[dict[str, str]]:
-        menu = menu_of(len(self._songs), self.unsaved(), self._batch is not None)
+        flagged = self._encodings is not None and any(s.encoding for s in self._songs)
+        menu = menu_of(len(self._songs), self.unsaved(), self._batch is not None, flagged)
         if not self._available():
             for t in menu:
                 t["later"] = t["later"] or "Saving waits until the music folder is back"
@@ -885,6 +897,7 @@ class EditTags(QObject):
         self._searcher.wait()
         self._follow(None)
         self._saved = self._history = self._write = None
+        self._encodings = None
         self._available = _gone
 
     # ---------- what QML reads ----------

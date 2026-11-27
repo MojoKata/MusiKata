@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class Tags:
-    """R4.1's fields as read. A field the file doesn't hold is None (or empty, for genres)."""
+    """R4.1's fields as read. A field the file doesn't hold is None (or empty, for genres).
+    `latin1`: the text fields an ID3 tag holds as Latin-1 (its encoding 0) beyond ASCII, whose
+    text is then its bytes exactly, a character a byte (A3.6); it isn't a field, and two Tags of
+    the same values are equal whatever their text's encoding."""
 
     title: str | None = None
     artist: str | None = None
@@ -33,6 +36,7 @@ class Tags:
     rg_album_gain: float | None = None
     rg_album_peak: float | None = None
     has_cover: bool = False
+    latin1: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
