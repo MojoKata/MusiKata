@@ -69,9 +69,10 @@ ALBUMS = [
 ]
 # further albums, so the Folders view has every shape of folder (R2.9, R5.8): an artist with two
 # albums, three, five (Soundtracks), a Remixes folder of albums inside an artist's folder; one of
-# the soundtracks names no album artist, only the compilation flag (R2.5.3)
+# the soundtracks names no album artist, only the compilation flag (R2.5.3); Live at the Lantern
+# is an album in one file, its eight tracks in a .cue sheet beside it (R2.8, L09-needs-attention)
 MORE_ALBUMS = [
-    ("Mara Okafor", "Live at the Lantern", 2016, "Soul", 151, 8, "mp3", "", ""),
+    ("Mara Okafor", "Live at the Lantern", 2016, "Soul", 151, 8, "mp3", "", "one-file"),
     ("The Paper Lanterns", "Paper Weather", 2019, "Indie Rock", 461, 11, "flac", "", ""),
     (
         "Lumen Drift",
@@ -211,6 +212,7 @@ class Song:
     tone: int = 440
     cover: tuple[int, int] | None = None  # embedded: (seed, size)
     back: tuple[int, int] | None = None  # a back cover embedded too (R5.2): (seed, size)
+    seconds: float | None = None  # its length, when not the library's (an album in one file)
 
 
 @dataclass
@@ -220,6 +222,7 @@ class Library:
     playlists: dict[str, list[str]]  # path -> entries, as written
     # folder -> its other images: (name, seed, size), a PNG (T02's back.png, R5.2)
     images: dict[str, list[tuple[str, int, int]]] = field(default_factory=dict)
+    cues: dict[str, str] = field(default_factory=dict)  # path -> a .cue sheet's text (A2.6)
 
 
 def _titles(rng: random.Random, n: int) -> list[str]:
@@ -243,6 +246,11 @@ def _album(row, rng: random.Random, lib: Library) -> None:
         lib.covers[folder] = (seed, size)
     if "back" in odd:  # T02: a back cover beside cover.jpg, and a smaller one in two songs
         lib.images[folder] = [("back.png", 311, 1400)]
+    if "one-file" in odd:  # an album in one file, its tracks in a .cue sheet (A2.6, R2.8)
+        _one_file(lib, folder, artist, album, year, genre, titles[:count], seed)
+        for _ in titles[:count]:  # the ratings its tracks would have had: the albums after it
+            rng.choice((0, 0, 3, 4, 5))  # are as they were
+        return
     for n, title in enumerate(titles[:count], 1):
         tags: dict[str, object] = {
             "title": title,
@@ -279,6 +287,28 @@ def _album(row, rng: random.Random, lib: Library) -> None:
                 (211, 500) if "back" in odd and n in (3, 7) else None,
             )
         )
+
+
+ONE_FILE_SECONDS = 52 * 60 + 8  # Live at the Lantern's length (L07-folders-list)
+
+
+def _one_file(lib: Library, folder: str, artist: str, album: str, year: int, genre: str | None,
+              titles: list[str], seed: int) -> None:  # fmt: skip
+    """An album kept as one file, with a .cue sheet beside it naming its tracks, as a ripper
+    writes one (A2.6): over 20 minutes, so it is "Album in one file" in Needs attention."""
+    name = f"{album}.mp3"
+    tags = {"title": album, "artist": artist, "album": album, "albumartist": artist,
+            "year": year, "genre": [genre] if genre else [], "rating": 0}  # fmt: skip
+    lib.songs.append(Song(f"{folder}/{name}", "mp3", tags, set(), 220 + seed % 660,
+                          seconds=ONE_FILE_SECONDS))  # fmt: skip
+    lines = ["REM GENRE " + (genre or ""), f"REM DATE {year}", f'PERFORMER "{artist}"',
+             f'TITLE "{album}"', f'FILE "{name}" MP3']  # fmt: skip
+    step = ONE_FILE_SECONDS // len(titles)
+    for n, title in enumerate(titles, 1):
+        at = (n - 1) * step
+        lines += [f"  TRACK {n:02d} AUDIO", f'    TITLE "{title}"',
+                  f"    INDEX 01 {at // 60:02d}:{at % 60:02d}:00"]  # fmt: skip
+    lib.cues[f"{folder}/{album}.cue"] = "\r\n".join(lines) + "\r\n"
 
 
 def plan(seed: int = 1) -> Library:
@@ -375,21 +405,31 @@ def more(lib: Library, songs: int, seed: int = 1) -> None:
 # ---------- writing: PyAV encodes, Mutagen tags ----------
 
 
+LONG_RATE = 8000  # a long song's rate, mono at LONG_BITS, so an hour is a few megabytes
+LONG_BITS = 8000
+
+
 def encode(path: str, kind: str, seconds: float, tone: int) -> None:
-    """A tone with a little noise, `seconds` long, as `kind` (PyAV's FFmpeg)."""
+    """A tone with a little noise, `seconds` long, as `kind` (PyAV's FFmpeg); an MP3 longer than
+    a minute (an album in one file) at a low rate, so it stays small."""
     import av
     import numpy as np
 
     _ext, fmt, codec, sample_fmt, rate = KINDS[kind]
+    long = kind == "mp3" and seconds > 60
+    rate = LONG_RATE if long else rate
     n = int(rate * seconds)
     t = np.arange(n) / rate
     noise = np.random.default_rng(tone).standard_normal(n)
     x = (0.3 * np.sin(2 * np.pi * tone * t) + 0.02 * noise).astype(np.float32)
-    both = np.stack([x, x])
+    layout = "mono" if long else "stereo"
+    both = np.stack([x]) if long else np.stack([x, x])
     with av.open(path, "w", format=fmt) as out:
-        stream = out.add_stream(codec, rate=rate, layout="stereo")
+        stream = out.add_stream(codec, rate=rate, layout=layout)
         if codec == "vorbis":
             stream.codec_context.options = {"strict": "experimental"}
+        if long:
+            stream.codec_context.bit_rate = LONG_BITS
         stream.codec_context.format = sample_fmt
         step = stream.codec_context.frame_size or 1024
         for i in range(0, n, step):
@@ -398,7 +438,7 @@ def encode(path: str, kind: str, seconds: float, tone: int) -> None:
                 chunk = (chunk * 32767).astype(np.int16)
             arr = chunk.T.reshape(1, -1) if sample_fmt == "s16" else chunk
             frame = av.AudioFrame.from_ndarray(
-                np.ascontiguousarray(arr), format=sample_fmt, layout="stereo"
+                np.ascontiguousarray(arr), format=sample_fmt, layout=layout
             )
             frame.sample_rate, frame.pts, frame.time_base = rate, i, fractions.Fraction(1, rate)
             for packet in stream.encode(frame):
@@ -585,7 +625,8 @@ def before_history(song: Song, saves: list = HISTORY) -> Song:
     for _computer, _when, _what, album, name, before, after in saves:
         if after is None and tags.get("album") == album:
             tags[name] = before
-    return Song(song.path, song.kind, tags, song.shape, song.tone, song.cover, song.back)
+    return Song(song.path, song.kind, tags, song.shape, song.tone, song.cover, song.back,
+                song.seconds)  # fmt: skip
 
 
 def history(music: str, lib: Library, saves: list = HISTORY, undone: dict = UNDONE) -> list[str]:
@@ -658,9 +699,10 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
         path = os.path.join(music, song.path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         ext = KINDS[song.kind][0]
-        made = os.path.join(cache, f"{song.kind}-{song.tone}-{seconds}.{ext}")
+        length = song.seconds or seconds
+        made = os.path.join(cache, f"{song.kind}-{song.tone}-{length}.{ext}")
         if not os.path.exists(made):
-            encode(made + ".part." + ext, song.kind, seconds, song.tone)
+            encode(made + ".part." + ext, song.kind, length, song.tone)
             os.replace(made + ".part." + ext, made)
         shutil.copyfile(made, path)
         tag(path, before_history(song))
@@ -671,6 +713,9 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
         for name, iseed, size in images:
             with open(os.path.join(music, folder, name), "wb") as f:
                 f.write(cover_png(iseed, size))
+    for rel, text in lib.cues.items():
+        with open(os.path.join(music, rel), "w", encoding="utf-8", newline="") as f:
+            f.write(text)
     for rel, lines in lib.playlists.items():
         path = os.path.join(music, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)

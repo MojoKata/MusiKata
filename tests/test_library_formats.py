@@ -122,3 +122,31 @@ def test_a_history_entry_as_musikata_writes_it_is_held_to_its_schema_and_a2_10s_
     entry = history.parse(history.name_for(Clock().now(), "b2c4"), json.dumps(example))
     assert isinstance(entry, history.Entry) and not entry.problems
     assert history.document(entry) == example
+
+
+def test_ignored_json_as_musikata_writes_it_is_held_to_its_schema_and_a2_10s_is_read(tmp_path):
+    """A2.8, R2.8: what Ignore writes (rootfiles.save_ignored, from attention.dismissal_of) is
+    A2.10's format, and A2.10's example reads back as the dismissals it shows."""
+    from musikata_core import attention, rootfiles
+
+    path = str(tmp_path / "ignored.json")
+    made = [
+        attention.dismissal_of(entry, "2026-11-26T21:00:00Z")
+        for entry in (
+            attention.Entry("unreadable", "_Incoming/broken.mp3", modified=1795600000.5),
+            attention.Entry("album-in-one-file", "Mara Okafor/Live.mp3", hash="0c" * 32,
+                            modified=1795600000.0),
+            attention.Entry("cover-small", "Lumen Drift/Glass Harbor", modified=1795600001.0),
+            attention.Entry("names-artist", "Lumen Drift"),
+        )
+    ]  # fmt: skip
+    rootfiles.save_ignored(path, made)
+    with open(path, encoding="utf-8") as f:
+        written = json.load(f)
+    jsonschema.validate(written, _schema("ignored.v1.schema.json"))
+    assert {e["kind"] for e in written["entries"]} == {
+        "unreadable", "album-in-one-file", "cover-small", "names-artist"
+    }  # fmt: skip
+    example = EXAMPLES["ignored.v1.schema.json"]
+    read = rootfiles.parse_ignored(json.dumps(example))
+    assert not read.problems and rootfiles.ignored_document(read.entries, read) == example

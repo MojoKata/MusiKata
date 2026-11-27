@@ -1,14 +1,15 @@
 import QtQuick
 import "."
 
-// A line of the sidebar (R6.3): its icon and label, highlighted while its view is open; a click
-// opens it.
+// A line of the sidebar (R6.3): its icon and label, highlighted while its view is open, and its
+// count when it has one (Needs attention's, R2.8, L09-needs-attention); a click opens it.
 Item {
     id: item
     signal clicked()
     property string label
     property string icon
     property bool active
+    property string badge: ""          // a count beside the label; "" for none
     height: 32
     Accessible.role: Accessible.Button
     Accessible.name: item.label
@@ -40,9 +41,28 @@ Item {
         size: 17
         color: item.active ? Theme.accentHi : Theme.muted
     }
+    Rectangle {
+        id: badge
+        objectName: "sideBadge"
+        anchors.right: parent.right
+        anchors.rightMargin: 20
+        anchors.verticalCenter: parent.verticalCenter
+        visible: item.badge !== ""
+        width: Math.max(height, count.implicitWidth + 14)
+        height: 20
+        radius: 10
+        color: Theme.warnSoft
+        Text {
+            id: count
+            anchors.centerIn: parent
+            text: item.badge
+            color: Theme.warn
+            font { family: Theme.sans; pixelSize: 11; weight: Font.Bold }
+        }
+    }
     Text {
         x: 50
-        width: item.width - 70
+        width: (badge.visible ? badge.x - 6 : item.width - 20) - x
         height: item.height
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight

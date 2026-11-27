@@ -121,7 +121,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.inotify` | library | Watching folders with Linux's inotify, a file rewritten in place included (A2.4) |
 | `musikata_core.search` | library | FTS5 queries and `field:` terms (A2.5, R2.7), and the values in use the Edit tags panel suggests (R4.6) |
 | `musikata_core.folders` | library | The folder table and the mosaics' sources (A2.7, R2.9, R5.8) |
-| `musikata_core.attention` | library | Needs attention's views (A2.6, R2.8) |
+| `musikata_core.attention` | library | Needs attention's groups (A2.6, R2.8): the queries over what the scan keeps for them, names with case and spacing set aside, an album's songs that differ, covers' sizes, the `.cue` sheet of an album in one file, Ignore's match, and the plan of a merge of an artist's or an album's names |
 | `musikata_core.duplicates` | library | Exact and likely copies, and the best copy (R2.12) |
 | `musikata_core.rootfiles` | library | The root's own files: plays, dismissals, merged and matched, and what naming and matching songs takes for every one of them, `ratings.json` included (A2.8, A2.10) |
 | `musikata_core.ratings` | library | Ratings where they are kept: into the files or the root's `ratings.json`, read, merged and written, the rating each song shows worked out in the index, and a save's writer that puts each rating where it goes (R10, A2.8, A2.10) |
@@ -156,6 +156,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.edittags` | app | The Edit tags panel in the running app: what it edits and follows, its fields, suggestions, saving through the batch with progress, Cancel and Retry, and one song's file (R4.2 to R4.4, R4.6 to R4.8) |
 | `musikata.albumart` | app | The Album art dialog in the running app: the album's art read, images decoded, converted and shrunk with Qt, dropped, chosen and pasted, saving through the batch with progress, Cancel and Retry, and Save cover to folder (R5.2 to R5.5) |
 | `musikata.bulktools` | app | The Edit tags panel's bulk tools: the ⋯ menu, and a tool's dialog with its options and its preview, saved through the panel (R4.5) |
+| `musikata.attention` | app | Needs attention in the running app: its chips and groups, found off the GUI thread and made a row at a time, each entry's action (Edit tags, Album art, Merge, Show in folder) and Ignore kept in `ignored.json` and watched; the Merge of an artist's or an album's names through the preview, the batch and the change history (R2.8) |
 | `musikata.genres` | app | Genres in the running app: the Genres view's tiles worked out off the GUI thread, a genre's page, the ⋯ menu's Rename… and Merge into… and the near duplicates' banner with Review… and Not now, through the preview, saved through the batch and the change history (R9) |
 | `musikata.preview` | app | The preview of a change to many files' tags before it is saved: each file's old and new values, its checkbox, the footer and Save (R3.7, R3.8; the bulk tools', and Infer from path's) |
 | `musikata.history` | app | The change history in the running app: the entries read and watched, the Change history panel, Ctrl+Z, R4.9.1's question and the message that follows a save, with Undo (R4.9, R6.7) |

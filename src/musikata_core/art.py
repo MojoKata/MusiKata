@@ -49,11 +49,15 @@ CAN_READ = "JPEG, PNG or WebP"
 
 @dataclass(frozen=True)
 class Image:
-    """An image file the walk found in a folder: its name, size and modification time."""
+    """An image file the walk found in a folder: its name, size and modification time; and, for
+    the folder's cover, its size in pixels once its header has been read (None: not read, or not
+    an image it can read; attention.measure, R5.6)."""
 
     name: str
     size: int
     mtime_ns: int
+    width: int | None = None
+    height: int | None = None
 
 
 def is_image(name: str) -> bool:

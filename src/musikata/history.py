@@ -49,8 +49,9 @@ LABELS = {
 RATE = "rate"  # a save of ratings (R10.2)
 ART = "album-art"  # a save of the Album art dialog, or Save cover to folder (R5.3, R5.5)
 GENRE = "genres"  # a genre renamed or merged (R9.4, R9.5)
+NAMES = "names"  # an artist's or an album's names merged, from Needs attention (R2.8)
 ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
-           ART: "Album art", GENRE: "Genres"}  # fmt: skip  # an entry
+           ART: "Album art", GENRE: "Genres", NAMES: "Names merged"}  # fmt: skip  # an entry
 # with no description, by its action
 
 
