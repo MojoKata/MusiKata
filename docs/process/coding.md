@@ -104,6 +104,12 @@ and mutation testing finds them only slowly.
   thread.
 - Work crosses threads by Qt signals queued to the receiver, or through the ring buffers of A4.1
   and A4.3; no object is changed from two threads.
+- No thread but the GUI thread starts a garbage collection (A1.3): Python's own collections are
+  off, and only `musikata.garbage` and the closing of a window (`app.Session`) collect. A window's
+  QObjects are deleted at its close, at once and on the GUI thread (`Shiboken.delete`), and
+  nothing they hold or that holds them is left in a reference cycle: a bound method or callback
+  stored on what outlives the close is let go at it, and an exception kept is kept without its
+  traceback, whose frames would hold everything they referred to.
 - The sound device's callback only copies samples out of the ring buffer, at the volume (A4.4).
 
 ## QML

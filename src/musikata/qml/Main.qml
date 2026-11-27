@@ -10,17 +10,30 @@ import "."
 // bottom, and Up next (R7.2) opens over the view's right side above it. Space plays and pauses,
 // Ctrl+→ and Ctrl+← (⌘ on macOS) go to the next song and the one before, and ← and → seek 5 seconds
 // (R6.9, R7.4), unless what has the focus uses them: a text box, the Folders view's grid, the
-// volume.
+// volume. ⋮ › Change history docks its panel on the right (R4.9), Ctrl+Z (⌘Z) undoes the most
+// recent save unless a text box takes it, and the message that follows a save or an undo, with its
+// Undo, shows at the foot of the view (R6.7). Edit tags (R4.2) docks its panel in the same place,
+// under Change history while that is open; Ctrl+E (⌘E) opens it on the open view's selection, and
+// the views open it from their buttons, selection bars and right-click menus. A bulk tool of its ⋯
+// menu (R4.5) opens its dialog over the whole window. While a modal dialog is open over the window
+// (`modal`: a bulk tool's), the window's shortcuts don't act on what is behind it. A star clicked
+// in a list's row or the bar sets that song's rating, and Ctrl+0 to Ctrl+5 (⌘ on macOS) the
+// selection's (R10.2).
 Window {
     id: win
     required property var library
     required property var player
+    required property var history
+    required property var edit
+    required property var ratings
     width: 1280
     height: 800
     minimumWidth: 960
     minimumHeight: 600
     title: win.library.windowTitle
     color: Theme.bg
+    // a modal dialog is open over the window: its shortcuts are the dialog's, not the window's
+    readonly property bool modal: win.edit.tool.opened
 
     Sidebar {
         id: sidebar
@@ -30,14 +43,33 @@ Window {
     ViewHeader {
         id: header
         objectName: "header"
-        anchors { left: sidebar.right; right: parent.right; top: parent.top }
+        anchors { left: sidebar.right; right: dock.left; top: parent.top }
         visible: win.library.searchable
         library: win.library
+        history: win.history
+    }
+    Item {  // the panel docked on the right: Change history over Edit tags
+        id: dock
+        anchors { right: parent.right; top: parent.top; bottom: bar.top }
+        width: win.history.opened || win.edit.opened ? Math.min(380, Math.max(320, win.width * 0.3)) : 0
+        EditTagsPanel {
+            objectName: "editPanel"
+            anchors.fill: parent
+            visible: win.edit.opened && !win.history.opened
+            focus: visible
+            edit: win.edit
+        }
+        ChangeHistoryPanel {
+            objectName: "historyPanel"
+            anchors.fill: parent
+            visible: win.history.opened
+            history: win.history
+        }
     }
     Column {
         id: banners
         anchors {
-            left: sidebar.right; right: parent.right; leftMargin: 28; rightMargin: 28
+            left: sidebar.right; right: dock.left; leftMargin: 28; rightMargin: 28
             top: win.library.searchable ? header.bottom : parent.top
             topMargin: banners.height > 0 ? 8 : 0
         }
@@ -93,14 +125,14 @@ Window {
     }
     Shortcut {
         sequence: "/"
-        enabled: win.library.searchable
+        enabled: win.library.searchable && !win.modal
         onActivated: header.openSearch()
     }
     Loader {
         id: view
         objectName: "view"
         anchors {
-            left: sidebar.right; right: parent.right; bottom: bar.top
+            left: sidebar.right; right: dock.left; bottom: bar.top
             top: banners.bottom
             topMargin: banners.height > 0 ? 12 : 0
         }
@@ -110,11 +142,11 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
     Component { id: artists; ArtistsView { library: win.library } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player } }
-    Component { id: songs; SongsView { library: win.library; player: win.player } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings } }
 
     UpNext {
         objectName: "upNext"
@@ -124,30 +156,69 @@ Window {
         visible: win.player.upNextOpen
         player: win.player
     }
+    MessageBar {
+        objectName: "message"
+        anchors { horizontalCenter: view.horizontalCenter; bottom: bar.top; bottomMargin: 16 }
+        maxWidth: view.width - 48
+        history: win.history
+    }
     NowPlayingBar {
         id: bar
         objectName: "nowPlayingBar"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         player: win.player
+        ratings: win.ratings
+    }
+    ToolDialog {
+        objectName: "toolOverlay"
+        anchors.fill: parent
+        tool: win.edit.tool
+    }
+    Shortcut {
+        sequence: "Ctrl+E"
+        enabled: !win.modal
+        onActivated: win.edit.editCurrent(win.library)
+    }
+    Repeater {  // Ctrl+0 to Ctrl+5 (⌘ on macOS) rate the selection, Ctrl+0 clearing it (R10.2)
+        model: 6
+        Item {
+            id: rateKey
+            required property int index
+            Shortcut {
+                sequence: "Ctrl+" + rateKey.index
+                enabled: !win.modal
+                onActivated: win.ratings.rateSelection(win.library, rateKey.index)
+            }
+        }
+    }
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: !win.modal
+        onActivated: win.history.undoLast()
     }
     Shortcut {
         sequence: "Space"
+        enabled: !win.modal
         onActivated: win.player.toggle()
     }
     Shortcut {
         sequence: "Ctrl+Right"
+        enabled: !win.modal
         onActivated: win.player.next()
     }
     Shortcut {
         sequence: "Ctrl+Left"
+        enabled: !win.modal
         onActivated: win.player.previous()
     }
     Shortcut {
         sequence: "Left"
+        enabled: !win.modal
         onActivated: win.player.seekBack()
     }
     Shortcut {
         sequence: "Right"
+        enabled: !win.modal
         onActivated: win.player.seekAhead()
     }
 }

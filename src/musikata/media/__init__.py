@@ -126,8 +126,10 @@ class MediaControls(QObject):
         try:
             self.backend = opener(self.commanded.emit, self._position, window)
         except Exception as e:  # anything a platform's module raises: it plays without them
+            # its words, not the error: a log record kept (a test's) would keep its traceback,
+            # and with it the frames that made this window and what they held (A1.3)
             log.warning("the system's media controls didn't start (%s: %s); MusiKata plays "
-                        "without them", type(e).__name__, e)  # fmt: skip
+                        "without them", type(e).__name__, str(e))  # fmt: skip
             return
         for signal in self._signals():
             signal.connect(self._follow)
@@ -175,13 +177,13 @@ class MediaControls(QObject):
         return ""
 
     def _found(self, thumb: str, future: Future[str | None]) -> None:
-        """On the finding thread: says what was found, to the GUI thread."""
-        try:
-            path = future.result() or ""
-        except Exception as e:  # the cover cache's, read off the GUI thread
-            log.warning("the cover %s for the system's media controls: %s", thumb, e)
-            path = ""
-        self._art_found.emit(thumb, path)
+        """On the finding thread: says what was found, to the GUI thread. Its failure is asked
+        for, not raised again here, where its traceback would take this frame, and this object
+        with it, into a cycle with the future (A1.3)."""
+        error = future.exception()
+        if error is not None:  # the cover cache's, read off the GUI thread
+            log.warning("the cover %s for the system's media controls: %s", thumb, error)
+        self._art_found.emit(thumb, "" if error is not None else future.result() or "")
 
     @Slot(str, str)
     def _on_art_found(self, thumb: str, path: str) -> None:

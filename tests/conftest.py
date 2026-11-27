@@ -10,16 +10,21 @@ How a skip slips past without it: a test that skips says why and the run still p
 result is read as counts ("128 passed, 6 skipped"), so a test that exists for one platform (MPRIS on
 Linux, the media controls on Windows or macOS, A4.5) can skip on that very platform unnoticed.
 
-And every test's own home, below: `own_home`, and the check of MusiKata's files in the real one."""
+And every test's own home, below: `own_home`, and the check of MusiKata's files in the real one;
+and garbage collected by the app's own rule (`garbage_collected`)."""
 
 import contextlib
 import functools
+import gc
 import os
 import re
 import stat
 
 import pytest
 from hypothesis import settings
+
+from musikata import garbage
+from musikata_core.clock import SystemClock
 
 # Hypothesis (docs/process/testing.md, "Properties"): tier 1 tries a fixed 50 examples a property,
 # so a run is fast and never flaky; HYPOTHESIS_PROFILE=deep, weekly and before a release, thousands
@@ -175,6 +180,23 @@ OWN = {
     "LOCALAPPDATA": "AppData/Local",
     "MUSIKATA_DATA": ".local/share/musikata",
 }
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _collector():
+    """Garbage collected as MusiKata collects it (musikata.garbage, A1.3): Python's own collections
+    off for the run, so none starts on a thread a test started, and the app's rule asked after
+    each test, here on the main thread, the GUI thread (`garbage_collected`)."""
+    gc.disable()
+    yield garbage.Collector(SystemClock())
+    gc.enable()
+
+
+@pytest.fixture(autouse=True)
+def garbage_collected(_collector):
+    """After each test, what the app's rule says is due is collected, as its timer would."""
+    yield
+    _collector.look()
 
 
 @pytest.fixture(autouse=True)

@@ -26,6 +26,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtMultimedia import QAudioDevice, QAudioFormat, QMediaDevices
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
+from shiboken6 import Shiboken
 
 from musikata import app, bridges, models, player
 from musikata_core import nowplaying, settings
@@ -399,8 +400,11 @@ def test_closing_while_a_song_plays_stops_it_and_ends_the_thread(make, qtbot):
     p = make(tone)
     p.play("a.flac")
     qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
+    thread, ended = p._thread._thread, []
+    thread.finished.connect(lambda: ended.append(1), Qt.ConnectionType.DirectConnection)
     p.close()
-    assert tone.closed == tone.opened and not p._thread._thread.isRunning()
+    # ended, then deleted with its engine, on this thread (A1.3)
+    assert tone.closed == tone.opened and ended == [1] and not Shiboken.isValid(thread)
 
 
 # ---------- devices (R7.7, A4.6) ----------

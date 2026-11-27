@@ -3,6 +3,7 @@ the scan on a thread of its own, its progress and end reaching QML's thread as s
 
 import functools
 import os
+import sqlite3
 import sys
 import threading
 from concurrent.futures import BrokenExecutor, ThreadPoolExecutor
@@ -11,7 +12,7 @@ import pytest
 from fakes import FakeClock, fill, wav
 
 from musikata import bridges
-from musikata_core import db, scanner, watch
+from musikata_core import db, scanner, tags, watch
 from musikata_core.clock import SystemClock
 
 
@@ -107,6 +108,27 @@ def test_a_scan_that_fails_is_kept_and_logged_and_the_library_goes_on(
     lib.wait()
     assert isinstance(lib.last, OSError) and "the scan of" in caplog.text
     assert lib.property("scanning") is False and lib.property("line") == "No songs yet"
+    # kept without its traceback, whose frames would keep the Library in a cycle (A1.3)
+    assert lib.last.__traceback__ is None
+
+
+def test_an_error_kept_lets_go_of_its_traceback_and_those_of_the_errors_it_came_from():
+    def raised(make):
+        try:
+            make()
+        except Exception as e:  # noqa: BLE001
+            return e
+
+    def chained():
+        try:
+            raise KeyError("first")
+        except KeyError:
+            raise ValueError("then") from OSError("cause")
+
+    e = raised(chained)
+    assert e.__traceback__ is not None and e.__context__.__traceback__ is not None
+    assert bridges.without_traceback(e) is e
+    assert [x.__traceback__ for x in (e, e.__cause__, e.__context__)] == [None] * 3
 
 
 def test_waiting_with_no_scan_started_returns_at_once(index, tmp_path):
@@ -795,6 +817,53 @@ def test_a_write_musikata_made_itself_isnt_read_again_by_the_rescan_its_change_s
     qtbot.waitUntil(lambda: lib.last is not first, timeout=10_000)
     lib.wait()
     assert lib.last.read == [] and lib.last.unchanged == 1
+    lib.close()
+
+
+def _title(index, path):
+    row = index.read().execute("SELECT title FROM song WHERE path = ?", (path,)).fetchone()
+    return row[0] if row else None
+
+
+def test_a_file_saved_takes_its_row_from_the_write_and_the_rescan_its_change_starts_reads_nothing(
+    index, music, tmp_path, qtbot
+):
+    """A2.4: a write MusiKata made (A3.4) updates its row from what was read back, and is
+    recognised by its path, size and time when the watcher reports it."""
+    clock = FakeClock()
+    lib = bridges.Library(str(music), index, str(tmp_path), threads, clock=clock, watching=True)
+    scanned(lib, qtbot)
+    first = lib.last
+    written = tags.save(
+        str(music / "A" / "1.wav"), {"title": "Tidewater"}, audio_hash=scanner.audio_hash
+    )
+    with qtbot.waitSignal(lib.changed, timeout=10_000):
+        lib.saved([written])
+    assert _title(index, "A/1.wav") == "Tidewater"
+    report(lib, clock, "A")
+    qtbot.waitUntil(lambda: lib.last is not first, timeout=10_000)
+    lib.wait()
+    assert lib.last.read == [] and lib.last.unchanged == 1
+    lib.close()
+
+
+def test_rows_of_a_save_that_cant_be_written_to_the_index_are_logged(
+    index, music, tmp_path, qtbot, monkeypatch, caplog
+):
+    lib = bridges.Library(str(music), index, str(tmp_path), threads)
+    scanned(lib, qtbot)
+    written = tags.save(
+        str(music / "B" / "2.wav"), {"title": "Parallax"}, audio_hash=scanner.audio_hash
+    )
+
+    def broken(c, root, rows):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(scanner, "wrote", broken)
+    with qtbot.waitSignal(lib.changed, timeout=10_000):
+        lib.saved([written])
+    assert "couldn't index the files written" in caplog.text
+    assert _title(index, "B/2.wav") == "Undertow"
     lib.close()
 
 

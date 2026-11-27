@@ -20,6 +20,10 @@
       "type": "string",
       "minLength": 1
     },
+    "description": {
+      "type": "string",
+      "description": "What the save was, in words, for the Change history view"
+    },
     "undoes": {
       "type": "string",
       "description": "The entry this one undoes, by file name"
@@ -38,16 +42,36 @@
           "from": {
             "type": "string",
             "minLength": 1,
-            "description": "The file's path under the root, with / separators"
+            "description": "The file's old path under the root, when the save moved it (R12), with / separators"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The file's audio hash (A2.3), which finds it when it has moved (A2.8)"
           },
           "fields": {
             "type": "object",
             "description": "Each changed field's old value, by R4.1 field"
           },
+          "new": {
+            "type": "object",
+            "description": "Each changed field's value as written, by R4.1 field, which Undo checks the file against (R4.9.1)"
+          },
           "cover": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[0-9a-f]{64}$",
-            "description": "The old cover, kept as history/images/<sha256>"
+            "description": "Present when the cover changed: the old cover, kept as history/images/<sha256>; null when there was none"
+          },
+          "new_cover": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The cover written, by its sha256; null when it was removed"
           }
         },
         "required": [

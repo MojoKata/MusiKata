@@ -9,9 +9,9 @@ lookup of 200 rows by their keys whatever the order, so typing never waits on a 
 scrolling, however deep, never sorts the list again: a page is a few milliseconds at any depth.
 
 What a row shows is decided here, as text (`docs/process/coding.md`: QML only lays out and binds):
-the title, or the file's name when the song has none; the genres joined; the length as m:ss; an
-album's artist and year as one line; a cover as the address the cover provider serves it at; and
-whether it is the song or album playing."""
+the title, or the file's name when the song has none; the genres joined; the plays of every
+computer added up (R7.9); the length as m:ss; an album's artist and year as one line; a cover as the
+address the cover provider serves it at; and whether it is the song or album playing."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import os
 import sqlite3
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from typing import Any
 
 from PySide6.QtCore import Property as QtProperty
@@ -37,6 +37,8 @@ from PySide6.QtCore import (
 
 from musikata_core import albums, folders, search
 
+from .selection import NOT_MINE, Selection, selection_text
+
 log = logging.getLogger(__name__)
 
 PAGE = 200  # rows read at a time
@@ -46,14 +48,14 @@ COVERS = "image://covers/"  # where the cover provider serves a thumbnail, by it
 UNKNOWN_ARTIST = "Unknown artist"
 
 # what a row of a list of songs holds, in the roles' order
-COLUMNS = ("title", "artist", "album", "genre", "year", "track", "rating", "time", "path")
+COLUMNS = ("title", "artist", "album", "genre", "year", "track", "rating", "plays", "time", "path")
 ROLES = {int(Qt.ItemDataRole.UserRole) + i: name for i, name in enumerate(COLUMNS)}
 PLAYING = int(Qt.ItemDataRole.UserRole) + len(COLUMNS)  # the role: whether it's the song playing
 
 # the Songs list's orders (R2.6), one for each column it sorts by: what it sorts by, how text is
 # compared, and what orders songs that tie. A missing value sorts last either way. By artist is
 # by album artist, then album, disc and track, so an album's songs stay together, by their sort
-# names (R2.13); so are the ties of genre, year, rating and time.
+# names (R2.13); so are the ties of genre, year, rating, plays and time.
 BY_ARTIST = (
     "artist_key IS NULL, artist_key, album_key IS NULL, album_key, album_id, disc, track, path"
 )
@@ -66,6 +68,7 @@ COLUMN_SORTS: dict[str, tuple[str, str, str]] = {
               BY_ARTIST),
     "year": ("year", "", BY_ARTIST),
     "rating": ("coalesce(rating, 0)", "", BY_ARTIST),
+    "plays": ("coalesce((SELECT SUM(count) FROM play WHERE song_id = song.id), 0)", "", BY_ARTIST),
     "time": ("length", "", BY_ARTIST),
 }  # fmt: skip
 # the orders of the pages' lists: an album's by disc and track, an artist's other songs by album
@@ -76,7 +79,7 @@ ORDERS = {
 # the Songs list's columns as its header shows them, and the order each sorts by ("": none)
 SONG_HEADERS = (
     ("#", ""), ("TITLE", "title"), ("ARTIST", "artist"), ("ALBUM", "album"), ("GENRE", "genre"),
-    ("YEAR", "year"), ("RATING", "rating"), ("TIME", "time"),
+    ("YEAR", "year"), ("RATING", "rating"), ("PLAYS", "plays"), ("TIME", "time"),
 )  # fmt: skip
 
 
@@ -116,8 +119,43 @@ ALBUM_SORT_LABELS = {"artist": "Artist", "title": "Title", "year": "Year"}
 SONG_COLUMNS = (
     "path, title, artist, album,"
     " (SELECT group_concat(genre, '; ' ORDER BY position) FROM song_genre WHERE song_id = song.id),"
-    " year, track, rating, length"
+    " year, track, rating, (SELECT SUM(count) FROM play WHERE song_id = song.id), length"
 )
+
+
+# the selection bar's actions after Play next (L03-songs-bulk-edit): Edit tags (R4.2, by its
+# `action`), and those that come with later slices, with what their tooltips say
+SONG_LATER = [
+    {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
+    {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"},
+    {
+        "label": "Infer from path",
+        "icon": "wand",
+        "later": "Tags from paths come in a later version",
+    },
+]
+
+# the keys a list selects with (R6.9, R18.2), by the names selection.press knows them by
+KEY_NAMES = {
+    int(Qt.Key.Key_Up): "up", int(Qt.Key.Key_Down): "down", int(Qt.Key.Key_PageUp): "pageup",
+    int(Qt.Key.Key_PageDown): "pagedown", int(Qt.Key.Key_Home): "home",
+    int(Qt.Key.Key_End): "end", int(Qt.Key.Key_Escape): "clear",
+}  # fmt: skip
+SHIFT = int(Qt.KeyboardModifier.ShiftModifier.value)
+CTRL = int(Qt.KeyboardModifier.ControlModifier.value)  # ⌘ on macOS, as Qt maps it
+OTHER = int(Qt.KeyboardModifier.AltModifier.value) | int(Qt.KeyboardModifier.MetaModifier.value)
+
+
+def key_name(key: int, modifiers: int) -> tuple[str, bool]:
+    """A key a list was given, as selection.press names it, and whether Shift was held: Ctrl+A
+    (⌘A) is "all"; with Ctrl, Alt or Meta otherwise, a key isn't the list's ("": Alt+↑ goes up a
+    folder, Ctrl+Shift+↑ moves songs in a playlist, R6.9), nor is one it doesn't know."""
+    shift = bool(modifiers & SHIFT)
+    if modifiers & OTHER:
+        return "", shift
+    if modifiers & CTRL:
+        return ("all" if key == int(Qt.Key.Key_A) else ""), shift
+    return KEY_NAMES.get(key, ""), shift
 
 
 def size_text(n: int) -> str:
@@ -166,6 +204,12 @@ def time_text(seconds: float | None) -> str:
     s = round(seconds)
     h, rest = divmod(s, 3600)
     return f"{h}:{rest // 60:02d}:{rest % 60:02d}" if h else f"{s // 60}:{s % 60:02d}"
+
+
+def plays_text(plays: int | None) -> str:
+    """A song's plays on every computer, added up (R7.9), as the lists show them: 1,204; empty
+    for a song never played."""
+    return f"{plays:,}" if plays else ""
 
 
 def length_text(seconds: float | None) -> str:
@@ -221,7 +265,7 @@ def tiles(thumbs: Sequence[str]) -> list[dict[str, Any]]:
 
 def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
     """A row of SONG_COLUMNS as the roles give it."""
-    path, title, artist, album, genre, year, track, rating, length = r
+    path, title, artist, album, genre, year, track, rating, plays, length = r
     return {
         "title": title_of(title, path),
         "artist": artist or "",
@@ -230,6 +274,7 @@ def row_of(r: tuple[Any, ...]) -> dict[str, Any]:
         "year": str(year) if year else "",
         "track": str(track) if track else "",
         "rating": rating or 0,
+        "plays": plays_text(plays),
         "time": time_text(length),
         "path": path,
     }
@@ -320,6 +365,7 @@ class PagedModel(QAbstractListModel):
         self._generation = 0  # which reload a search's result belongs to
         self._shown = ""  # the search whose rows the list shows
         self._pending = False  # a search sent to the search thread, its rows still to come
+        self._ratings: Mapping[int, int] = {}  # ratings being saved, shown at once (R10.2)
 
     def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
         """The columns selected, the table, the WHERE ("" for none), its parameters, the order."""
@@ -406,6 +452,7 @@ class PagedModel(QAbstractListModel):
         self._total, self._ids = result if result is not None else (self._total, [])
         self._count = len(self._ids)
         self._shown, self._pending = text, False
+        self._rows_found()
         self.endResetModel()
         self.countChanged.emit()
 
@@ -415,6 +462,7 @@ class PagedModel(QAbstractListModel):
         old = self._count
         self._pages.clear()
         self._total, self._ids, self._shown, self._pending = total, ids, shown, False
+        self._rows_found()
         if count > old:
             self.beginInsertRows(QModelIndex(), old, count - 1)
             self._count = count
@@ -426,6 +474,9 @@ class PagedModel(QAbstractListModel):
         if count:
             self.dataChanged.emit(self.index(0), self.index(count - 1))
         self.countChanged.emit()
+
+    def _rows_found(self) -> None:
+        """The rows were found afresh (`_ids`), before the view hears of it."""
 
     def row(self, n: int) -> dict[str, Any] | None:
         """Row n, reading its page when it isn't held."""
@@ -454,6 +505,28 @@ class PagedModel(QAbstractListModel):
         rows = {r[0]: self._row(r[1:]) for r in self._read().execute(sql, ids)}
         return [rows.get(i) for i in ids]  # None for a row gone since they were found
 
+    def song_at(self, n: int) -> int | None:
+        """The song row n stands for, by id; None for a row of no one song (a folder)."""
+        return None
+
+    def rating_at(self, n: int) -> int:
+        """Row n's rating as the list shows it, one being saved included (R10.2); 0 for none."""
+        song = self.song_at(n)
+        if song is not None and song in self._ratings:
+            return self._ratings[song]
+        row = self.row(n)
+        return int(row.get("rating") or 0) if row is not None else 0
+
+    def show_ratings(self, ratings: Mapping[int, int]) -> None:
+        """The ratings being saved, by song id, shown at once in place of the index's until
+        they are saved (R10.2: the list shows a new rating at once, and goes back when it
+        fails)."""
+        if not ratings and not self._ratings:
+            return
+        self._ratings = dict(ratings)
+        if "rating" in self.roles:
+            self._changed("rating")
+
     def _changed(self, role: str) -> None:
         if self._count:
             self.dataChanged.emit(self.index(0), self.index(self._count - 1), [self._role(role)])
@@ -476,6 +549,10 @@ class PagedModel(QAbstractListModel):
         i = role - int(Qt.ItemDataRole.UserRole)
         if not 0 <= i < len(self.roles):
             return None
+        if self._ratings and self.roles[i] == "rating":
+            song = self.song_at(index.row())
+            if song is not None and song in self._ratings:
+                return self._ratings[song]
         row = self.row(index.row())
         return None if row is None else self._value(row, self.roles[i])
 
@@ -511,10 +588,19 @@ class PagedModel(QAbstractListModel):
 
 class SongsModel(PagedModel):
     """Songs of the index: every one (the Songs list), or those a WHERE picks (an album's, an
-    artist's on others' albums), in one of ORDERS, or by a column either way (COLUMN_SORTS)."""
+    artist's on others' albums), in one of ORDERS, or by a column either way (COLUMN_SORTS).
 
-    roles = (*COLUMNS, "playing")
+    It holds the list's selection (R2.6), by song id (selection.Selection), so it stays with its
+    songs however the list is scrolled, paged, sorted or read again after a scan, and a song that
+    leaves the list leaves it; each row says whether it is selected and whether it is the current
+    row the arrow keys move. `selection` is the songs selected, in the list's order: what Enter
+    plays (R7.1), the right-click menu queues (R7.2) and the Edit tags panel and ratings act on
+    (R4.2, R10)."""
+
+    roles = (*COLUMNS, "playing", "selected", "current")
     key = "song.id"
+    selectionChanged = Signal()
+    revealRow = Signal(int)  # a selection the tour made: its first row, for the view to show
 
     def __init__(
         self,
@@ -530,6 +616,8 @@ class SongsModel(PagedModel):
         self._sort, self._descending = sort, False
         self._where, self._params = where, params
         self._playing = ""  # the path of the song playing
+        self._selection: Selection[int] = Selection()
+        self._wanted: list[int] | None = None  # songs to select once the rows come (select_songs)
         self.source = ""  # the list's name, where the queue says it plays from (R7.2)
 
     def _query(self) -> tuple[str, str, str, tuple[Any, ...], str]:
@@ -541,6 +629,24 @@ class SongsModel(PagedModel):
 
     def _value(self, row: dict[str, Any], name: str) -> Any:
         return row["path"] == self._playing if name == "playing" else row[name]
+
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = 0) -> Any:
+        i = role - int(Qt.ItemDataRole.UserRole)
+        if 0 <= i < len(self.roles) and self.roles[i] in ("selected", "current"):
+            song = self._id_at(index.row())
+            if song is None:
+                return None
+            if self.roles[i] == "selected":
+                return song in self._selection
+            return song == self._selection.current
+        return super().data(index, role)
+
+    def _id_at(self, row: int) -> int | None:
+        ids = self._ids or []
+        return ids[row] if 0 <= row < min(self._count, len(ids)) else None
+
+    def song_at(self, n: int) -> int | None:
+        return self._id_at(n)
 
     def select(self, where: str, params: tuple[Any, ...]) -> None:
         """Lists the songs `where` picks instead, and reads them."""
@@ -570,9 +676,109 @@ class SongsModel(PagedModel):
         return (ids[row:] if 0 <= row < self._count else []), self.source
 
     def songs_at(self, row: int) -> list[int]:
-        """Row `row`'s song, as Play next and Add to queue take it (R7.2)."""
-        ids = self._ids or []
-        return [ids[row]] if 0 <= row < min(self._count, len(ids)) else []
+        """The songs a right click on row `row` stands for (R7.2): the whole selection, in the
+        list's order, when the row is in it; the row's song alone when it isn't."""
+        song = self._id_at(row)
+        if song is None:
+            return []
+        return self.selected_songs() if song in self._selection else [song]
+
+    # ---------- the selection (R2.6) ----------
+
+    def selected_songs(self) -> list[int]:
+        """The songs selected, by id, in the list's order."""
+        return self._selection.chosen(self._ids or [])
+
+    def queue_from_selection(self) -> tuple[list[int], str]:
+        """What Enter on the selection plays (R7.1, R6.9): its first song in the list's order, and
+        the rest of the list after it, so every song selected plays, in the list's order; none
+        when nothing is selected."""
+        first = self._selection.first(self._ids or [])
+        return self.queue_from(first) if first >= 0 else ([], self.source)
+
+    def select_songs(self, songs: Sequence[int]) -> None:
+        """Exactly those of `songs` in the list selected, as the tour shows a selection: once
+        its rows have come, when a search's are still to come."""
+        if self._pending:
+            self._wanted = list(songs)
+            return
+        self._selection.select(self._ids or [], songs)
+        self._selection_changed()
+        self.revealRow.emit(self._selection.first(self._ids or []))
+
+    def _rows_found(self) -> None:
+        if self._wanted is not None:
+            self._selection.select(self._ids or [], self._wanted)
+            self._wanted = None
+            self.selectionChanged.emit()
+            self.revealRow.emit(self._selection.first(self._ids or []))
+        elif self._selection.keep(self._ids or []):
+            self.selectionChanged.emit()
+
+    def _selection_changed(self) -> None:
+        self._changed("selected")
+        self._changed("current")
+        self.selectionChanged.emit()
+
+    @Slot(int, bool, bool)
+    def click(self, row: int, ctrl: bool, shift: bool) -> None:
+        """A click on row `row`: it alone selected; with Ctrl (⌘) it added or taken away; with
+        Shift the rows from the anchor to it."""
+        if self._selection.click(self._ids or [], row, ctrl, shift):
+            self._selection_changed()
+
+    @Slot(int)
+    def toggle(self, row: int) -> None:
+        """Row `row`'s checkbox: it added to the selection or taken away."""
+        if self._selection.toggle(self._ids or [], row):
+            self._selection_changed()
+
+    @Slot(int, int, int, result=int)
+    def press(self, key: int, modifiers: int, page: int) -> int:
+        """A key pressed while the list has the focus (R6.9, R18.2), as Qt gives it: ↑ and ↓,
+        Page Up and Page Down (`page` rows), Home and End move the current row, selecting it, and
+        with Shift the range from the anchor; Ctrl+A (⌘A) selects the whole list; Esc clears the
+        selection. Returns the row to bring into view, -1 for none, or selection.NOT_MINE for a
+        key the list doesn't use, which goes on to the window."""
+        name, shift = key_name(key, modifiers)
+        row = self._selection.press(self._ids or [], name, shift, page)
+        if row != NOT_MINE:
+            self._selection_changed()
+        return row
+
+    @Slot()
+    def selectAll(self) -> None:  # noqa: N802
+        self._selection.select_all(self._ids or [])
+        self._selection_changed()
+
+    @Slot()
+    def toggleAll(self) -> None:  # noqa: N802
+        """The header's checkbox: every song selected when none is, none when any is."""
+        self._selection.toggle_all(self._ids or [])
+        self._selection_changed()
+
+    @Slot()
+    def clearSelection(self) -> None:  # noqa: N802
+        self._selection.clear()
+        self._selection_changed()
+
+    def _get_selection(self) -> list[int]:
+        return self.selected_songs()
+
+    def _get_selection_count(self) -> int:
+        return len(self._selection)
+
+    def _get_selection_text(self) -> str:
+        return selection_text(len(self._selection))
+
+    def _get_selection_state(self) -> str:
+        return self._selection.state(self._ids or [])
+
+    selection = QtProperty(list, _get_selection, notify=selectionChanged)  # ids, in list order
+    selectionCount = QtProperty(int, _get_selection_count, notify=selectionChanged)
+    selectionText = QtProperty(str, _get_selection_text, notify=selectionChanged)  # 4 selected
+    selectionState = QtProperty(str, _get_selection_state, notify=selectionChanged)  # the header's
+    laterActions = QtProperty(list, lambda self: SONG_LATER, constant=True)
 
 
 class AlbumsModel(PagedModel):

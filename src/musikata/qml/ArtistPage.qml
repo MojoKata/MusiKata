@@ -4,19 +4,39 @@ import "."
 
 // An artist's page (R2.6, L11-artist), under the header (R6.4) with its way back and the search box,
 // which filters their albums and songs (R2.7): their mosaic, name, albums and songs; their albums,
-// by year; then their songs on others' albums and on none.
+// by year; then their songs on others' albums and on none, selected as the Songs list's are (R2.6),
+// clicks and keys forwarded to the model: Enter plays the selection from its first song, the rest of
+// the list after it (R7.1), and the right-click menu acts on the selection when the row is in it.
 Item {
     id: page
     required property var library
     required property var player
+    property var edit: null
+    property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var artist: library.artist
+    readonly property var others: artist.others
+    focus: true
 
-    // [x, width] of the song columns: #, title, album, rating, time
+    function tapped(index, modifiers) {
+        page.forceActiveFocus()
+        page.others.click(index, (modifiers & Qt.ControlModifier) !== 0, (modifiers & Qt.ShiftModifier) !== 0)
+    }
+    Keys.onReturnPressed: page.player.playSelection(page.others)
+    Keys.onEnterPressed: page.player.playSelection(page.others)
+    Keys.onPressed: (event) => {
+        const row = page.others.press(event.key, event.modifiers, Math.max(1, Math.floor(list.height / 42)))
+        event.accepted = row !== -2
+        if (row >= 0)
+            list.positionViewAtIndex(row, ListView.Contain)
+    }
+
+    // [x, width] of the song columns: #, title, album, rating, plays, time
     readonly property var columns: {
         const w = list.width
-        const free = Math.max(0, w - 12 - 28 - 16 - 16 - 90 - 16 - 56 - 12 - 16)
+        const free = Math.max(0, w - 12 - 28 - 16 - 16 - 90 - 16 - 56 - 16 - 56 - 12 - 16)
         return [[12, 28], [56, free * 0.55], [56 + free * 0.55 + 16, free * 0.45],
-                [w - 12 - 56 - 16 - 90, 90], [w - 12 - 56, 56]]
+                [w - 12 - 56 - 16 - 56 - 16 - 90, 90], [w - 12 - 56 - 16 - 56, 56],
+                [w - 12 - 56, 56]]
     }
 
     ListView {
@@ -63,14 +83,22 @@ Item {
                 font { family: Theme.sans; pixelSize: 36; weight: Font.Bold }
             }
             Text {
+                id: artistDetail
                 x: kicker.x
                 anchors.top: name.bottom
                 anchors.topMargin: 2
-                width: head.width - x - 12
+                width: Math.min(implicitWidth, head.width - x - 12 - (average.visible ? average.width + 12 : 0))
                 elide: Text.ElideRight
                 text: page.artist.detail
                 color: Theme.muted
                 font { family: Theme.sans; pixelSize: 13 }
+            }
+            Average {  // the average of their rated songs (R10.1)
+                id: average
+                objectName: "artistAverage"
+                x: artistDetail.x + artistDetail.width + 12
+                anchors.verticalCenter: artistDetail.verticalCenter
+                value: page.artist.average
             }
 
             Text {
@@ -109,7 +137,7 @@ Item {
                 font { family: Theme.sans; pixelSize: 17; weight: Font.Bold }
             }
             Repeater {
-                model: page.artist.othersTitle ? [["#", 0], [qsTr("TITLE"), 1], [qsTr("ALBUM"), 2], [qsTr("RATING"), 3], [qsTr("TIME"), 4]] : []
+                model: page.artist.othersTitle ? [["#", 0], [qsTr("TITLE"), 1], [qsTr("ALBUM"), 2], [qsTr("RATING"), 3], [qsTr("PLAYS"), 4], [qsTr("TIME"), 5]] : []
                 Text {
                     required property var modelData
                     x: page.columns[modelData[1]][0]
@@ -117,7 +145,7 @@ Item {
                     width: page.columns[modelData[1]][1]
                     height: 22
                     verticalAlignment: Text.AlignVCenter
-                    horizontalAlignment: modelData[1] === 0 || modelData[1] === 4 ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: modelData[1] === 0 || modelData[1] >= 4 ? Text.AlignRight : Text.AlignLeft
                     text: modelData[0]
                     color: Theme.faint
                     font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
@@ -129,8 +157,11 @@ Item {
             width: list.width
             columns: page.columns
             showAlbum: true
-            onActivated: page.player.playFrom(page.artist.others, index)
-            onMenu: songMenu.openFor(page.artist.others, index)
+            focused: page.activeFocus
+            onTapped: (modifiers) => page.tapped(index, modifiers)
+            onActivated: page.player.playFrom(page.others, index)
+            onMenu: songMenu.openFor(page.others, index)
+            onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.others, index, star) }
         }
         ScrollBar.vertical: ScrollBar { }
     }
@@ -145,5 +176,5 @@ Item {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 14 }
     }
-    SongMenu { id: songMenu; player: page.player }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit }
 }

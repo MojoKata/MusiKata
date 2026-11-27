@@ -62,7 +62,7 @@ ignore_missing_imports = true       # neither ships type information
 [[tool.mypy.overrides]]
 # the edges that hand Mutagen's objects on as plain data (docs/process/coding.md): Mutagen's own
 # methods carry no types, so calling them is allowed there, and nowhere else in the core
-module = ["musikata_core.tags.read"]
+module = ["musikata_core.tags.read", "musikata_core.tags.write"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]

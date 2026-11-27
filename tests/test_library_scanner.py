@@ -6,6 +6,7 @@ Why: the scan is how the index stays a copy of the files (A1.4). A scan that rea
 time would take minutes at 50,000 songs; one that lost a move would lose the song's plays; one
 that hashed the tags would call every retagged song new."""
 
+import dataclasses
 import logging
 import os
 import shutil
@@ -13,12 +14,14 @@ import stat
 import sys
 import types
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 import mutagen
 import pytest
-from fakes import wav
+from fakes import FakeClock, wav
 
-from musikata_core import albums, art, db, scanner, workers
+from musikata_core import albums, art, db, scanner, tags, workers
+from musikata_core.tags import safe
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -612,3 +615,76 @@ def test_songs_taken_out_on_remove_are_those_still_gone_while_the_root_is_there(
     assert scanner.remove(str(music), index, ["A/0.wav", "A/1.wav", "A/9.wav"]) == 1
     assert set(_rows(index)) == {"A/1.wav", "A/2.wav"}  # A/1.wav is there; A/9.wav never was
     index.close()
+
+
+# ---------- MusiKata's own writes (A3.4, A2.4) ----------
+
+
+def test_a_copy_a_write_left_behind_is_never_a_song_and_the_next_scan_removes_it(lib, caplog):
+    """A3.4: a crash's copy, `.<name>.musikata-tmp`, goes at the next scan, whole or partial; one
+    touched moments ago, maybe another MusiKata's write in progress, stays until it is old."""
+    music, index = lib
+    wav(music / "A" / "1.wav", 1)
+    for copy in (music / ".1.wav.musikata-tmp", music / "A" / ".1.wav.musikata-tmp"):
+        shutil.copyfile(music / "A" / "1.wav", copy)
+    st = os.stat(music / "A" / ".1.wav.musikata-tmp")
+    clock = FakeClock(datetime.fromtimestamp(max(st.st_mtime, st.st_ctime), UTC))
+    clock.advance(seconds=1)
+    res = _scan(music, index, clock=clock)
+    assert [s.path for s in res.read] == ["A/1.wav"]
+    assert sorted(n for n in os.listdir(music / "A") if n.startswith(".")) == [
+        ".1.wav.musikata-tmp"
+    ]
+    clock.advance(seconds=safe.LEFTOVER)
+    caplog.set_level(logging.INFO)
+    _scan(music, index, _scope("A", known=res.folders), clock=clock)
+    assert os.listdir(music / "A") == ["1.wav"]
+    assert (music / ".1.wav.musikata-tmp").exists()  # the root wasn't walked
+    _scan(music, index, clock=clock)
+    assert sorted(os.listdir(music)) == ["A"]
+    assert "a copy a write left behind" in caplog.text
+    assert set(_rows(index)) == {"A/1.wav"}
+
+
+def test_a_file_musikata_wrote_has_its_row_updated_from_what_was_written_and_isnt_read_again(
+    lib, caplog
+):
+    """A2.4: the write's own result is the row, so neither a scan nor a watched rescan reads the
+    file again, even when it kept its modification time (R4.7.1)."""
+    music, index = lib
+    wav(music / "A" / "1.wav", 1, "Signal Fires")
+    wav(music / "B" / "2.wav", 2, "Undertow")
+    _scan(music, index)
+    first = {p: (s, m) for p, s, m in index.read().execute("SELECT path, size, mtime_ns FROM song")}
+    written = [
+        tags.save(str(music / "A" / "1.wav"), {"title": "Tidewater", "genres": ["Folk", "Jazz"]},
+                  audio_hash=scanner.audio_hash),
+        tags.save(str(music / "B" / "2.wav"), {"album": "Glass Harbor"},
+                  audio_hash=scanner.audio_hash, keep_mtime=True),
+    ]  # fmt: skip
+    outside = dataclasses.replace(written[0], path=str(music.parent / "elsewhere.wav"))
+    res = index.write(lambda c: scanner.wrote(c, str(music), [*written, outside])).result()
+    assert (res.added, res.changed) == (0, 2)
+    assert "didn't index" in caplog.text and "isn't under" in caplog.text
+    rows = {
+        p: (t, a, s, m)
+        for p, t, a, s, m in index.read().execute(
+            "SELECT path, title, album, size, mtime_ns FROM song"
+        )
+    }
+    assert rows["A/1.wav"] == ("Tidewater", None, written[0].size, written[0].mtime_ns)
+    assert rows["B/2.wav"] == ("Undertow", "Glass Harbor", written[1].size, first["B/2.wav"][1])
+    genres = index.read().execute(
+        "SELECT genre FROM song_genre JOIN song ON song.id = song_id WHERE path = 'A/1.wav'"
+        " ORDER BY position"
+    )
+    assert [g for (g,) in genres] == ["Folk", "Jazz"]
+    assert _scan(music, index).read == []
+
+
+def test_a_paths_place_under_the_root_or_none_outside_it(tmp_path):
+    root = str(tmp_path / "Music")
+    assert scanner.path_under(root, os.path.join(root, "A", "1.flac")) == "A/1.flac"
+    assert scanner.path_under(root, os.path.join(root, "..Odd", "1.flac")) == "..Odd/1.flac"
+    for outside in (root, str(tmp_path / "Other" / "1.flac"), str(tmp_path)):
+        assert scanner.path_under(root, outside) is None

@@ -5,8 +5,9 @@ This much is what the configured root and playing need: where the file is, readi
 shape a person, a sync tool or another version of MusiKata left it, and writing the root back,
 every field it doesn't know kept (A2.10); this computer's id (A2.8), made when it has none;
 Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them; and
-shuffle and repeat (R7.3), written when the user changes them. The rest of the shared settings and
-the root's own `settings.json` come with Settings.
+shuffle and repeat (R7.3), written when the user changes them. Of the root's own `settings.json`,
+the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
+are read (`root_tags`). The rest of both files comes with Settings.
 
 A value it can't use is reported in the App log and its default used (R13.9); a file of a newer
 format is read for what it can and never written (A2.10)."""
@@ -324,3 +325,126 @@ def choose_root(path: str, home: str, root: str, computer_name: str) -> bool:
         log.info("the music root is %s from now on", root)
         return True
     return False
+
+
+# ---------- the root's own settings.json (R13.9): what writing tags needs ----------
+
+ID3_VERSIONS = ("2.4", "2.3")  # R13.3: 2.4 the default (R4.7.2)
+ROOT_DIR = ".musikata"  # the root's own folder (R1.5)
+
+
+HISTORY_DAYS = 90  # R4.9, R13.3: how long the change history keeps an entry, by default
+RATING_SCALES = ("windows-media", "musikata")  # R10.4.1, R13.3: Windows Media the default
+
+
+@dataclass(frozen=True)
+class RootTags:
+    """The root's Tags settings (R13.3) that writing tags needs: the ID3 version MP3s are written
+    as (R4.7.2), whether a written file keeps its modification time (R4.7.1's "Leave file
+    modification times alone", off), and the change history's "Keep a history of tag changes"
+    (`history`, on) and for how many days (`history_days`, 90) (R4.9); "Write ratings into the
+    files" (`write_ratings`, on: off keeps every rating in ratings.json, R10.3) and "Rating scale
+    in files" (`rating_scale`, Windows Media's, or MusiKata's own POPM scale, R10.4.1); what
+    couldn't be used, for the log."""
+
+    id3_version: str = "2.4"
+    keep_modified_times: bool = False
+    history: bool = True
+    history_days: int = HISTORY_DAYS
+    write_ratings: bool = True
+    rating_scale: str = "windows-media"
+    problems: tuple[str, ...] = ()
+
+
+def _days(value: object) -> int | None:
+    """A number of days from `value`: a whole number of 1 or more, also as 90.0 or "90", as a
+    person may write it; None when it isn't one."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        value = int(value)
+    return value if isinstance(value, int) and value >= 1 else None
+
+
+def root_path(root: str) -> str:
+    """The root's own settings.json (R13.9), in its .musikata."""
+    return os.path.join(root, ROOT_DIR, NAME)
+
+
+def parse_root_tags(text: str) -> RootTags:
+    """The `tags` group's id3_version, keep_modified_times, history, history_days, write_ratings
+    and rating_scale in the root's settings.json, `text`, whatever was written there (A2.10): what
+    can't be used is named in `problems` and takes its default (R13.9). A version written as a
+    number (2.3) or with a "v" ("v2.3"), days written as text ("90") or 90.0, and a scale in
+    another case or with a space or "_" ("Windows Media", "MUSIKATA") are read as meant; a newer
+    format is read for what it can."""
+    try:
+        data = json.loads(text.removeprefix("\ufeff"))
+    except ValueError as e:
+        return RootTags(problems=(f"it isn't JSON ({e}): its settings take their defaults",))
+    if not isinstance(data, dict):
+        return RootTags(problems=("it isn't a JSON object: its settings take their defaults",))
+    problems: list[str] = []
+    group = data.get("tags", {})
+    if not isinstance(group, dict):
+        problems.append(f"tags isn't a group: {group!r}")
+        group = {}
+    default = RootTags()
+    version = group.get("id3_version", default.id3_version)
+    if isinstance(version, float | int) and not isinstance(version, bool):
+        version = f"{version:.1f}"
+    if isinstance(version, str):
+        version = version.strip().lower().removeprefix("id3").removeprefix("v")
+    if version not in ID3_VERSIONS:
+        problems.append(f"tags.id3_version isn't 2.3 or 2.4: {group.get('id3_version')!r}; 2.4")
+        version = default.id3_version
+    keep = group.get("keep_modified_times", default.keep_modified_times)
+    if not isinstance(keep, bool):
+        problems.append(f"tags.keep_modified_times isn't true or false: {keep!r}; off")
+        keep = default.keep_modified_times
+    history = group.get("history", default.history)
+    if not isinstance(history, bool):
+        problems.append(f"tags.history isn't true or false: {history!r}; on")
+        history = default.history
+    days = _days(group.get("history_days", default.history_days))
+    if days is None:
+        problems.append(
+            f"tags.history_days isn't a number of days: {group.get('history_days')!r};"
+            f" {default.history_days}"
+        )
+        days = default.history_days
+    write_ratings = group.get("write_ratings", default.write_ratings)
+    if not isinstance(write_ratings, bool):
+        problems.append(f"tags.write_ratings isn't true or false: {write_ratings!r}; on")
+        write_ratings = default.write_ratings
+    scale = group.get("rating_scale", default.rating_scale)
+    if isinstance(scale, str):
+        scale = "-".join(scale.strip().lower().replace("_", " ").split())
+    if scale not in RATING_SCALES:
+        problems.append(
+            f"tags.rating_scale isn't windows-media or musikata: {group.get('rating_scale')!r};"
+            " windows-media"
+        )
+        scale = default.rating_scale
+    return RootTags(str(version), keep, history, days, write_ratings, str(scale), tuple(problems))
+
+
+def root_tags(root: str) -> RootTags:
+    """The root's Tags settings for writing (`parse_root_tags`) from its settings.json; the
+    defaults when it has none, or it can't be read, each problem logged. A root without its own
+    file takes the configured root's when Settings comes (R13.9.1); until then, the defaults."""
+    path = root_path(root)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return RootTags()
+    except OSError as e:
+        log.warning("couldn't read %s: %s; writing tags takes the defaults", path, e)
+        return RootTags(problems=(f"couldn't be read: {e}",))
+    found = parse_root_tags(text)
+    for problem in found.problems:
+        log.warning("%s: %s", path, problem)
+    return found

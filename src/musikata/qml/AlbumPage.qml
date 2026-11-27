@@ -4,17 +4,36 @@ import "."
 
 // An album's page (R2.6, L02-album), under the header (R6.4) with its way back and the search box,
 // which filters its songs (R2.7): the cover, the line over the title, the title,
-// the artist (a click opens their page), songs, length and format; Play and Shuffle, and Edit tags
-// and Album art, which come with later slices (the Edit tags panel, album art); the album's state
+// the artist (a click opens their page), songs, length and format; Play and Shuffle, Edit tags (the
+// panel for its songs, R4.2), and Album art, which comes with a later slice; the album's state
 // chips; and its songs. Play plays the album from its first song, Shuffle from one at random, the
 // rest shuffled (R7.1, R7.3); a song's double click plays it and the rest after it, its right click
-// opens its menu (R7.2).
+// opens its menu (R7.2). Its songs are selected as the Songs list's are (R2.6), clicks and keys
+// forwarded to the model; Enter plays the selection from its first song, the rest of the album after
+// it (R7.1), and the menu acts on the selection when the row is in it.
 Item {
     id: page
     required property var library
     required property var player
+    property var edit: null
+    property var ratings: null  // a star clicked in a row rates its song (R10.2)
     readonly property var album: library.album
+    readonly property var tracks: album.songs
     readonly property bool loading: art.loading
+    focus: true
+
+    function tapped(index, modifiers) {
+        page.forceActiveFocus()
+        page.tracks.click(index, (modifiers & Qt.ControlModifier) !== 0, (modifiers & Qt.ShiftModifier) !== 0)
+    }
+    Keys.onReturnPressed: page.player.playSelection(page.tracks)
+    Keys.onEnterPressed: page.player.playSelection(page.tracks)
+    Keys.onPressed: (event) => {
+        const row = page.tracks.press(event.key, event.modifiers, Math.max(1, Math.floor(songs.height / 42)))
+        event.accepted = row !== -2
+        if (row >= 0)
+            songs.positionViewAtIndex(row, ListView.Contain)
+    }
 
     Cover {
         id: art
@@ -71,11 +90,18 @@ Item {
             id: detail
             anchors.top: artist.bottom
             anchors.topMargin: 4
-            width: about.width
+            width: Math.min(implicitWidth, about.width - (average.visible ? average.width + 12 : 0))
             elide: Text.ElideRight
             text: page.album.detail
             color: Theme.muted
             font { family: Theme.sans; pixelSize: 13 }
+        }
+        Average {  // the average of its rated songs (R10.1)
+            id: average
+            objectName: "albumAverage"
+            x: detail.width + 12
+            anchors.verticalCenter: detail.verticalCenter
+            value: page.album.average
         }
         Row {
             id: buttons
@@ -97,7 +123,12 @@ Item {
                 later: page.library.playNote
                 onClicked: page.player.shuffleAlbum(page.album.id)
             }
-            Btn { label: qsTr("Edit tags"); icon: "genre"; later: qsTr("Editing tags comes in a later version") }
+            Btn {
+                objectName: "editAlbum"
+                label: qsTr("Edit tags")
+                icon: "genre"
+                onClicked: page.edit.editAlbum(page.album.id, page.tracks)
+            }
             Btn { label: qsTr("Album art"); icon: "image"; later: qsTr("Album art comes in a later version") }
         }
         Row {
@@ -122,25 +153,26 @@ Item {
         width: page.width - 36
         height: page.height - y
 
-        // [x, width] of each column: #, title, (unused), rating, time
+        // [x, width] of each column: #, title, (unused), rating, plays, time
         readonly property real gap: 16
         readonly property var columns: [
             [12, 28],
-            [56, Math.max(0, width - 56 - 16 - 90 - 16 - 56 - 12)],
+            [56, Math.max(0, width - 56 - 16 - 90 - 16 - 56 - 16 - 56 - 12)],
             [0, 0],
-            [width - 12 - 56 - 16 - 90, 90],
+            [width - 12 - 56 - 16 - 56 - 16 - 90, 90],
+            [width - 12 - 56 - 16 - 56, 56],
             [width - 12 - 56, 56],
         ]
 
         Repeater {
-            model: [["#", 0], [qsTr("TITLE"), 1], [qsTr("RATING"), 3], [qsTr("TIME"), 4]]
+            model: [["#", 0], [qsTr("TITLE"), 1], [qsTr("RATING"), 3], [qsTr("PLAYS"), 4], [qsTr("TIME"), 5]]
             Text {
                 required property var modelData
                 x: table.columns[modelData[1]][0]
                 width: table.columns[modelData[1]][1]
                 height: 32
                 verticalAlignment: Text.AlignVCenter
-                horizontalAlignment: modelData[1] === 0 || modelData[1] === 4 ? Text.AlignRight : Text.AlignLeft
+                horizontalAlignment: modelData[1] === 0 || modelData[1] >= 4 ? Text.AlignRight : Text.AlignLeft
                 text: modelData[0]
                 color: Theme.faint
                 font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4 }
@@ -163,8 +195,11 @@ Item {
                 required property int index
                 width: songs.width
                 columns: table.columns
-                onActivated: page.player.playFrom(page.album.songs, index)
-                onMenu: songMenu.openFor(page.album.songs, index)
+                focused: page.activeFocus
+                onTapped: (modifiers) => page.tapped(index, modifiers)
+                onActivated: page.player.playFrom(page.tracks, index)
+                onMenu: songMenu.openFor(page.tracks, index)
+                onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.tracks, index, star) }
             }
             ScrollBar.vertical: ScrollBar { }
         }
@@ -180,5 +215,5 @@ Item {
             font { family: Theme.sans; pixelSize: 14 }
         }
     }
-    SongMenu { id: songMenu; player: page.player }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit }
 }

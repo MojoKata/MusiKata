@@ -6,7 +6,7 @@ numbers, dates, genres and ratings each come in several forms, and each form her
 player or tagger writes."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from musikata_core.tags import parse
@@ -75,10 +75,35 @@ def test_popm_ranges_are_the_common_players():
     [
         ("4", None, 4), ("80", None, 4), ("100", None, 5), ("20", None, 1), (None, "0.8", 4),
         ("3", "1.0", 3), ("4,0", None, 4), ("x", "0.6", 3), ("-1", None, None), (None, None, None),
+        ("INFINITY", None, None), ("nan", "0.6", 3), (None, "inf", None), ("1e999", None, None),
     ],
 )  # fmt: skip
 def test_vorbis_and_mp4_ratings_as_stars_hundredths_or_fmps(rating, fmps, stars):
     assert parse.vorbis_rating(rating, fmps) == stars
+
+
+@pytest.mark.parametrize(
+    ("rating", "fmps", "stars"),
+    [
+        ("5", None, 5), ("6", None, 0), ("0", "1.0", 0), ("2.5", None, 3),  # 5 or less: stars
+        ("10", None, 1), ("30", None, 2), ("50", None, 3), ("70", None, 4), ("90", None, 5),
+        ("150", None, 5), (None, "0.0", 0), (None, "0.5", 3), (None, "0.1", 1), (None, "2", 5),
+        ("", "0.4", 2), (" 60 ", None, 3),
+    ],
+)  # fmt: skip
+def test_ratings_edges_half_stars_round_up_and_rating_wins_over_fmps(rating, fmps, stars):
+    """R10.4.2: RATING of 5 or less is stars and more hundredths (MusicBee's half stars 10 … 90
+    round up), FMPS_RATING 0.0 to 1.0, RATING winning when both are there."""
+    assert parse.vorbis_rating(rating, fmps) == stars
+
+
+def test_mp4_reads_fmps_rating_where_it_has_no_rating():
+    """R10.4.2 for MP4: the freeform FMPS_Rating Clementine and Strawberry write, in any case,
+    read when there is no RATING, which wins when there is."""
+    fmps = {"----:com.apple.iTunes:FMPS_Rating": ["0.6"]}
+    assert parse.from_mp4(fmps).rating == 3
+    both = {**fmps, "----:com.apple.itunes:rating": ["100"]}
+    assert parse.from_mp4(both).rating == 5
 
 
 def test_replaygain_reads_db_and_peaks_in_their_written_forms():
@@ -212,6 +237,8 @@ def test_a_riff_chunk_cut_short_or_not_a_wave_reads_as_nothing():
 
 
 @given(st.text())
+@example("INFINITY")  # a rating no number of stars: found by Hypothesis
+@example("nan")
 def test_any_text_is_read_without_an_error(value):
     parse.number_pair(value)
     parse.year_and_date(value)
@@ -234,3 +261,55 @@ def test_any_text_is_read_without_an_error(value):
 @given(st.binary(max_size=200))
 def test_any_bytes_read_as_riff_info_without_an_error(data):
     parse.riff_info(b"RIFF" + data[:4] + b"WAVE" + data[4:])
+
+
+def test_the_comment_is_the_comm_without_a_description_or_id3v1s_never_another_programs():
+    """iTunes keeps its own numbers in COMM frames (iTunNORM, iTunSMPB), MediaMonkey its custom
+    fields (Songs-DB_Custom1): kept as they are (R4.1.1), and never shown as the comment, which
+    a song without one would otherwise show, and couldn't have removed."""
+    others = [("iTunNORM", " 00000A2B"), ("Songs-DB_Custom1", "vinyl rip")]
+    assert parse.from_id3({}, comments=others).comment is None
+    assert parse.from_id3({}, comments=[*others, (parse.V1_COMMENT, "from v1")]).comment == (
+        "from v1"
+    )
+    assert parse.from_id3(
+        {}, comments=[("", " "), (parse.V1_COMMENT, "v1"), ("", "v2")]
+    ).comment == ("v1")
+
+
+def test_the_tags_kept_without_showing_are_listed_by_name_and_r41s_never():
+    """R4.1.1, R4.8: lyrics, MusicBrainz ids, encoder settings, private frames, … read only;
+    what R4.1's fields are read from, the comment and ReplayGain aren't listed."""
+    id3 = [
+        ("TIT2", "Parallax"), ("TXXX:MusicBrainz Album Id", "0f4d"), ("USLT", "la la\n la"),
+        ("USLT:eng", "words"), ("COMM", "a comment"), ("COMM:ID3v1 Comment", "v1"),
+        ("COMM:iTunNORM", " 0000 0001"), ("TXXX:REPLAYGAIN_TRACK_GAIN", "-6 dB"),
+        ("TXXX:replaygain_album_peak", "0.9"), ("PRIV:WM/MediaClassPrimaryID", "16 bytes"),
+        ("UFID:http://musicbrainz.org", "4 bytes"), ("APIC:3", "front cover, 9 bytes"),
+        ("APIC:4", "back cover, 12 bytes"), ("TSSE", "LAME 3.100"), ("TDRC", "2019"),
+        ("POPM", "x"), ("XXXX", "?"), ("TXXX", "no description"),
+    ]  # fmt: skip
+    assert parse.kept("id3", id3) == [
+        ("MusicBrainz Album Id", "0f4d"), ("Lyrics", "la la la"), ("Lyrics (eng)", "words"),
+        ("Comment (iTunNORM)", "0000 0001"), ("Private data (WM/MediaClassPrimaryID)", "16 bytes"),
+        ("File id (http://musicbrainz.org)", "4 bytes"), ("Picture", "back cover, 12 bytes"),
+        ("Encoder settings", "LAME 3.100"), ("XXXX", "?"), ("TXXX", "no description"),
+    ]  # fmt: skip
+    vorbis = [
+        ("TITLE", "x"), ("ALBUM ARTIST", "x"), ("LYRICS", "words"), ("R128_TRACK_GAIN", "1"),
+        ("MUSICBRAINZ_TRACKID", "9a"), ("REPLAYGAIN_TRACK_GAIN", "1 dB"), ("ENCODER", "x"),
+    ]  # fmt: skip
+    assert parse.kept("vorbis", vorbis) == [
+        ("Lyrics", "words"), ("MUSICBRAINZ_TRACKID", "9a"), ("Encoder", "x"),
+    ]  # fmt: skip
+    mp4 = [("\xa9nam", "x"), ("----:com.apple.iTunes:MusicBrainz Track Id", "9a"),
+           ("----:com.apple.iTunes:RATING", "100"), ("----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN",
+           "1"), ("\xa9lyr", "words"), ("tmpo", "120"), ("covr", "...")]  # fmt: skip
+    assert parse.kept("mp4", mp4) == [
+        ("MusicBrainz Track Id", "9a"), ("Lyrics", "words"), ("BPM", "120"),
+    ]  # fmt: skip
+
+
+def test_a_kept_value_too_long_is_cut_short_with_an_ellipsis():
+    ((name, value),) = parse.kept("vorbis", [("LYRICS", "word " * 40)])
+    assert len(value) == parse.KEPT_WIDTH and value.endswith("…")

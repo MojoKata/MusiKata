@@ -10,6 +10,7 @@ nothing in an int32), so a value of the wrong type is a song without a length, o
 can't seek, on a desktop the tests don't run; and the methods are called by the desktop, never by
 MusiKata's own code."""
 
+import gc
 import os
 import random
 import re
@@ -18,11 +19,14 @@ import signal
 import subprocess
 import sys
 import threading
+import weakref
 
 import pytest
 from fakes import FakeEngine, fill
+from PySide6.QtCore import QObject
 from PySide6.QtDBus import QDBusConnection
 from PySide6.QtGui import QWindow
+from shiboken6 import Shiboken
 
 from musikata import bridges, media
 from musikata.media import controls, mpris
@@ -268,6 +272,41 @@ def test_a_second_musikata_takes_a_name_of_its_own_and_each_gives_its_up(bus, qa
     assert not [n for n in names if n.startswith(mpris.SERVICE)]
     QDBusConnection.disconnectFromBus("first")
     QDBusConnection.disconnectFromBus("second")
+
+
+def test_closed_its_objects_are_gone_at_once_and_it_goes_when_let_go(bus, qapp):
+    """The objects registered on a connection stay connected to it, and when it ends, on QtDBus's
+    own thread, Qt calls into each one still there: one made in Python runs Python on that thread,
+    while the GUI thread may be freeing it (tier 1's segfault). So closing deletes them at once, on
+    the thread that closes, and the Mpris goes as soon as it is let go, the collector (which may
+    run on any thread) never needed: it is off here."""
+    connection = QDBusConnection.connectToBus(bus, "closing")
+    gc.disable()
+    try:
+        m = mpris.Mpris(connection, print, lambda: 0.0)
+        registered = [connection.objectRegisteredAt(p) for p in (mpris.PATH, mpris.INT64_PATH)]
+        assert all(Shiboken.isValid(o) for o in registered)
+        gone = weakref.ref(m)
+        m.close()
+        assert not any(Shiboken.isValid(o) for o in registered)
+        del m
+        assert gone() is None
+    finally:
+        gc.enable()
+        QDBusConnection.disconnectFromBus("closing")
+
+
+def test_a_path_taken_on_the_connection_leaves_nothing_of_its_own_there(bus, qapp):
+    connection = QDBusConnection.connectToBus(bus, "taken")
+    other = QObject()
+    assert connection.registerObject(mpris.PATH, other)
+    with pytest.raises(RuntimeError, match=f"{mpris.PATH} is taken on this connection"):
+        mpris.Mpris(connection, print, lambda: 0.0)
+    assert connection.objectRegisteredAt(mpris.INT64_PATH) is None
+    assert connection.objectRegisteredAt(mpris.PATH) is other
+    connection.unregisterObject(mpris.PATH)
+    Shiboken.delete(other)  # here, not on QtDBus's thread as the connection ends (mpris.py)
+    QDBusConnection.disconnectFromBus("taken")
 
 
 def test_without_a_session_bus_it_doesnt_start_and_says_why(tmp_path, qapp):

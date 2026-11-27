@@ -6,8 +6,10 @@ programs write tags (docs/process/testing.md, "Shapes"). Real music is never use
     .venv/bin/python scripts/demo_library.py build DIR [--songs N] [--seconds S]
 
 writes DIR/Music: the mockups' library (about 240 songs), and with --songs N more albums of made-up
-names until it holds N songs (R1.11's 50,000). It runs on the release's Python with PyAV, Mutagen
-and NumPy (packaging/versions.env): PyAV's own FFmpeg encodes every kind, so nothing else is needed.
+names until it holds N songs (R1.11's 50,000), and the change history of a few saves made on two
+computers (R4.9; `HISTORY`), through MusiKata's own batch, so its Change history has entries. It
+runs on the release's Python with PyAV, Mutagen and NumPy (packaging/versions.env): PyAV's own
+FFmpeg encodes every kind, so nothing else is needed; the history imports musikata_core from src/.
 
 What it plans is plain data (plan, more), so the tests read it without encoding anything; build
 writes it.
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import fractions
+import json
 import os
 import random
 import shutil
@@ -161,6 +164,26 @@ WORDS = [
     "Velvet",
     "Wire",
 ]
+
+
+# the change history (R4.9, A3.5): saves made on two computers, each by MusiKata's own batch
+# (tags.Batch, history.Recording), from the value written first (`before`) to the plan's, so the
+# library ends as planned: (computer, when, what the save was, the album, the field, before,
+# after: None for the plan's value). A save to another value is undone at the time UNDONE gives.
+COMPUTERS = {
+    "Studio-PC": "6f1c0a5e-2b7d-4c1e-9a43-0f2d8e5b7c11",
+    "Laptop": "b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c4d",
+}
+HISTORY = [
+    ("Studio-PC", "2026-11-24T19:12:40", "Genre on 10 songs", "Glass Harbor", "genre",
+     ["Electronica"], None),
+    ("Laptop", "2026-11-25T20:45:12", "Year on 9 songs", "Low Orbit", "year", 2021, None),
+    ("Laptop", "2026-11-25T20:52:03", "Album artist on 13 songs", "Quiet Acres", "albumartist",
+     None, None),
+    ("Studio-PC", "2026-11-25T21:30:00", "Album on 6 songs", "Afterlight", "album", None,
+     "Afterlight (Deluxe)"),
+]  # fmt: skip
+UNDONE = {"Album on 6 songs": ("Laptop", "2026-11-25T21:31:20")}
 
 
 @dataclass
@@ -510,6 +533,73 @@ def _tag_mp4(path: str, song: Song) -> None:
     audio.save()
 
 
+def before_history(song: Song, saves: list = HISTORY) -> Song:
+    """The song as first written: each field a save of `saves` brings to the plan's value holds
+    its value from before that save."""
+    if song.tags is None:
+        return song
+    tags = dict(song.tags)
+    for _computer, _when, _what, album, name, before, after in saves:
+        if after is None and tags.get("album") == album:
+            tags[name] = before
+    return Song(song.path, song.kind, tags, song.shape, song.tone, song.cover)
+
+
+def history(music: str, lib: Library, saves: list = HISTORY, undone: dict = UNDONE) -> list[str]:
+    """The change history's saves (`HISTORY`), each made by MusiKata's own batch into Music's
+    .musikata/history at its time, on its computer, and those UNDONE undone by MusiKata's Undo;
+    each computer named by an empty play file, as A2.8's are. The entries made, by name."""
+    from datetime import UTC, datetime
+
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+    from musikata_core import history as change_history
+    from musikata_core import rootfiles, scanner, tags
+
+    class At:
+        def __init__(self, when: str) -> None:
+            self.when = datetime.fromisoformat(when).replace(tzinfo=UTC)
+
+        def now(self) -> datetime:
+            return self.when
+
+        def monotonic(self) -> float:
+            return 0.0
+
+    def write(job: tags.Job) -> tags.Written:
+        return tags.save(job.path, job.changes, audio_hash=scanner.audio_hash)
+
+    made = []
+    for computer, when, what, album, name, _before, after in saves:
+        field_name = "genres" if name == "genre" else name
+        jobs = [
+            tags.Job(os.path.join(music, s.path), {field_name: s.tags[name] if after is None
+                                                   else after})
+            for s in lib.songs if s.tags is not None and s.tags.get("album") == album
+        ]  # fmt: skip
+        record = change_history.Recording(music, lambda c=computer: COMPUTERS[c], At(when))
+        out = tags.Batch(jobs, write, record=record, description=what).run()
+        if out.failed or out.entry is None:
+            raise RuntimeError(f"the save {what!r} failed: {out.failed}")
+        made.append(out.entry)
+        if what in undone:
+            by, at = undone[what]
+            entry = change_history.read(change_history.folder_of(music), out.entry)
+            assert isinstance(entry, change_history.Entry)
+            plan = change_history.plan(entry, music, lambda h: [])
+            record = change_history.Recording(music, lambda c=by: COMPUTERS[c], At(at), out.entry)
+            done = change_history.undo(plan, music, False, write, record)
+            if done.failed or done.entry is None:
+                raise RuntimeError(f"undoing {what!r} failed: {done.failed}")
+            made.append(done.entry)
+    for name, computer in COMPUTERS.items():
+        doc = {"format": 1, "computer": {"id": computer, "name": name}, "songs": []}
+        path = rootfiles.file_of(rootfiles.folder_of(music), computer)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(doc, indent=2) + "\n")
+    return made
+
+
 def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Library:
     """DIR/Music: the plan, written. Each kind is encoded once per tone and copied; tags are per
     file."""
@@ -530,7 +620,7 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
             encode(made + ".part." + ext, song.kind, seconds, song.tone)
             os.replace(made + ".part." + ext, made)
         shutil.copyfile(made, path)
-        tag(path, song)
+        tag(path, before_history(song))
     for folder, (cseed, size) in lib.covers.items():
         with open(os.path.join(music, folder, "cover.jpg"), "wb") as f:
             f.write(cover_jpeg(cseed, size))
@@ -539,6 +629,7 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+    history(music, lib)
     return lib
 
 

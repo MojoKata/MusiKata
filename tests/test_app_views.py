@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fakes import FakeClock
 from PySide6.QtCore import QBuffer, QPointF, Qt, QUrl
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QAccessible, QColor, QImage
 from PySide6.QtMultimedia import QAudioDevice
 from PySide6.QtQml import QQmlComponent
 from PySide6.QtTest import QTest
@@ -357,6 +357,123 @@ def test_a_list_keeps_its_place_and_its_search_when_a_scan_changes_its_rows(shel
     settle(shell, qtbot)
     assert songs.property("contentY") == 1500.0
     assert lib.property("search") == "many" and lib.property("view") == "songs"
+
+
+# ---------- selecting songs (R2.6, R7.1) ----------
+
+
+def song_row(shell, list_name, title):
+    rows = one(shell, list_name).property("contentItem").childItems()
+    return next((r for r in rows if r.property("title") == title and visible(r)), None)
+
+
+def at(item, x):
+    return item.mapToScene(QPointF(x, item.height() / 2)).toPoint()
+
+
+PLAIN = Qt.KeyboardModifier(0)
+
+
+def click_row(shell, item, modifiers=PLAIN, button=Qt.MouseButton.LeftButton):
+    """A click on a row, on its title."""
+    QTest.mouseClick(shell.window, button, modifiers, at(item, 300))
+
+
+def press(shell, k, modifiers=PLAIN):
+    QTest.keyClick(shell.window, k, modifiers)
+
+
+def selected_of(item):
+    """What a row tells a screen reader of being selected (R18.1)."""
+    return QAccessible.queryAccessibleInterface(item).state().selected
+
+
+@pytest.mark.slow
+def test_songs_are_selected_by_clicks_checkboxes_and_keys_and_enter_plays_the_selection(
+    shell, qtbot, qtlog
+):
+    lib, p = shell.library, shell.player
+    songs = lib.property("songs")
+    played = []  # what the player was handed, cued where there's no sound device
+    p.nowPlaying.connect(played.append)
+    lib.show("songs")
+    settle(shell, qtbot)
+    qtbot.waitUntil(lambda: song_row(shell, "songs", "Kindling 2") is not None, timeout=WAIT)
+
+    def row(title):
+        return song_row(shell, "songs", title)
+
+    ctrl, shift = Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.ShiftModifier
+    click_row(shell, row("Glass Harbor 2"))
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 1, timeout=WAIT)
+    click_row(shell, row("Kindling 1"), ctrl)
+    click_row(shell, row("Kindling 2"), shift)  # from Kindling 1
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 2, timeout=WAIT)
+    assert row("Kindling 1").property("selected") and row("Kindling 2").property("selected")
+    assert selected_of(row("Kindling 2")) and not selected_of(row("Glass Harbor 2"))
+    assert row("Kindling 2").property("ringed") and not row("Kindling 1").property("ringed")
+    bar = one(shell, "songsSelectionBar")
+    qtbot.waitUntil(lambda: visible(bar), timeout=WAIT)
+    assert one(shell, "selectionText").property("text") == "2 selected"
+    check = [i for i in every_item(row("Tide Tables 1")) if i.property("mark") is not None][0]
+    click(shell, check)  # its checkbox: added
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 3, timeout=WAIT)
+    press(shell, Qt.Key.Key_Escape)
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 0, timeout=WAIT)
+    assert not visible(bar)
+    press(shell, Qt.Key.Key_A, ctrl)
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 9, timeout=WAIT)
+    click(shell, one(shell, "selectAllSongs"))  # all selected: none
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 0, timeout=WAIT)
+    press(shell, Qt.Key.Key_Up)  # the current row, Tide Tables 1, moves up and is selected
+    press(shell, Qt.Key.Key_Up, shift)
+    qtbot.waitUntil(lambda: songs.property("selectionCount") == 2, timeout=WAIT)
+    assert row("Glass Harbor 2").property("selected") and row("Glass Harbor 3").property("selected")
+    press(shell, Qt.Key.Key_Return)  # from the first selected, the rest of the list after it
+    qtbot.waitUntil(lambda: bool(played), timeout=WAIT)
+    assert played == ["Lumen Drift/Glass Harbor/02.flac"] and len(p.queue.upcoming) == 7
+    # a right click on a row in the selection: the menu takes all of it
+    click_row(shell, row("Glass Harbor 3"), button=Qt.MouseButton.RightButton)
+    click(shell, menu_item(shell, "Play next", qtbot))
+    qtbot.waitUntil(lambda: len(p.queue.upcoming) == 9, timeout=WAIT)
+    assert [e.added for e in p.queue.upcoming[:3]] == [True, True, False]
+    click(shell, one(shell, "playNextSelection"))  # the bar's Play next
+    qtbot.waitUntil(lambda: len(p.queue.upcoming) == 11, timeout=WAIT)
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
+
+
+@pytest.mark.slow
+def test_an_albums_songs_are_selected_and_enter_plays_them_and_up_next_takes_its_keys(
+    shell, qtbot, qtlog
+):
+    lib, p = shell.library, shell.player
+    played = []
+    p.nowPlaying.connect(played.append)
+    lib.go({"view": "album", "album": "Glass Harbor"})
+    settle(shell, qtbot)
+    tracks = lib.property("album").property("songs")
+    qtbot.waitUntil(lambda: song_row(shell, "albumSongs", "Glass Harbor 3") is not None,
+                    timeout=WAIT)  # fmt: skip
+    click_row(shell, song_row(shell, "albumSongs", "Glass Harbor 2"))
+    qtbot.waitUntil(lambda: tracks.property("selectionCount") == 1, timeout=WAIT)
+    assert selected_of(song_row(shell, "albumSongs", "Glass Harbor 2"))
+    press(shell, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+    qtbot.waitUntil(lambda: tracks.property("selectionCount") == 2, timeout=WAIT)
+    press(shell, Qt.Key.Key_Enter)
+    qtbot.waitUntil(lambda: bool(played), timeout=WAIT)
+    assert played == ["Lumen Drift/Glass Harbor/02.flac"] and len(p.queue.upcoming) == 1
+    p.toggleUpNext()
+    panel = one(shell, "upNext")
+    qtbot.waitUntil(lambda: visible(panel), timeout=WAIT)
+    rows = one(shell, "upNextRows").property("contentItem").childItems()
+    nxt = next(r for r in rows if r.property("kind") == "next")
+    click_row(shell, nxt)
+    qtbot.waitUntil(lambda: nxt.property("selected") is True, timeout=WAIT)
+    press(shell, Qt.Key.Key_Delete)
+    qtbot.waitUntil(lambda: len(p.queue.upcoming) == 0, timeout=WAIT)
+    press(shell, Qt.Key.Key_Escape)  # nothing selected now: Up next closes
+    qtbot.waitUntil(lambda: not p.property("upNextOpen"), timeout=WAIT)
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
 
 
 # ---------- Folders (R2.9) ----------

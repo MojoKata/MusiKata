@@ -127,6 +127,72 @@ def test_a_double_click_plays_the_song_and_queues_the_rest_of_its_list(made, ind
     assert p.property("timeName") == "0:00 of 0:42" and p.property("failed") is False
 
 
+def test_enter_on_a_selection_plays_its_first_song_and_queues_the_rest_of_its_list(
+    made, index, qtbot
+):
+    p, engine, songs = made
+    p.playSelection(songs)  # nothing selected: nothing plays
+    assert p.queue.current is None and engine.played() == []
+    songs.click(3, False, False)
+    songs.click(1, True, False)
+    p.playSelection(songs)
+    wait_playing(qtbot, p, engine, 1)
+    assert engine.played() == ["02.flac"] and p.queue.source == "Songs"
+    assert [e.song for e in p.queue.upcoming] == ids(index, "LD/GH/03.flac", "MO/Kindling.mp3")
+
+
+def test_the_menu_and_the_selection_bar_queue_the_whole_selection(made, index, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    songs.click(1, False, False)
+    songs.click(3, True, False)
+    p.playNext(songs, 3)  # a right click on a row in the selection: all of it
+    assert [e.song for e in p.queue.upcoming][:2] == ids(index, "LD/GH/02.flac", "MO/Kindling.mp3")
+    p.addToQueue(songs, 2)  # one outside it: its own
+    assert [e.song for e in p.queue.upcoming if e.added] == ids(
+        index, "LD/GH/02.flac", "MO/Kindling.mp3", "LD/GH/03.flac"
+    )
+    songs.click(2, False, False)
+    p.playNextSelection(songs)  # the selection bar's Play next
+    assert p.queue.upcoming[0].song == ids(index, "LD/GH/03.flac")[0]
+
+
+def test_up_nexts_rows_are_selected_and_enter_plays_and_delete_removes_them(made, index, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    up = p.property("upNext")
+
+    def titles():
+        return [up.row_of(i)["title"] for i in range(up.rowCount())]
+
+    def marks():
+        return [(up.row_of(i)["selected"], up.row_of(i)["current"]) for i in range(up.rowCount())]
+
+    down = int(Qt.Key.Key_Down.value)
+    shift = int(Qt.KeyboardModifier.ShiftModifier.value)
+    p.playSelected()  # nothing selected: nothing
+    assert len(engine.played()) == 1
+    changed = []
+    up.dataChanged.connect(lambda *a: changed.append(a))
+    up.click(1, False, False)
+    assert changed and up.press(down, shift, 5) == 2
+    assert marks() == [(False, False), (True, False), (True, True), (False, False)]
+    assert up.press(int(Qt.Key.Key_Space.value), 0, 5) == -2
+    up.click(0, True, False)  # the song playing too: Delete leaves it
+    p.removeSelected()
+    assert titles() == ["Tidewater", "Kindling"]
+    assert marks() == [(True, True), (False, False)]  # what is left of the selection stays
+    p.removeSelected()  # only the song playing: nothing goes
+    assert titles() == ["Tidewater", "Kindling"]
+    up.click(1, False, False)
+    p.playSelected()
+    wait_playing(qtbot, p, engine, 2)
+    assert engine.played()[-1] == "Kindling.mp3"
+    assert marks()[0] == (True, True)  # its entry, now playing, still selected
+
+
 def test_a_song_that_ends_starts_the_next_until_the_queue_has_played_out(made, qtbot):
     p, engine, songs = made
     p.playFrom(songs, 2)
@@ -1050,7 +1116,8 @@ def test_a_root_opens_with_what_was_playing_when_it_closed_paused_at_its_place(t
     qtbot.waitUntil(lambda: p.property("position") == 37.5, timeout=WAIT)
     p.toggle()
     qtbot.waitUntil(lambda: p.property("paused"), timeout=WAIT)
-    shell.close()
+    playing = p.property("path")
+    shell.close()  # its Player deleted with its window (A1.3)
     env = {"MUSIKATA_DATA": str(tmp_path / "data"), "HOME": str(tmp_path)}
     shared = settings.load(settings.shared_path(env), str(tmp_path))
     assert (shared.playback.shuffle, shared.playback.repeat) == (True, ALL)
@@ -1061,7 +1128,7 @@ def test_a_root_opens_with_what_was_playing_when_it_closed_paused_at_its_place(t
         q = again.player
         assert [(e.song, e.added) for e in q.queue.order] == before and q.queue.shuffle
         assert q.queue.repeat == ALL and any(added for _, added in before)
-        assert q.property("path") == p.property("path") and q.property("position") == 37.5
+        assert q.property("path") == playing and q.property("position") == 37.5
         assert q.property("playing") is False and again.engine_.played() == []
     finally:
         again.close()

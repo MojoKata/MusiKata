@@ -56,13 +56,14 @@ INFER = {
     "icon": "wand",
     "later": "Tags from paths come in a later version",
 }
-# the selection bar's actions (R2.9.6) that come with later slices, and what their tooltips say:
-# Album art (slice 6) shows only when the songs are one album; the right-click menu holds only Play
-# next and Add to queue (R7.2) until the slices that fill the rest, and dragging (R6.10) comes whole
-# with its own
+# the selection bar's actions (R2.9.6) after Play: Edit tags (R4.2, its `action`), and those that
+# come with later slices, with what their tooltips say; Album art (slice 6) shows only when the
+# songs are one album; the right-click menu holds Play next, Add to queue (R7.2) and Edit tags until
+# the slices that fill the rest, and dragging (R6.10) comes whole with its own
+EDIT = {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"}
 LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
-    {"label": "Edit tags", "icon": "genre", "later": "Editing tags comes in a later version"},
+    EDIT,
     {
         "label": "Infer from path",
         "icon": "wand",
@@ -70,14 +71,14 @@ LATER = [
     },
     {"label": "Organize…", "icon": "arrow", "later": "Organizing files comes in a later version"},
 ]
-# a folder of songs' buttons (R2.9.7), all of later slices so far
+# a folder of songs' buttons (R2.9.7): Edit tags (R4.2), and those of later slices
 STRIP_LATER = [
     {
         "label": "Infer from path",
         "icon": "wand",
         "later": "Tags from paths come in a later version",
     },
-    {"label": "Edit tags", "icon": "genre", "later": "Editing tags comes in a later version"},
+    EDIT,
     {"label": "Album art", "icon": "image", "later": "Album art comes in a later version"},
 ]
 
@@ -382,6 +383,15 @@ class FolderModel(PagedModel):
         if row_["kind"] == "folder":
             return index_folders.songs_beneath(self._read(), row_["path"])
         return [int(row_["key"]) // 2]
+
+    def song_at(self, n: int) -> int | None:
+        """A file's song, by id (its key is odd); None for a folder's row."""
+        k = self._key_at(n)
+        return k // 2 if k is not None and k % 2 else None
+
+    def is_selected(self, n: int) -> bool:
+        """Whether row n is selected."""
+        return self._key_at(n) in self._selected
 
     def selected_songs(self) -> list[int]:
         """The songs the selection stands for, in the list's order, each once (R2.9.6): a

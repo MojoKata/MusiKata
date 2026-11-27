@@ -312,3 +312,139 @@ def test_this_computers_id_is_the_files_else_made_once_and_kept(tmp_path):
     newer.write_text(json.dumps({"format": 2}))
     assert settings.computer_id(str(newer), HOME, "PC") is None
     assert json.loads(newer.read_text()) == {"format": 2}
+
+
+# ---------- the root's own settings.json: what writing tags needs (R13.3, R4.7.1, R4.7.2) ---
+
+ROOT_EXAMPLE = {
+    "format": 1,
+    "tags": {"id3_version": "2.3", "write_ratings": True, "rating_scale": "windows-media",
+             "history": True, "history_days": 90, "articles": ["The", "A", "An"],
+             "keep_modified_times": True},
+    "skip": ["_Incoming/Unsorted"],
+}  # fmt: skip
+
+
+def test_the_roots_own_settings_give_the_id3_version_and_whether_times_are_kept(tmp_path):
+    """A2.10's example, held to its schema, read; and a root without the file, or the file
+    without the group, writes ID3v2.4 and updates modification times (R4.7.1, R4.7.2)."""
+    schema = SCHEMA.replace("shared-settings", "root-settings")
+    with open(schema, encoding="utf-8") as f:
+        jsonschema.validate(ROOT_EXAMPLE, json.load(f))
+    root = tmp_path / "Music"
+    assert settings.root_tags(str(root)) == settings.RootTags("2.4", False)
+    (root / ".musikata").mkdir(parents=True)
+    with open(settings.root_path(str(root)), "w", encoding="utf-8") as f:
+        json.dump(ROOT_EXAMPLE, f)
+    assert settings.root_tags(str(root)) == settings.RootTags("2.3", True)
+    assert settings.parse_root_tags('{"format": 1}') == settings.RootTags()
+    assert settings.parse_root_tags('{"format": 3, "tags": {"id3_version": "2.3"}}') == (
+        settings.RootTags("2.3")
+    )  # a newer format: read for what it can
+
+
+@pytest.mark.parametrize(
+    "tags, want, problem",
+    [
+        ({"id3_version": 2.3}, ("2.3", False), None),  # a number, as a person writes it
+        ({"id3_version": "v2.3"}, ("2.3", False), None),
+        ({"id3_version": "ID3v2.4 "}, ("2.4", False), None),
+        ({"id3_version": "2.2"}, ("2.4", False), "isn't 2.3 or 2.4"),
+        ({"id3_version": True}, ("2.4", False), "isn't 2.3 or 2.4"),
+        ({"id3_version": None}, ("2.4", False), "isn't 2.3 or 2.4"),
+        ({"keep_modified_times": "yes"}, ("2.4", False), "isn't true or false"),
+        ("2.3", ("2.4", False), "tags isn't a group"),
+    ],
+)
+def test_the_roots_tags_values_broken_or_in_another_form(tags, want, problem):
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": tags}))
+    assert (found.id3_version, found.keep_modified_times) == want
+    assert [p for p in found.problems if problem in p] if problem else not found.problems
+
+
+def test_the_roots_own_settings_give_the_change_historys_switch_and_days():
+    """R4.9, R13.3: Keep a history of tag changes (on), and for how many days (90)."""
+    found = settings.parse_root_tags(json.dumps(ROOT_EXAMPLE))
+    assert (found.history, found.history_days) == (True, 90)
+    off = settings.parse_root_tags('{"format": 1, "tags": {"history": false, "history_days": 7}}')
+    assert (off.history, off.history_days, off.problems) == (False, 7, ())
+    assert (settings.RootTags().history, settings.RootTags().history_days) == (True, 90)
+
+
+@pytest.mark.parametrize(
+    "tags, want, problem",
+    [
+        ({"history_days": "30"}, (True, 30), None),  # as text, as a person writes it
+        ({"history_days": 30.0}, (True, 30), None),
+        ({"history_days": " 30 "}, (True, 30), None),
+        ({"history_days": 0}, (True, 90), "isn't a number of days"),
+        ({"history_days": -5}, (True, 90), "isn't a number of days"),
+        ({"history_days": 2.5}, (True, 90), "isn't a number of days"),
+        ({"history_days": True}, (True, 90), "isn't a number of days"),
+        ({"history_days": None}, (True, 90), "isn't a number of days"),
+        ({"history_days": "a month"}, (True, 90), "isn't a number of days"),
+        ({"history_days": float("nan")}, (True, 90), "isn't a number of days"),
+        ({"history": "off"}, (True, 90), "tags.history isn't true or false"),
+        ({"history": 0}, (True, 90), "tags.history isn't true or false"),
+        ({"history": None}, (True, 90), "tags.history isn't true or false"),
+    ],
+)
+def test_the_change_historys_settings_broken_or_in_another_form(tags, want, problem):
+    """R13.9: a broken value is reported in the log and its default used."""
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": tags}))
+    assert (found.history, found.history_days) == want
+    assert [p for p in found.problems if problem in p] if problem else not found.problems
+
+
+def test_the_roots_own_settings_give_where_ratings_are_kept_and_their_scale():
+    """R10.3, R10.4.1, R13.3: Write ratings into the files (on), and the rating scale in files
+    (Windows Media, else MusiKata's own), as A2.10 names them."""
+    found = settings.parse_root_tags(json.dumps(ROOT_EXAMPLE))
+    assert (found.write_ratings, found.rating_scale) == (True, "windows-media")
+    beside = settings.parse_root_tags(
+        '{"format": 1, "tags": {"write_ratings": false, "rating_scale": "musikata"}}'
+    )
+    assert (beside.write_ratings, beside.rating_scale, beside.problems) == (False, "musikata", ())
+    assert (settings.RootTags().write_ratings, settings.RootTags().rating_scale) == (
+        True, "windows-media",
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "tags, want, problem",
+    [
+        ({"rating_scale": "Windows Media"}, (True, "windows-media"), None),  # as a person writes it
+        ({"rating_scale": "windows_media"}, (True, "windows-media"), None),
+        ({"rating_scale": " MusiKata "}, (True, "musikata"), None),
+        ({"rating_scale": "itunes"}, (True, "windows-media"), "isn't windows-media or musikata"),
+        ({"rating_scale": 5}, (True, "windows-media"), "isn't windows-media or musikata"),
+        ({"rating_scale": None}, (True, "windows-media"), "isn't windows-media or musikata"),
+        ({"write_ratings": "no"}, (True, "windows-media"), "write_ratings isn't true or false"),
+        ({"write_ratings": 0}, (True, "windows-media"), "write_ratings isn't true or false"),
+        ({"write_ratings": None}, (True, "windows-media"), "write_ratings isn't true or false"),
+    ],
+)
+def test_the_ratings_settings_broken_or_in_another_form(tags, want, problem):
+    """R13.9: a broken value is reported in the log and its default used."""
+    found = settings.parse_root_tags(json.dumps({"format": 1, "tags": tags}))
+    assert (found.write_ratings, found.rating_scale) == want
+    assert [p for p in found.problems if problem in p] if problem else not found.problems
+
+
+@pytest.mark.parametrize("text", ["", '{"format": 1, "tags": {', "[1, 2]", '﻿{"tags": 5}'])
+def test_a_roots_file_empty_cut_short_or_not_an_object_writes_with_the_defaults(text):
+    found = settings.parse_root_tags(text)
+    assert (found.id3_version, found.keep_modified_times) == ("2.4", False) and found.problems
+
+
+def test_a_roots_file_that_cant_be_read_or_with_problems_is_logged(tmp_path, caplog):
+    folder = tmp_path / ".musikata"
+    folder.mkdir()
+    (folder / "settings.json").write_text('{"tags": {"id3_version": "3"}}', encoding="utf-8")
+    assert settings.root_tags(str(tmp_path)).id3_version == "2.4"
+    assert "isn't 2.3 or 2.4" in caplog.text
+    (folder / "settings.json").unlink()
+    (folder / "settings.json").mkdir()  # a folder where the file should be: it can't be read
+    found = settings.root_tags(str(tmp_path))
+    assert (found.id3_version, found.keep_modified_times) == ("2.4", False) and found.problems
+    assert "writing tags takes the defaults" in caplog.text

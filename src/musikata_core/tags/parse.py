@@ -5,6 +5,7 @@ what MusiKata writes (docs/process/testing.md, "Shapes", `tags`)."""
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -120,16 +121,18 @@ def popm_rating(popms: Sequence[tuple[str, int]]) -> int | None:
 
 def vorbis_rating(rating: str | None, fmps: str | None) -> int | None:
     """RATING as stars when 5 or less and as hundredths when more; FMPS_RATING as 0.0 to 1.0;
-    RATING wins when both are there (R10.4.2)."""
+    RATING wins when both are there (R10.4.2). A half star (MusicBee's 10, 30 … 90, or 0.5 …
+    4.5) rounds up. What float reads that isn't a number of stars ("inf", "nan") is no
+    rating."""
     for value, scale in ((rating, None), (fmps, 5.0)):
         try:
             x = float((value or "").strip().replace(",", "."))
         except ValueError:
             continue
-        if x < 0:
+        if not math.isfinite(x) or x < 0:
             continue
         stars = (x if x <= 5 else x / 20) if scale is None else min(x, 1.0) * scale
-        return max(0, min(5, round(stars)))
+        return max(0, min(5, math.floor(stars + 0.5)))
     return None
 
 
@@ -191,8 +194,10 @@ def with_replaygain(tags: Tags, more: Mapping[str, float | None]) -> Tags:
 
 # ---------- each kind's fields ----------
 
-# Vorbis comments (FLAC, Ogg, Opus): keys upper-cased; several values are several fields
-_VORBIS = {
+# A3.2's mapping, the text fields' half (the rest is each kind's function's): R4.1's field to its
+# Vorbis comment (FLAC, Ogg, Opus; keys upper-cased; several values are several fields), its ID3v2
+# frame and its MP4 atom. compose.py writes through the same tables.
+VORBIS = {
     "title": "TITLE", "artist": "ARTIST", "album": "ALBUM", "albumartist": "ALBUMARTIST",
     "composer": "COMPOSER", "comment": "COMMENT", "artistsort": "ARTISTSORT",
     "albumartistsort": "ALBUMARTISTSORT", "albumsort": "ALBUMSORT",
@@ -208,7 +213,7 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     track, track_total = number_pair(text(get("TRACKNUMBER")))
     disc, disc_total = number_pair(text(get("DISCNUMBER")))
     year, date = year_and_date(text(get("DATE")) or text(get("YEAR")))
-    fields = {k: text(get(v)) for k, v in _VORBIS.items()}
+    fields = {k: text(get(v)) for k, v in VORBIS.items()}
     fields["albumartist"] = fields["albumartist"] or text(get("ALBUM ARTIST"))
     fields["comment"] = fields["comment"] or text(get("DESCRIPTION"))
     gains = replaygain_of(raw)
@@ -236,7 +241,17 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     )
 
 
-_ID3 = {
+V1_COMMENT = "ID3v1 Comment"  # the description Mutagen gives an ID3v1 tag's comment
+
+
+def is_comment(description: str) -> bool:
+    """Whether a COMM frame with this description is the song's comment (A3.2): one without a
+    description, or an ID3v1 tag's. The others are other programs' own data, kept as they are
+    (R4.1.1): iTunes' iTunNORM and iTunSMPB, MediaMonkey's Songs-DB_Custom1, MusicMatch's."""
+    return not description or description == V1_COMMENT
+
+
+ID3 = {
     "title": "TIT2", "artist": "TPE1", "album": "TALB", "albumartist": "TPE2",
     "composer": "TCOM", "artistsort": "TSOP", "albumartistsort": "TSO2", "albumsort": "TSOA",
 }  # fmt: skip
@@ -252,8 +267,8 @@ def from_id3(
     """ID3v2 frames by id (TCON already as genre names: read.py takes them from Mutagen, which
     turns ID3v1's numbers, "(17)", into names, R9.3), TXXX frames as "TXXX:<description>", each
     user's POPM, COMM frames as (description, text), and RVA2 frames as `rva2_replaygain` takes
-    them. The comment is the COMM without a description (A3.2), else the first. ReplayGain is
-    TXXX's, else RVA2's."""
+    them. The comment is the first COMM that `is_comment`: without a description (A3.2), or the
+    ID3v1 tag's. ReplayGain is TXXX's, else RVA2's."""
     get = raw.get
     track, track_total = number_pair(text(get("TRCK")))
     disc, disc_total = number_pair(text(get("TPOS")))
@@ -261,9 +276,7 @@ def from_id3(
         year, date = year_and_date(text(get("TDRC")))
     else:
         year, date = id3v23_date(text(get("TYER")), text(get("TDAT")))
-    comment = next((t for d, t in comments if not d and t.strip()), None) or next(
-        (t for _, t in comments if t.strip()), None
-    )
+    comment = next((t for d, t in comments if is_comment(d) and t.strip()), None)
 
     def txxx(name: str) -> str | None:
         for key, values in raw.items():
@@ -272,7 +285,7 @@ def from_id3(
         return None
 
     tags = Tags(
-        **{k: text(get(v)) for k, v in _ID3.items()},
+        **{k: text(get(v)) for k, v in ID3.items()},
         track=track,
         tracktotal=track_total,
         disc=disc,
@@ -292,7 +305,7 @@ def from_id3(
     return with_replaygain(tags, rva2_replaygain(rva2))
 
 
-_MP4 = {
+MP4 = {
     "title": "\xa9nam", "artist": "\xa9ART", "album": "\xa9alb", "albumartist": "aART",
     "composer": "\xa9wrt", "comment": "\xa9cmt", "artistsort": "soar", "albumartistsort": "soaa",
     "albumsort": "soal",
@@ -320,7 +333,7 @@ def from_mp4(
     t = track or (0, 0)
     d = disc or (0, 0)
     return Tags(
-        **{k: text(get(v)) for k, v in _MP4.items()},
+        **{k: text(get(v)) for k, v in MP4.items()},
         track=t[0] or None,
         tracktotal=t[1] or None,
         disc=d[0] or None,
@@ -329,7 +342,7 @@ def from_mp4(
         date=date,
         genres=genres(get("\xa9gen") or ()),
         compilation=compilation,
-        rating=vorbis_rating(freeform("RATING"), None),
+        rating=vorbis_rating(freeform("RATING"), freeform("FMPS_RATING")),
         rg_track_gain=replaygain(freeform("replaygain_track_gain")),
         rg_track_peak=replaygain(freeform("replaygain_track_peak")),
         rg_album_gain=replaygain(freeform("replaygain_album_gain")),
@@ -389,3 +402,71 @@ def merge_info(tags: Tags, info: Mapping[str, str]) -> Tags:
             "date": tags.date or (date if not tags.year else None),
         }
     )
+
+
+# ---------- the tags kept without showing (R4.1.1, R4.8) ----------
+
+# what R4.1's fields are read from, by each kind's own key (A3.2): everything else a file holds is
+# kept untouched when it is written, and listed read only for one song (R4.8)
+KNOWN = {
+    "id3": {*ID3.values(), "TRCK", "TPOS", "TDRC", "TYER", "TDAT", "TCON", "TCMP", "POPM", "RVA2",
+            "APIC:3"},
+    "vorbis": {*VORBIS.values(), "ALBUM ARTIST", "DESCRIPTION", "TRACKNUMBER", "TRACKTOTAL",
+               "TOTALTRACKS", "DISCNUMBER", "DISCTOTAL", "TOTALDISCS", "DATE", "YEAR", "GENRE",
+               "COMPILATION", "RATING", "FMPS_RATING", "METADATA_BLOCK_PICTURE", "COVERART",
+               "R128_TRACK_GAIN", "R128_ALBUM_GAIN"},
+    "mp4": {*MP4.values(), "trkn", "disk", "\xa9day", "\xa9gen", "cpil", "covr",
+            "----:com.apple.itunes:rating", "----:com.apple.itunes:fmps_rating"},
+}  # fmt: skip
+# what the common keys of other programs are, in words
+KEPT_NAMES = {
+    "USLT": "Lyrics", "SYLT": "Synced lyrics", "LYRICS": "Lyrics", "UNSYNCEDLYRICS": "Lyrics",
+    "\xa9lyr": "Lyrics", "TSSE": "Encoder settings", "ENCODER": "Encoder", "\xa9too": "Encoder",
+    "TENC": "Encoded by", "ENCODEDBY": "Encoded by", "UFID": "File id", "PRIV": "Private data",
+    "PCNT": "Play count", "TBPM": "BPM", "BPM": "BPM", "tmpo": "BPM", "pgap": "Gapless",
+    "APIC": "Picture", "TCOP": "Copyright", "COPYRIGHT": "Copyright", "cprt": "Copyright",
+    "TPUB": "Publisher", "TSRC": "ISRC", "ISRC": "ISRC", "TLAN": "Language", "TMED": "Media",
+    "TORY": "Original year", "TDOR": "Original date",
+}  # fmt: skip
+KEPT_WIDTH = 80  # characters of a kept value shown, the rest elided
+
+
+def _replaygain_key(key: str) -> bool:
+    k = key.upper()
+    return k.startswith(("REPLAYGAIN_", "TXXX:REPLAYGAIN_")) or k.startswith(
+        "----:COM.APPLE.ITUNES:REPLAYGAIN_"
+    )
+
+
+def kept(family: str, items: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The tags of a file MusiKata keeps without showing (R4.1.1), in its order, each as a name
+    and its value in words, for R4.8's read-only list. `family` is "id3", "vorbis" or "mp4";
+    `items` the file's tags as read.kept gives them: (its key, its value as text), an ID3 frame
+    with a description keyed "<id>:<description>" (a picture "APIC:<type>"), Vorbis keys
+    upper-cased. What R4.1's fields are read from (`KNOWN`, the comment, ReplayGain) isn't
+    listed."""
+    known = KNOWN[family]
+    out: list[tuple[str, str]] = []
+    for key, value in items:
+        if key in known or key.lower() in known or _replaygain_key(key):
+            continue
+        fid, _, desc = key.partition(":")
+        if fid == "COMM" and is_comment(desc):
+            continue
+        if family == "mp4" and key.startswith("----:"):
+            name = key.rsplit(":", 1)[-1]
+        elif fid in ("TXXX", "WXXX") and desc:
+            name = desc
+        elif fid == "APIC":
+            name = KEPT_NAMES[fid]
+        elif desc and fid in KEPT_NAMES:
+            name = f"{KEPT_NAMES[fid]} ({desc})"
+        elif fid == "COMM":
+            name = f"Comment ({desc})"
+        else:
+            name = KEPT_NAMES.get(key, key)
+        value = " ".join(value.split())
+        if len(value) > KEPT_WIDTH:
+            value = value[: KEPT_WIDTH - 1].rstrip() + "…"
+        out.append((name, value))
+    return out

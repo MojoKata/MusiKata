@@ -7,6 +7,7 @@ rebuilt, not written by an older one."""
 
 import sqlite3
 import threading
+import weakref
 
 import pytest
 
@@ -71,6 +72,25 @@ def test_a_write_is_one_transaction_kept_whole_or_not_at_all(tmp_path):
         index.write(add_then_fail).result()
     assert [r[0] for r in index.read().execute("SELECT path FROM song")] == ["a.mp3"]
     index.close()
+
+
+def test_a_failed_write_and_what_it_holds_go_once_let_go_without_a_collection(tmp_path):
+    """A1.3: the writer's frame, which a failed job's traceback holds, lets go of the job's
+    future, which would otherwise keep itself, and what the job and its callbacks refer to (a
+    window's Library), in a cycle that only a garbage collection, on any thread, would free."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    held = threading.Event()  # what a job refers to
+
+    def fail(c, held=held):
+        raise ValueError("no")
+
+    done = index.write(fail)
+    done.add_done_callback(lambda f, held=held: None)
+    assert isinstance(done.exception(), ValueError)
+    index.close()
+    gone = weakref.ref(held)
+    del held, done, fail
+    assert gone() is None
 
 
 def test_each_thread_reads_through_a_connection_of_its_own(tmp_path):
@@ -138,4 +158,25 @@ def test_an_index_of_slice_2_gains_albums_and_artists_and_its_songs_are_read_aga
     ]
     tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"album", "artist"} <= tables
+    c.close()
+
+
+def test_an_index_of_slice_4_gains_the_change_history_and_reads_nothing_again(tmp_path):
+    """Version 6 (A2.1's change and change_file, R4.9): filled from the root's history folder
+    (history.refresh), so no song is read again; an entry gone takes its files with it."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:5]:
+        step(c)
+    c.execute("PRAGMA user_version = 5")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 10, 5)")
+    assert db.migrate(c) == len(db.MIGRATIONS)
+    assert c.execute("SELECT mtime_ns FROM song").fetchall() == [(5,)]
+    c.execute(
+        "INSERT INTO change (name, time, computer, action, description) VALUES"
+        " ('n.json', '2026-11-25T20:45:12+00:00', 'b2c4', 'edit-tags', '')"
+    )
+    c.execute("INSERT INTO change_file VALUES (1, 0, 'a.flac', NULL, 'title', NULL)")
+    c.execute("DELETE FROM change")
+    assert c.execute("SELECT COUNT(*) FROM change_file").fetchone()[0] == 0
     c.close()

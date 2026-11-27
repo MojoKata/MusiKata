@@ -13,12 +13,14 @@ over the index's `song_fts` and filters on the song table's columns, and the ind
 
 `parse` and `match` are plain functions, tested on what users type (docs/process/testing.md,
 "Shapes"); `condition` is the SQL a list adds to its WHERE; `index_songs` and `forget` keep
-`song_fts` in step with `song`, in the scan's transactions (A2.2)."""
+`song_fts` in step with `song`, in the scan's transactions (A2.2). `suggestions` gives the values
+already in the library the Edit tags panel suggests as the user types (R4.6), ranked by `rank`."""
 
 from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -200,3 +202,61 @@ def forget(c: sqlite3.Connection, paths: Iterable[str]) -> None:
         "DELETE FROM song_fts WHERE rowid = (SELECT id FROM song WHERE path = ?)",
         [(p,) for p in paths],
     )
+
+
+# ---------- the values in use, suggested as the user types (R4.6) ----------
+
+# what each field suggests from: an artist is anyone named as artist or album artist (R2.5.4)
+_NAMES = (
+    "SELECT name, COUNT(*) FROM (SELECT artist AS name FROM song UNION ALL"
+    " SELECT albumartist FROM song) WHERE name IS NOT NULL GROUP BY name"
+)
+SUGGESTED = {
+    "artist": _NAMES,
+    "albumartist": _NAMES,
+    "album": "SELECT album, COUNT(*) FROM song WHERE album IS NOT NULL GROUP BY album",
+    "genres": "SELECT genre, COUNT(*) FROM song_genre GROUP BY genre",
+}
+SUGGESTIONS = 8  # the most a field suggests at once
+
+
+def fold(text: str) -> str:
+    """Text with case and accents set aside, as what is typed is matched: "Beyoncé" as
+    "beyonce"."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+
+
+def rank(values: Iterable[tuple[str, int]], typed: str, limit: int = SUGGESTIONS) -> list[str]:
+    """The values (each with how many songs have it) that what was `typed` could be the start
+    of, case and accents aside: those that start with it first, then those with a word that does
+    ("drift" finds "Lumen Drift"), each by how many songs have it, most first. The value typed
+    exactly is left out, and nothing is suggested for nothing typed."""
+    want = fold(typed.strip())
+    if not want:
+        return []
+    starts: list[tuple[int, str]] = []
+    words: list[tuple[int, str]] = []
+    for value, n in values:
+        name = fold(value)
+        if name == want and value.strip() == typed.strip():
+            continue
+        if name.startswith(want):
+            starts.append((-n, value))
+        elif any(w.startswith(want) for w in re.split(r"[\s\-/&(,.]+", name)[1:]):
+            words.append((-n, value))
+    ordered = sorted(starts, key=lambda x: (x[0], fold(x[1]))) + sorted(
+        words, key=lambda x: (x[0], fold(x[1]))
+    )
+    return [v for _, v in ordered[:limit]]
+
+
+def suggestions(
+    c: sqlite3.Connection, field: str, typed: str, limit: int = SUGGESTIONS
+) -> list[str]:
+    """The values of the library's songs that the Edit tags panel suggests for `field` (artist,
+    albumartist, album, genres; R4.6) as `typed` is typed (`rank`); none for another field."""
+    query = SUGGESTED.get(field)
+    if query is None or not typed.strip():
+        return []
+    return rank(c.execute(query), typed, limit)

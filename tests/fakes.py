@@ -40,6 +40,20 @@ def fill(index, songs):
     index.write(lambda c: scanner.write_batch(c, batch, {})).result()
 
 
+def played(index, plays, computer="this-computer", when=datetime(2026, 11, 25, 20, 41, tzinfo=UTC)):
+    """Plays counted in `index` as playing them would count them (rootfiles.count): `plays` the
+    times each song, by path, was played on `computer`."""
+    from musikata_core import rootfiles
+
+    def write(c):
+        for path, n in plays.items():
+            (song,) = c.execute("SELECT id FROM song WHERE path = ?", (path,)).fetchone()
+            for _ in range(n):
+                rootfiles.count(c, computer, song, when)
+
+    index.write(write).result()
+
+
 def wav(path, seed, title=None):
     """A tenth of a second of WAV at `path` (folders made), its audio, and so its hash (A2.3), made
     from `seed`, and its title tagged when given: a file the scan reads in a millisecond."""

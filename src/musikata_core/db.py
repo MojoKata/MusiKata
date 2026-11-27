@@ -123,7 +123,66 @@ def _v4(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]
+def _v5(c: sqlite3.Connection) -> None:
+    """Play counts (A2.1's play, R7.9): a row for each song a computer has played, with its count
+    and when it was last played, as that computer's `.musikata/<computer id>/plays.json` names it
+    (A2.8): by the computer's id, the song's path and audio hash, and the song in the index it
+    stands for, found by that path, else that hash (None until one is). This computer's rows are
+    the counts it keeps; another's are read from its file. Filled from the files and by playing,
+    so nothing needs reading again."""
+    c.execute(
+        "CREATE TABLE play (id INTEGER PRIMARY KEY, computer TEXT NOT NULL,"
+        " song_id INTEGER REFERENCES song (id) ON DELETE SET NULL, path TEXT NOT NULL, hash TEXT,"
+        " count INTEGER NOT NULL, last TEXT NOT NULL)"
+    )
+    c.execute("CREATE INDEX play_song ON play (song_id)")
+    c.execute("CREATE INDEX play_path ON play (path)")
+    c.execute("CREATE INDEX play_computer ON play (computer)")
+
+
+def _v6(c: sqlite3.Connection) -> None:
+    """The change history (A2.1's change and change_file, R4.9, A3.5): a row per entry of the
+    root's `.musikata/history/`, by its file's name, with when and on which computer it was saved,
+    what the save was and the entry it undoes, if any; and a row per file it touched, in its
+    order, with the file's path and audio hash, the fields it changed (by name, comma-separated)
+    and the old cover it keeps (history/images/<hash>). Filled from the entries' files, so nothing
+    needs reading again."""
+    c.execute(
+        "CREATE TABLE change (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+        " time TEXT NOT NULL, computer TEXT NOT NULL, action TEXT NOT NULL,"
+        " description TEXT NOT NULL, undoes TEXT)"
+    )
+    c.execute("CREATE INDEX change_time ON change (time, name)")
+    c.execute("CREATE INDEX change_undoes ON change (undoes)")
+    c.execute(
+        "CREATE TABLE change_file (change_id INTEGER NOT NULL REFERENCES change (id)"
+        " ON DELETE CASCADE, position INTEGER NOT NULL, path TEXT NOT NULL, hash TEXT,"
+        " fields TEXT NOT NULL, cover TEXT, PRIMARY KEY (change_id, position))"
+    )
+    c.execute("CREATE INDEX change_file_cover ON change_file (cover)")
+
+
+def _v7(c: sqlite3.Connection) -> None:
+    """Ratings kept beside the files (R10.3, A2.8): the rating each song's file holds, apart
+    (`song.file_rating`), as `song.rating` becomes the rating shown, which is the song's
+    `.musikata/ratings.json` entry when its ratings are kept there; the entries of that file
+    (`rating`), each by its path and audio hash as the file names it, with its stars and when
+    it was set, and the song it stands for (by that path, else that hash; None until one is); and
+    whether the root keeps every song's rating there (`rating_rule`, R10.3's setting), one row.
+    The ratings shown so far were the files', so nothing needs reading again."""
+    c.execute("ALTER TABLE song ADD COLUMN file_rating")
+    c.execute("UPDATE song SET file_rating = rating")
+    c.execute(
+        "CREATE TABLE rating (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, hash TEXT,"
+        " stars INTEGER NOT NULL, changed TEXT NOT NULL,"
+        " song_id INTEGER REFERENCES song (id) ON DELETE SET NULL)"
+    )
+    c.execute("CREATE INDEX rating_song ON rating (song_id)")
+    c.execute("CREATE TABLE rating_rule (everything INTEGER NOT NULL)")
+    c.execute("INSERT INTO rating_rule VALUES (0)")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4, _v5, _v6, _v7]
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -211,6 +270,9 @@ class Index:
                 if c.in_transaction:
                     c.execute("ROLLBACK")
                 done.set_exception(e)
+            # let go of the job: a failed one's traceback holds this frame, which would hold its
+            # future, and what the job and its callbacks refer to, in a cycle once it ends
+            del job, fn, done
         c.close()
 
     def write(self, fn: Callable[[sqlite3.Connection], T]) -> Future[T]:

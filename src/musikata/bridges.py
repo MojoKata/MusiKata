@@ -19,7 +19,7 @@ import os
 import random
 import sqlite3
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, Executor
 from typing import Any, Protocol
 
@@ -28,8 +28,10 @@ from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
 from musikata_core import albums, db, nowplaying, scanner, settings, watch, workers
 from musikata_core.audio import gain
+from musikata_core.audio.played import Listening
 from musikata_core.audio.queue import Entry, Queue
 from musikata_core.clock import Clock, SystemClock
+from musikata_core.tags import Written
 
 from .folders import MODES as folders_modes
 from .folders import SEARCH_HINT as FOLDERS_SEARCH_HINT
@@ -68,6 +70,7 @@ from .nowplaying import (
     song_of_path,
 )
 from .player import Engine, PlaybackThread, gain_of
+from .plays import PlayCounts
 
 log = logging.getLogger(__name__)
 
@@ -248,6 +251,26 @@ def page_count_text(parts: Sequence[tuple[int, int, str]], filtered: bool) -> st
     return " · ".join(count_text(shown, total, one, True) for shown, total, one in parts if total)
 
 
+def average_of(total: int | None, rated: int) -> dict[str, object]:
+    """The average of an album's or artist's rated songs (R10.1), for its page: its stars,
+    rounded half up, and in words ("4.3 average of 9 rated songs"); {} when none is rated."""
+    if not rated or not total:
+        return {}
+    mean = total / rated
+    return {
+        "stars": max(1, min(5, int(mean + 0.5))),
+        "text": f"{mean:.1f} average of {plural(rated, 'rated song')}",
+    }
+
+
+def average_in(c: sqlite3.Connection, where: str, params: tuple[object, ...]) -> dict[str, object]:
+    """`average_of` the songs `where` picks."""
+    total, rated = c.execute(
+        f"SELECT SUM(rating), COUNT(*) FROM song WHERE rating > 0 AND ({where})", params
+    ).fetchone()
+    return average_of(total, rated)
+
+
 def _field(name: str, default: object = "") -> Callable[[AlbumPage | ArtistPage], object]:
     """A page's property getter: its value of `name`, `default` before it shows anything."""
     return lambda page: page._values.get(name, default)
@@ -314,6 +337,7 @@ class AlbumPage(QObject):
             ),
             "cover": cover_url(thumb),
             "chips": state_chips(songs, embedded, image),
+            "average": average_in(c, "album_id = ?", (album_id,)),
         }
         if same:  # read again where it is: after a scan, the list keeps its place
             self._songs.refresh()
@@ -344,6 +368,7 @@ class AlbumPage(QObject):
     detail = QtProperty(str, _field("detail"), notify=changed)  # 10 songs · 44 min · FLAC 44.1 kHz
     cover = QtProperty(str, _field("cover"), notify=changed)
     chips = QtProperty(list, _field("chips", []), notify=changed)
+    average = QtProperty(dict, _field("average", {}), notify=changed)  # R10.1; {}: none rated
     songs = QtProperty(QObject, _get_songs, constant=True)
 
 
@@ -397,6 +422,11 @@ class ArtistPage(QObject):
             "name": name,
             "detail": artist_line(albums, songs),
             "tiles": tiles((thumbs or "").split()),
+            "average": average_in(
+                c,
+                "artist_id = ? OR album_id IN (SELECT id FROM album WHERE artist_id = ?)",
+                (artist_id, artist_id),
+            ),
         }
         self.changed.emit()
         return True
@@ -428,6 +458,7 @@ class ArtistPage(QObject):
     name = QtProperty(str, _field("name"), notify=changed)
     detail = QtProperty(str, _field("detail"), notify=changed)  # 3 albums · 41 songs
     tiles = QtProperty(list, _field("tiles", []), notify=changed)
+    average = QtProperty(dict, _field("average", {}), notify=changed)  # R10.1; {}: none rated
     othersTitle = QtProperty(str, _get_others_title, notify=changed)  # "" when it shows none
     albums = QtProperty(QObject, _get_albums, constant=True)
     others = QtProperty(QObject, _get_others, constant=True)
@@ -460,6 +491,21 @@ def sort_text(label: str) -> str:
     return f"Sort: {label}" if label else ""
 
 
+def without_traceback(error: BaseException) -> BaseException:
+    """`error`, and those it was raised from or while handling, without their tracebacks, which
+    were logged: kept (`Library.last`), a traceback holds the frames it passed through, and with
+    them the Library, in a cycle only a garbage collection would free (A1.3)."""
+    seen: set[int] = set()
+    left: list[BaseException | None] = [error]
+    while left:
+        e = left.pop()
+        if e is not None and id(e) not in seen:
+            seen.add(id(e))
+            e.__traceback__ = None
+            left += [e.__cause__, e.__context__]
+    return error
+
+
 class Library(QObject):
     """One root and its index, as the sidebar and the views see them: which view is open and the
     way back from a page (R6.3), Albums and its genre chips, Artists, Songs, and the pages; and
@@ -485,9 +531,12 @@ class Library(QObject):
     searchChanged = Signal()
     rootChosen = Signal(str)  # Choose another folder… (R2.10): the folder chosen, a whole path
     reachChanged = Signal()  # the root, or a linked folder, went or came back (R2.10)
+    songsMoved = Signal()  # a scan found songs moved: their plays name them anew (A2.8)
+    reloaded = Signal()  # the rows were read again, after a scan or a save (`reload`)
     _progress = Signal(int, int)
     _finished = Signal(object)
     _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
+    _indexed = Signal(object)  # the rows of files MusiKata wrote updated (`saved`), or why not
 
     def __init__(
         self,
@@ -554,6 +603,7 @@ class Library(QObject):
         self._progress.connect(self._on_progress)
         self._finished.connect(self._on_finished)
         self._reached.connect(self._on_reached)
+        self._indexed.connect(self._on_indexed)
         self._counts = (0, 0, 0)
         self._given = given
         self._missing = missing  # the root isn't there (R2.10)
@@ -595,6 +645,7 @@ class Library(QObject):
             self.back()
         self._mark_playing()
         self.changed.emit()
+        self.reloaded.emit()
 
     # ---------- going between the views ----------
 
@@ -708,7 +759,8 @@ class Library(QObject):
         {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}, {"view": "artist",
         "artist": "Lumen Drift"}; or Folders at a
         folder, in a mode, with rows selected: {"view": "folders", "folder": "Lumen Drift",
-        "mode": "large", "select": ["Lumen Drift/Remixes"]}."""
+        "mode": "large", "select": ["Lumen Drift/Remixes"]}; or Songs with songs selected, by
+        their titles: {"view": "songs", "select": ["Neap Tide", "Moonpull"]}, or none ([])."""
         view = step["view"]
         c = self._index.read()
         if view == "folders":
@@ -730,6 +782,11 @@ class Library(QObject):
         else:
             self.show(view)
             self.setSearch(step.get("search", ""))
+            titles = list(step.get("select", []))
+            if view == "songs" and "select" in step:  # [] clears what an earlier step selected
+                marks = ", ".join("?" * len(titles))
+                found = c.execute(f"SELECT id FROM song WHERE title IN ({marks})", titles)
+                self._songs.select_songs([r[0] for r in found])
 
     # ---------- Albums' genre chips ----------
 
@@ -806,6 +863,7 @@ class Library(QObject):
                 copied=copied,
                 keep=keep,
                 reached=self._reached.emit if self._watching else None,
+                clock=self._clock,
             )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
@@ -813,7 +871,7 @@ class Library(QObject):
                 # a worker process died: the next scan starts them anew
                 self._workers.shutdown(wait=False)
                 self._workers = None
-            result = e
+            result = without_traceback(e)
         if isinstance(result, scanner.Result) and not result.missing and self._trim is not None:
             try:  # the cache's thumbnails no row points at any more (A2.7)
                 self._trim(self._index.read())
@@ -847,6 +905,8 @@ class Library(QObject):
                 self._copied = result.copied
                 self._watch(whole, result)
                 self._found_there(whole, result)
+                if result.moved:
+                    self.songsMoved.emit()
         if whole:
             self._scanning = False
         self.reload()
@@ -1044,6 +1104,44 @@ class Library(QObject):
         """MusiKata wrote the file at `path` (under the root), leaving it `size` bytes modified at
         `mtime_ns`: a watched rescan doesn't read it again (A2.4, watch.OwnWrites)."""
         self._own.wrote(path, size, mtime_ns)
+
+    def saved(self, written: Sequence[Written]) -> None:
+        """Files MusiKata wrote itself (tags.save, A3.4), each as it was read back: their rows
+        updated from that on the writer thread, without reading them again, and the rescan their
+        change starts passing them by (A2.4). The views reload once the rows are written."""
+        for w in written:
+            rel = scanner.path_under(self._root, w.path)
+            if rel is not None:
+                self.wrote(rel, w.size, w.mtime_ns)
+        rows = list(written)
+        done = self._index.write(lambda c: scanner.wrote(c, self._root, rows))
+        done.add_done_callback(lambda f: self._indexed.emit(f.exception()))
+
+    @Slot(object)
+    def _on_indexed(self, error: BaseException | None) -> None:
+        if error is not None:
+            log.error("couldn't index the files written in %s: %s", self._root, error)
+        self.reload()
+
+    @Slot(object)
+    def show_ratings(self, ratings: Mapping[int, int]) -> None:
+        """The ratings being saved, by song id, shown at once in every list of songs (R10.2)."""
+        for model in (self._songs, self._album.property("songs"), self._artist.property("others"),
+                      self._folders.property("model")):  # fmt: skip
+            model.show_ratings(ratings)
+
+    @Slot()
+    def ratings_changed(self) -> None:
+        """Ratings kept beside the files changed (another computer's, R10.3): read again."""
+        self.reload()
+
+    @Slot()
+    def plays_changed(self) -> None:
+        """The play counts changed (R7.9; plays.PlayCounts): the lists of songs read their rows
+        again where they are."""
+        self._songs.refresh()
+        self._album.property("songs").refresh()
+        self._artist.property("others").refresh()
 
     @Slot(str)
     def show_playing(self, path: str) -> None:
@@ -1325,7 +1423,8 @@ class Queueable(Protocol):
         ...
 
     def songs_at(self, row: int) -> list[int]:
-        """The songs row `row` stands for: its own, or those beneath a folder."""
+        """The songs a right click on row `row` stands for: its own, those beneath a folder, or,
+        in a list of songs, the whole selection when the row is in it."""
         ...
 
 
@@ -1361,7 +1460,11 @@ class Player(QObject):
     kept (`restore`, R1.8): cued at its place in the current song, which play starts from. Given
     `keep` (`nowplaying.Keeping`), each change is kept on its thread: the queue when it changes,
     the place on pause, at close and once a minute while playing, and shuffle and repeat when the
-    user changes them."""
+    user changes them.
+
+    What the engine reports of the song playing is heard (`played.Listening`, on `clock`): once
+    enough of a song of the queue is heard, its play is counted (R7.9) by `count`'s PlayCounts. A
+    file played outside the queue (`play_file`) isn't counted (R1.7)."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
@@ -1386,9 +1489,12 @@ class Player(QObject):
         read: Callable[[], sqlite3.Connection] | None = None,
         rng: random.Random | None = None,
         playback: settings.Playback | None = None,
+        clock: Clock | None = None,
     ) -> None:
         super().__init__(parent)
         self._settings = playback if playback is not None else settings.Playback()
+        self._listening = Listening(clock if clock is not None else SystemClock())
+        self._counts: PlayCounts | None = None
         self._root = root
         self._refuse = refuse  # why a song can't play now (Library.unplayable, R2.10)
         self._read = read
@@ -1404,6 +1510,7 @@ class Player(QObject):
         self._up_next = UpNextModel(read, self.queue, self)
         self._up_next_open = False
         self._info: SongInfo | None = None  # the shown song's words, when the index has it
+        self._ratings: dict[int, int] = {}  # ratings being saved, by song id (R10.2)
         self._path = ""  # the shown song's path under the root
         self._tickets = itertools.count(1)
         self._requested = 0  # the ticket of the song the engine was last asked to play
@@ -1482,6 +1589,15 @@ class Player(QObject):
         ids, source = songs.queue_from(row)
         self.play_songs(ids, source)
 
+    @Slot(QObject)
+    def playSelection(self, songs: SongsModel) -> None:  # noqa: N802
+        """Enter on a list's selection (R7.1, R6.9): its first song plays, and the rest of the
+        list after it is the queue, so every song selected plays, in the list's order; with
+        nothing selected, nothing."""
+        ids, source = songs.queue_from_selection()
+        if ids:
+            self.play_songs(ids, source)
+
     @Slot(int)
     def playAlbum(self, album_id: int) -> None:  # noqa: N802
         """Play on an album: its songs by disc and track, from its first (R7.1)."""
@@ -1533,6 +1649,10 @@ class Player(QObject):
         self._keeping = keeping
         keeping.settle(self._state())
 
+    def count(self, counts: PlayCounts) -> None:
+        """From now on each song of the queue heard enough is counted by `counts` (R7.9)."""
+        self._counts = counts
+
     def _state(self) -> nowplaying.State:
         return nowplaying.state_of(self.queue, self._position)
 
@@ -1574,6 +1694,12 @@ class Player(QObject):
         """A song list's Add to queue: the row's songs after those added before."""
         self._added(self.queue.add(songs.songs_at(row)))
 
+    @Slot(QObject)
+    def playNextSelection(self, songs: SongsModel) -> None:  # noqa: N802
+        """The Songs selection bar's Play next (L03-songs-bulk-edit): the songs selected, in the
+        list's order, right after the current one."""
+        self._added(self.queue.play_next(songs.selected_songs()))
+
     def _added(self, entries: list[Entry]) -> None:
         """Songs went into the queue: shown at once when nothing was there (cued, not started)."""
         if entries and self.queue.current is entries[0]:
@@ -1595,6 +1721,18 @@ class Player(QObject):
         """Up next's ×: the song out of the queue; the song playing stays."""
         found = self._up_next.entry(row)
         if found is not None and self.queue.remove(found[0].key):
+            self._queue_changed()
+
+    @Slot()
+    def playSelected(self) -> None:  # noqa: N802
+        """Enter on Up next's selection: its first song plays, as a double click on it would."""
+        self.playRow(self._up_next.first_selected())
+
+    @Slot()
+    def removeSelected(self) -> None:  # noqa: N802
+        """Delete on Up next's selection: its songs out of the queue; the song playing stays."""
+        removed = [self.queue.remove(entry.key) for entry, _ in self._up_next.selected()]
+        if any(removed):
             self._queue_changed()
 
     @Slot(int, int)
@@ -1696,6 +1834,7 @@ class Player(QObject):
         if self._length:
             seconds = min(seconds, self._length)
         self._position = seconds
+        self._listening.sought(seconds)
         self._seeking += 1
         self._seek.emit(self._requested, seconds)
         self.positionChanged.emit()
@@ -1732,6 +1871,30 @@ class Player(QObject):
         """The words of the song shown, when the index has it (the system's media controls)."""
         return self._info
 
+    def song_id(self) -> int | None:
+        """The song shown, by id, when it is the queue's (None: none, or a file played alone)."""
+        entry = self.queue.current
+        return entry.song if entry is not None and self._info is not None else None
+
+    @Slot(object)
+    def show_ratings(self, ratings: Mapping[int, int]) -> None:
+        """The ratings being saved, by song id: the bar shows the song's at once (R10.2)."""
+        song = self.song_id()
+        before = self._ratings.get(song) if song is not None else None
+        self._ratings = dict(ratings)
+        if song is not None and self._ratings.get(song) != before:
+            self.changed.emit()
+
+    @Slot()
+    def reread(self) -> None:
+        """The index's rows changed (a scan, a save): the song shown read again, its words and
+        rating as they are now."""
+        song = self.song_id()
+        info = self._song(song) if song is not None else None
+        if info is not None and info != self._info:
+            self._info = info
+            self.changed.emit()
+
     def play_file(self, path: str) -> None:
         """Plays the file at `path`, a whole path, from its start, outside the queue (--play)."""
         self._info = None
@@ -1745,6 +1908,7 @@ class Player(QObject):
             self._keeping.close()
             self._keeping = None  # what the engine says as it stops changes nothing kept
         self._thread.close()
+        self._refuse = None  # the Library: let go with its window (app.Shell.close)
 
     # ---------- playing the queue's songs ----------
 
@@ -1847,6 +2011,7 @@ class Player(QObject):
         on (`_requested` no longer names it)."""
         self._requested = 0
         self._playing(None)
+        self._listening.stop()
         if self._on or self._started:
             self._stop.emit()
         self._on = self._paused = False
@@ -1855,6 +2020,7 @@ class Player(QObject):
         """Nothing plays now: the queue's current song stays cued, if it has one (after a song
         that failed, or Stop), else the bar is empty (the queue played out)."""
         self.last, self._error = how, error
+        self._listening.stop()
         self._on = self._paused = False
         self._position = 0.0
         if self.queue.current is None or self._info is None:
@@ -1931,6 +2097,9 @@ class Player(QObject):
         if self._info is None:
             self._set_path(self._under_root(path))
         self._length, self._position = max(0.0, length), self._begun_at
+        current = self.queue.current
+        song = current.song if self._playing_key is not None and current is not None else None
+        self._listening.begin(song, self._length, self._begun_at)
         self.changed.emit()
         self.positionChanged.emit()
 
@@ -1961,6 +2130,7 @@ class Player(QObject):
         self._show(info, info.path)
         self._on, self._paused = True, False
         self._length = max(0.0, length)
+        self._listening.begin(entry.song, self._length)  # a new play (R7.6), repeat One's too
         self.changed.emit()
         self._queue_changed()
 
@@ -1969,8 +2139,13 @@ class Player(QObject):
         if self._on and not self._seeking:
             self._position = seconds
             self.positionChanged.emit()
+            play = self._listening.moved(seconds)
+            if play is not None and self._counts is not None:
+                self._counts.played(play)  # heard enough: counted (R7.9)
             if not self._paused and self._keeping is not None and self._keeping.ticks():
                 self._keep(nowplaying.TICK)  # at most once a minute while playing (A2.8)
+            if not self._paused and self._counts is not None:
+                self._counts.tick()  # this computer's plays file, when due (A2.8)
 
     @Slot(int)
     def _on_sought(self, ticket: int) -> None:
@@ -2062,6 +2237,9 @@ class Player(QObject):
         return self._info.cover if self._info is not None else ""
 
     def _get_rating(self) -> int:
+        song = self.song_id()
+        if song is not None and song in self._ratings:
+            return self._ratings[song]
         return self._info.rating if self._info is not None else 0
 
     def _get_position_text(self) -> str:

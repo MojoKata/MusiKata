@@ -65,7 +65,9 @@ missing years, lower-case artists, "Electronica" beside "Electronic", an album w
 loose files in `_Incoming`, a playlist naming a file that isn't there. Needs attention, R3 and R12
 always have work to show on it. Its folders are deep enough for every kind of folder cover (R5.8):
 an artist with one album, artists with two, three and five, and a `Remixes` folder of albums inside
-an artist's folder, whose mosaic takes its pieces from a level further down.
+an artist's folder, whose mosaic takes its pieces from a level further down. Its `.musikata/history`
+holds a few saves made on two computers, Studio-PC and Laptop, one of them undone, each made by
+MusiKata's own batch and Undo, so the Change history (R4.9) has entries to list and undo.
 
 ## The tour
 
