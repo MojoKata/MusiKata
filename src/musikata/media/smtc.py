@@ -11,6 +11,7 @@ the GUI thread (MediaControls.commanded). What only Windows can show, the overla
 
 from __future__ import annotations
 
+import logging
 import sys
 import uuid
 from collections.abc import Callable
@@ -34,6 +35,8 @@ from .controls import (
     Song,
     State,
 )
+
+log = logging.getLogger(__name__)
 
 # the buttons heard, by their SystemMediaTransportControlsButton name; the rest are never enabled
 BUTTONS = {"PLAY": PLAY, "PAUSE": PAUSE, "STOP": STOP, "NEXT": NEXT, "PREVIOUS": PREVIOUS}
@@ -79,11 +82,21 @@ class Smtc:
             setattr(controls, f"is_{name}_enabled", False)
         self._tokens = [
             (controls.remove_button_pressed, controls.add_button_pressed(self._pressed)),
-            (
-                controls.remove_playback_position_change_requested,
-                controls.add_playback_position_change_requested(self._position_asked),
-            ),
         ]
+        # The position moved in the overlay is ISystemMediaTransportControls2's, which an older or
+        # partial implementation (Wine's) lacks: the rest of the controls work without it, and the
+        # timeline is never offered as seekable.
+        self._can_seek = True
+        try:
+            self._tokens.append(
+                (
+                    controls.remove_playback_position_change_requested,
+                    controls.add_playback_position_change_requested(self._position_asked),
+                )
+            )
+        except (AttributeError, OSError) as error:
+            self._can_seek = False
+            log.warning("the system's media controls can't seek (%s); the rest of them work", error)
 
     def _pressed(self, sender: Any, args: Any) -> None:
         """A button pressed, on WinRT's thread."""
@@ -117,7 +130,7 @@ class Smtc:
         c.is_play_enabled, c.is_pause_enabled = state.can_play, state.can_pause
         c.is_stop_enabled = state.status != STOPPED
         c.is_next_enabled, c.is_previous_enabled = state.can_go_next, state.can_go_previous
-        self._seekable = state.can_seek
+        self._seekable = state.can_seek and self._can_seek
         self._timeline(position)
 
     def seeked(self, position: float) -> None:
