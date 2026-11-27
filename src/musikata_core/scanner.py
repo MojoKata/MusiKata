@@ -2,7 +2,8 @@
 its row, read the changed and new ones on the worker processes in batches, write each batch in one
 transaction, with its rows of the search index (A2.5), and remove what's gone, unless it reappears
 elsewhere with the same audio hash, which is a move: its row keeps its id and the plays that hang
-on it.
+on it. The playlists the walk finds are read when new or changed, and those gone taken out
+(playlists.refresh, R8.1.2).
 
 A partial scan (A2.4) does the same for the folders a watched change named (`Scope`): each named
 folder's own files, and the folders new under it, walked whole; the folders already known (walked
@@ -38,6 +39,7 @@ from . import (
     duplicates,
     encodings,
     folders,
+    playlists,
     ratings,
     rootfiles,
     search,
@@ -139,6 +141,7 @@ class Result:
     unreachable: set[str] = field(default_factory=set)
     held: list[str] = field(default_factory=list, repr=False)
     songs: int = 0
+    playlists: int = 0  # the playlists read, new or changed (R8.1.2)
 
 
 # ---------- walking ----------
@@ -177,6 +180,7 @@ def walk(
     reached: Reached | None = None,
     now: float | None = None,
     cues: dict[str, list[art.Image]] | None = None,
+    lists: dict[str, list[playlists.Found]] | None = None,
 ) -> Iterator[Seen]:
     """Every audio file under root (R2.2's kinds), skipping hidden files and folders, folders
     holding .musikataignore, the folders the settings skip (paths under the root), and the root's
@@ -185,7 +189,7 @@ def walk(
     are followed like folders; one leading back to a folder already walked is skipped, and the
     log says so (R2.3.2). `images`, when given, gets each folder walked (with no images: an empty
     list) and its images (R5.1's kinds), for its albums' covers; `cues`, likewise, its `.cue`
-    sheets, for an album in one file (A2.6).
+    sheets, for an album in one file (A2.6), and `lists` its playlists (R8.1.2).
 
     A partial scan (A2.4) walks from `start`, a folder under the root, and passes by the folders
     `known` under it; `tree`, when given, gets the folders walked and passed, and its real paths
@@ -220,6 +224,8 @@ def walk(
             images.setdefault(rel, [])
         if cues is not None:
             cues.setdefault(rel, [])
+        if lists is not None:
+            lists.setdefault(rel, [])
         for entry in entries:
             path = f"{rel}/{entry.name}" if rel else entry.name
             if now is not None and is_leftover(entry.name) and not entry.is_dir():
@@ -244,6 +250,10 @@ def walk(
                     if cues is not None:
                         st = entry.stat()
                         cues[rel].append(art.Image(entry.name, st.st_size, st.st_mtime_ns))
+                elif playlists.kind_of(entry.name) is not None:
+                    if lists is not None:
+                        st = entry.stat()
+                        lists[rel].append(playlists.Found(entry.name, st.st_size, st.st_mtime_ns))
                 elif _link(entry.path) and not os.path.exists(entry.path):
                     # a link to a folder whose drive isn't there: its songs are kept (R2.10)
                     tree.unreachable.add(path)
@@ -301,11 +311,12 @@ def walk_scope(
     reached: Reached | None = None,
     now: float | None = None,
     cues: dict[str, list[art.Image]] | None = None,
+    lists: dict[str, list[playlists.Found]] | None = None,
 ) -> Iterator[Seen]:
     """The audio files a partial scan sees (A2.4): each named folder's own files and those of the
     folders new under it, each named folder walked once, whether named or found new under another.
-    A named folder out of the library now (`outside`) is walked not at all. `reached`, `now` and
-    `cues`: as for `walk`."""
+    A named folder out of the library now (`outside`) is walked not at all. `reached`, `now`,
+    `cues` and `lists`: as for `walk`."""
     tree = tree if tree is not None else Tree()
     named = sorted(scope.folders)
     # the known folders count as walked (R2.3.2), but for the named ones, walked again here
@@ -319,7 +330,7 @@ def walk_scope(
             continue
         yield from walk(
             root, skip, images, start=folder, known=scope.known, tree=tree, reached=reached,
-            now=now, cues=cues,
+            now=now, cues=cues, lists=lists,
         )  # fmt: skip
     tree.passed -= set(tree.folders)
 
@@ -762,10 +773,12 @@ def scan(
         return Result(missing=True)
     now = (clock or SystemClock()).now().timestamp()
     cues: dict[str, list[art.Image]] = {}
+    lists: dict[str, list[playlists.Found]] = {}
     if scope is None:
-        seen = list(walk(root, skip, images, tree=tree, reached=reached, now=now, cues=cues))
+        seen = list(walk(root, skip, images, tree=tree, reached=reached, now=now, cues=cues,
+                         lists=lists))  # fmt: skip
     else:
-        seen = list(walk_scope(root, scope, skip, images, tree, reached, now, cues))
+        seen = list(walk_scope(root, scope, skip, images, tree, reached, now, cues, lists))
     attention.measure(root, images, attention.known_sizes(c))  # the covers' sizes (R5.6)
     rows = _rows(c, scope, tree)
     indexed = {p: (s, m) for p, s, m, _h in rows}
@@ -830,6 +843,12 @@ def scan(
     # the songs a .cue sheet beside them names: an album in one file (A2.6)
     found = attention.cued_in(root, cues, (s.path for s in seen))
     index.write(lambda c: attention.set_cues(c, set(cues), found)).result()
+
+    # the playlists under the root, those new or changed read (R8.1.2, R8.1.3)
+    def answered(folder: str) -> bool:
+        return scope is None or in_scope(folder, scope, tree)
+
+    total.playlists = playlists.refresh(root, index, lists, answered)[0]
     used = {hashes[p] for p in taken}
     total.copied = {h: p for h, p in copies.items() if h not in used and p not in gone}
     if scope is None:

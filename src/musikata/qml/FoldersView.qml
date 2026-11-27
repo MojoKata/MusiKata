@@ -26,6 +26,7 @@ Item {
     id: view
     required property var library
     required property var player
+    property var playlists: null  // Add to playlist and New playlist from selection (R8)
     property var edit: null
     property var art: null      // the Album art dialog's bridge (R5.2)
     property var infer: null    // Infer from path's dialog (R3)
@@ -472,12 +473,15 @@ Item {
         return out
     }
 
-    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer }
+    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer; playlists: view.playlists; playlistList: view.library.playlists }
 
     SelectionBar {
         objectName: "selectionBar"
         text: view.folders.selectionText
         laterActions: view.folders.laterActions
+        playlists: view.playlists
+        playlistList: view.library.playlists
+        songs: view.rowsModel
         editing: view.edit !== null && view.edit.opened
         onAct: (action) => {
             if (action === "edit")

@@ -1,8 +1,8 @@
 import QtQuick
 import "."
 
-// A mosaic of up to four covers (R5.8's table, laid out by models.mosaic): an artist's tile. With
-// no cover at all, the dashed tile, with the artist's icon.
+// A mosaic of up to four covers (R5.8's table, laid out by models.mosaic): an artist's tile, a
+// playlist's (R8.2). With no cover at all, the dashed tile, with the artist's icon or `emptyIcon`.
 Item {
     id: mosaic
     property var tiles: []            // [{source, x, y, w, h}], from Python
@@ -10,6 +10,7 @@ Item {
     property real radius: 10
     property color matte: Theme.bg
     property int sourceSide: 256
+    property string emptyIcon: "artist"  // the dashed tile's icon: an artist's, or a playlist's
     readonly property bool loading: {
         for (let i = 0; i < pieces.count; i++)
             if (pieces.itemAt(i) && pieces.itemAt(i).loading) return true
@@ -41,7 +42,7 @@ Item {
         anchors.fill: parent
         visible: mosaic.tiles.length === 0
         emptyText: qsTr("No art")
-        emptyIcon: "artist"
+        emptyIcon: mosaic.emptyIcon
         radius: mosaic.radius
     }
 }

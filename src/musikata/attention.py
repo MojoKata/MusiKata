@@ -72,6 +72,7 @@ from .encodings import FixEncoding
 from .history import LABELS, NAMES, ChangeHistory
 from .infer import InferFromPath
 from .models import SHORT, Searcher, cover_url, plural, time_text
+from .playlists import Playlists
 from .preview import Preview, failed_text, footer_text, progress_text, save_text
 
 log = logging.getLogger(__name__)
@@ -122,6 +123,9 @@ GROUPS = (
     Group("albums", "Albums that differ", "AN ALBUM WHOSE SONGS DIFFER",
           "Edit tags gives its songs one value; Album art gives them one cover.",
           (attention.ALBUM_DIFFERS,), "album"),
+    Group("playlists", "Missing from playlists", "PLAYLIST ENTRIES WHOSE FILE IS MISSING",
+          "Find looks under your music folder for the file by its name and its tags; choosing"
+          " one fixes the entry.", (attention.MISSING,), "song"),
     Group("unreadable", "Files that couldn't be read", "FILES THAT COULDN'T BE READ",
           "Each with why; Show in folder opens it where it is.", (attention.UNREADABLE,), "file"),
 )  # fmt: skip
@@ -137,7 +141,7 @@ CHIPS = (
     ("names", "Names", ("names",)),
     ("encoding", "Wrong encoding", ("encoding",)),
     ("one-file", "Album in one file", ("one-file",)),
-    ("other", "Other", ("albums", "unreadable")),
+    ("other", "Other", ("albums", "playlists", "unreadable")),
 )
 FIELD_LABELS = {"album": "Album", "albumartist": "Album artist", "year": "Year", "genre": "Genre",
                 "cover": "Cover", "track": "Track"}  # fmt: skip
@@ -215,6 +219,10 @@ def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dic
         detail = f"{who} · {time_text(e.length)} in one file, with {e.cue}"
         actions = []
         icon = "file"
+    elif e.kind == attention.MISSING:
+        detail = missing_detail(e)
+        actions = [_action("find", "Find…")]
+        icon = "playlist"
     else:
         detail = e.error
         actions = [_action("folder", "Show in folder")]
@@ -237,6 +245,13 @@ def path_detail(e: Entry) -> str:
     fields = and_text([FIELD_LABELS.get(f, LABELS.get(f, f)) for f in e.fields])
     parts = [where, f"{differing:,} of {plural(files, 'file')}" if files else "", fields]
     return " · ".join(p for p in parts if p)
+
+
+def missing_detail(e: Entry) -> str:
+    """What a playlist's missing entry says (R8.7): the playlist, and the place it names: In Road
+    Trip · ../Lumen Drift/Tide Tables/10 - Slack Tide.flac; twice when it names it twice."""
+    times = f" ({e.counts[0]:,} times)" if e.counts and e.counts[0] > 1 else ""
+    return f"In {e.artist}{times} · {e.key}"
 
 
 def short_of(e: Entry) -> str:
@@ -938,7 +953,8 @@ class Attention(QObject):
     tags panel, musikata.edittags), Album art on `art` (musikata.albumart), Merge on `genres`
     (musikata.genres) or `names` (`NameMerge`), Review… on `copies` (musikata.duplicates' dialog,
     R2.12), Fix encoding… on `encoding` (musikata.encodings' dialog, R4.10), Infer from path on
-    `infer` (musikata.infer's, R3), Show in folder through `reveal` (a command, or the folder
+    `infer` (musikata.infer's, R3), Find on `playlists` (musikata.playlists' dialog, R8.7), Show
+    in folder through `reveal` (a command, or the folder
     opened by `open_folder`), and Ignore. A dismissal is written into the root's
     ignored.json (read again and merged first) and the index on `executor` (its own thread when
     None) at `clock`'s time, or the index only when `.musikata` can't be written (R1.5.2); the
@@ -963,6 +979,7 @@ class Attention(QObject):
         copies: Duplicates | None = None,
         encoding: FixEncoding | None = None,
         infer: InferFromPath | None = None,
+        playlists: Playlists | None = None,
         watching: bool = True,
         executor: Executor | None = None,
         reveal: Callable[[str], list[str] | None] | None = None,
@@ -974,7 +991,7 @@ class Attention(QObject):
         self._root, self._index, self._model, self._clock = root, index, model, clock
         self._edit, self._art, self._genres, self._names = edit, art, genres, names
         self._history, self._copies, self._encoding = history, copies, encoding
-        self._infer = infer
+        self._infer, self._playlists = infer, playlists
         self._watching = watching
         self._executor = executor
         self._reveal = reveal or (lambda p: reveal_command(p, sys.platform, shutil.which))
@@ -1042,7 +1059,8 @@ class Attention(QObject):
     @Slot(int, str)
     def act(self, row: int, action: str) -> None:
         """An entry's action (row `row` of the list): "edit", "art", "merge", "review", "fix",
-        "infer", "folder" or "ignore"; or a group's (its line's row): "fix", on its first entry."""
+        "infer", "find", "folder" or "ignore"; or a group's (its line's row): "fix", on its first
+        entry."""
         e = self._model.entry_at(row)
         if e is None:
             first = self._model.first_of(row)
@@ -1065,9 +1083,11 @@ class Attention(QObject):
             self._encoding.open(e)
         elif action == "infer" and self._infer is not None:
             self._infer.open(e)
+        elif action == "find" and self._playlists is not None:
+            self._playlists.find_entry(e)
         elif action == "folder":
             self.show_in_folder(scanner.full_path(self._root, e.about))
-        elif action not in ("edit", "art", "merge", "review", "fix", "infer"):
+        elif action not in ("edit", "art", "merge", "review", "fix", "infer", "find"):
             raise ValueError(f"no such action: {action}")
 
     def show_in_folder(self, path: str) -> None:

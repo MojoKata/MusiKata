@@ -231,6 +231,9 @@ class Library:
     songs: list[Song]
     covers: dict[str, tuple[int, int]]  # folder -> (seed, size) of its cover.jpg
     playlists: dict[str, list[str]]  # path -> entries, as written
+    # path -> how a playlist is written, when not as MusiKata writes one: its encoding (a BOM as
+    # "utf-8-sig") and its line ends (R8.1.2's shapes)
+    playlist_forms: dict[str, tuple[str, str]] = field(default_factory=dict)
     # folder -> its other images: (name, seed, size), a PNG (T02's back.png, R5.2)
     images: dict[str, list[tuple[str, int, int]]] = field(default_factory=dict)
     cues: dict[str, str] = field(default_factory=dict)  # path -> a .cue sheet's text (A2.6)
@@ -385,20 +388,53 @@ def plan(seed: int = 1) -> Library:
             seconds=2.0,
         )
     )
-    lib.playlists["Playlists/Road Trip.m3u8"] = [
-        "#EXTM3U",
-        "../Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.flac",
-        "../Kestrel Union/2022 - Low Orbit/01 - "
-        + lib.songs[
-            [s.path for s in lib.songs].index(
-                next(s.path for s in lib.songs if s.path.startswith("Kestrel Union/"))
-            )
-        ].tags["title"]
-        + ".mp3",
-        "../Lumen Drift/Tide Tables/10 - Slack Tide.flac",  # missing: Needs attention's Find (R8.7)
-    ]
+    _playlists(lib)
     _apart(lib, {SIGNAL_COPY})
     return lib
+
+
+def _playlists(lib: Library) -> None:
+    """The playlists of P01-playlist-drag (R8): Road Trip as MusiKata writes one (R8.1), its songs
+    as the mockup orders them and one missing, which Needs attention's Find looks for (R8.7);
+    Evening Focus as a Windows player writes one (a BOM, CRLF, `\\`, no #EXTINF); Rainy Day an
+    `.m3u` in Windows' Western encoding with CRLF, naming the album whose tags are in the wrong
+    encoding by its folder."""
+    paths = [s.path for s in lib.songs]
+
+    def song(album: str, n: int = 1) -> Song:
+        found = [s for s in lib.songs if s.tags and s.tags.get("album") == album]
+        return next(s for s in found if s.tags and s.tags.get("track") == n)
+
+    def extinf(s: Song) -> str:
+        tags = s.tags or {}
+        return f"#EXTINF:{round(s.seconds or 1)},{tags.get('artist')} - {tags.get('title')}"
+
+    road = [
+        song("Northbound Static"), song("Breakwater"), song("Low Orbit"), song("Afterlight"),
+        song("Glass Harbor", 4), song("Paper Moons"), song("Velvet Hours"),
+        song("Northbound Static", 2), song("Quiet Acres", 3), song("Neon Fieldwork", 5),
+    ]  # fmt: skip
+    lines = ["#EXTM3U"]
+    for s in road:
+        lines += [extinf(s), "../" + s.path]
+    # missing: Needs attention's Find (R8.7)
+    lines += [
+        "#EXTINF:-1,Lumen Drift - Slack Tide",
+        "../Lumen Drift/Tide Tables/10 - Slack Tide.flac",
+    ]
+    lib.playlists["Playlists/Road Trip.m3u8"] = lines
+    evening = [song("Spore Theory", n) for n in range(1, 5)] + [
+        song("Blue Hour Sessions", n) for n in range(1, 4)
+    ]
+    rel = "Playlists/Evening Focus.m3u8"
+    lib.playlists[rel] = ["..\\" + s.path.replace("/", "\\") for s in evening]
+    lib.playlist_forms[rel] = ("utf-8-sig", "\r\n")
+    rainy = [p for p in paths if p.startswith("Ñåâåðíûé Âåòåð/")][:5] + [
+        p for p in paths if p.startswith("Mara Okafor/Kindling/")
+    ][:4]
+    rel = "Playlists/Rainy Day.m3u"
+    lib.playlists[rel] = ["#EXTM3U", *("../" + p for p in rainy)]
+    lib.playlist_forms[rel] = ("cp1252", "\r\n")
 
 
 def _apart(lib: Library, copies: set[str]) -> None:
@@ -773,8 +809,9 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
     for rel, lines in lib.playlists.items():
         path = os.path.join(music, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        encoding, end = lib.playlist_forms.get(rel, ("utf-8", "\n"))
+        with open(path, "w", encoding=encoding, newline="") as f:
+            f.write(end.join(lines) + end)
     history(music, lib)
     root_settings(music)
     return lib

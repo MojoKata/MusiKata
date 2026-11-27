@@ -12,11 +12,13 @@ import "."
 // the selection from its first song, the rest of the list after it the queue (R7.1); a right click
 // opens the menu, Play next and Add to queue, for the selection when the row is in it (R7.2); the
 // selection bar counts it and offers Play next and Edit tags, which the menu and Ctrl+E open too (R4.2),
-// and Infer from path (R3.1), which the menu has too.
+// Infer from path (R3.1), which the menu has too, and Add to playlist (R8), which the menu has too
+// with New playlist from selection (R8.3).
 Item {
     id: view
     required property var library
     required property var player
+    property var playlists: null  // Add to playlist and New playlist from selection (R8)
     property var edit: null
     property var infer: null    // Infer from path's dialog (R3)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
@@ -140,7 +142,7 @@ Item {
             }
             ScrollBar.vertical: ScrollBar { }
         }
-        SongMenu { id: songMenu; player: view.player; edit: view.edit; infer: view.infer }
+        SongMenu { id: songMenu; player: view.player; edit: view.edit; infer: view.infer; playlists: view.playlists; playlistList: view.library.playlists }
         Connections {
             target: view.songs
             // once the list has taken its rows: a search's come with the selection it waited for
@@ -152,6 +154,9 @@ Item {
             playLabel: qsTr("Play next")
             playObjectName: "playNextSelection"
             laterActions: view.songs.laterActions
+            playlists: view.playlists
+            playlistList: view.library.playlists
+            songs: view.songs
             editing: view.edit !== null && view.edit.opened
             onAct: (action) => {
                 if (action === "edit")

@@ -250,7 +250,7 @@ def test_an_index_of_slice_6_gains_tags_match_path_and_its_songs_are_read_again(
     c.execute("PRAGMA user_version = 10")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
     c.execute("INSERT INTO folder (path, name, name_key, fold) VALUES ('', '', '', '')")
-    assert db.migrate(c) == len(db.MIGRATIONS) == 11
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT mtime_ns, path_state, path_diff FROM song").fetchall() == [
         (-1, None, None)
     ]
@@ -260,4 +260,39 @@ def test_an_index_of_slice_6_gains_tags_match_path_and_its_songs_are_read_again(
         "EXPLAIN QUERY PLAN SELECT id FROM song WHERE path_diff IS NOT NULL ORDER BY folder"
     ).fetchall()
     assert any("song_path_diff" in str(row) for row in plan)
+    c.close()
+
+
+@pytest.mark.slow
+def test_an_index_of_slice_7_1_gains_the_playlists_and_reads_nothing_again(tmp_path):
+    """Version 12 (R8, A2.1): the playlist and playlist_entry tables, filled by the next scan, so
+    no song is read again; an entry is found by its playlist in order, and by the path it
+    resolves to (a song's, R8.7), each through an index of its own; a playlist's entries go with
+    it."""
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:11]:
+        step(c)
+    c.execute("PRAGMA user_version = 11")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
+    assert db.migrate(c) == len(db.MIGRATIONS) == 12
+    assert c.execute("SELECT mtime_ns FROM song").fetchall() == [(5,)]
+    c.execute(
+        "INSERT INTO playlist (path, name, name_key, kind, size, mtime_ns, encoding)"
+        " VALUES ('Playlists/A.m3u8', 'A', 'a', 'm3u8', 1, 1, 'utf-8')"
+    )
+    c.execute(
+        "INSERT INTO playlist_entry (playlist_id, position, written, path) VALUES (1, 0,"
+        " '../a.mp3', 'a.mp3')"
+    )
+    for sql, index in (
+        ("SELECT id FROM playlist_entry WHERE playlist_id = 1 ORDER BY position",
+         "playlist_entry_order"),
+        ("SELECT id FROM playlist_entry WHERE path = 'a.mp3'", "playlist_entry_path"),
+        ("SELECT id FROM playlist ORDER BY name_key, path", "playlist_order"),
+    ):  # fmt: skip
+        plan = c.execute(f"EXPLAIN QUERY PLAN {sql}").fetchall()
+        assert any(index in str(row) for row in plan), (sql, plan)
+    c.execute("DELETE FROM playlist")
+    assert c.execute("SELECT COUNT(*) FROM playlist_entry").fetchone() == (0,)
     c.close()

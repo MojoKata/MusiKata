@@ -31,6 +31,7 @@ from shiboken6 import Shiboken
 
 from musikata_core import __version__, db, history, nowplaying, rootfiles, roots, settings, workers
 from musikata_core import folders as index_folders
+from musikata_core import playlists as index_playlists
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 from musikata_core.ratings import Writing, set_everything
@@ -48,6 +49,7 @@ from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
+from .playlists import Playlists
 from .plays import PlayCounts
 from .ratings import Ratings, file_writer
 
@@ -161,6 +163,7 @@ class Shell:
     copies: Duplicates | None = None
     encodings: FixEncoding | None = None
     infer: InferFromPath | None = None
+    playlists: Playlists | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -170,7 +173,7 @@ class Shell:
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
-            self.copies, self.encodings, self.infer,
+            self.copies, self.encodings, self.infer, self.playlists,
         )  # fmt: skip
 
 
@@ -190,10 +193,12 @@ def close_bridges(
     copies: Duplicates | None = None,
     encodings: FixEncoding | None = None,
     infer: InferFromPath | None = None,
+    playlists: Playlists | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's, Album art's, the merges', Fix encoding…'s and Infer
-    from path's saves (stopped before their next file) and threads, Needs attention's dismissals
+    from path's saves (stopped before their next file) and threads, the playlists' changes (an
+    export stopped), Needs attention's dismissals
     and watching, the ratings' save and watching, the play counts (their file written), the change
     history's thread, the watcher, the scan's thread and the worker processes, and the index; then
     deletes them (`release`)."""
@@ -214,6 +219,8 @@ def close_bridges(
         encodings.shut()
     if infer is not None:
         infer.shut()
+    if playlists is not None:
+        playlists.shut()
     if attention is not None:
         attention.close()
     if ratings is not None:
@@ -225,8 +232,8 @@ def close_bridges(
     library.close()
     index.close()
     release(
-        controls, counts, edit, art, genres, names, copies, encodings, infer, attention, ratings,
-        changes, player, library,
+        controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, attention,
+        ratings, changes, player, library,
     )  # fmt: skip
 
 
@@ -331,9 +338,17 @@ def load(
     library.reloaded.connect(genre_tools.refresh)  # R9.5's banner, after a scan or a save
     genre_tools.refresh()
     changes.plays = plays_back(counts.change if counts is not None else None, make)  # R2.12
+    # playlists (R8): made in the root's playlists folder (R13.6), changed through the store
+    store = index_playlists.Store(
+        root, index, settings.root_playlists(root) if not missing else index_playlists.FOLDER
+    )
+    lists = Playlists(
+        store, library, index.read, say=changes.say,
+        available=lambda: bool(library.property("available")), home=home_of(env),
+    )  # fmt: skip
     needs, names, copies = attend(
         library, root, index, clock, edit, album_art, genre_tools, writing, changes, tags_settings,
-        missing, counts, fix, infer,
+        missing, counts, fix, infer, lists, store,
     )  # fmt: skip
     engine.setInitialProperties(
         {
@@ -349,6 +364,7 @@ def load(
             "copies": copies,
             "encodings": fix,
             "infer": infer,
+            "playlists": lists,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -358,14 +374,14 @@ def load(
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
                       art=album_art, genres=genre_tools, attention=needs, names=names,
-                      copies=copies, encodings=fix, infer=infer)  # fmt: skip
+                      copies=copies, encodings=fix, infer=infer, playlists=lists)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
     window.activeChanged.connect(lambda: library.window_active(window.isActive()))
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
-        changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer,
+        changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
     )  # fmt: skip
 
 
@@ -384,13 +400,16 @@ def attend(
     counts: PlayCounts | None = None,
     fix: FixEncoding | None = None,
     infer: InferFromPath | None = None,
+    lists: Playlists | None = None,
+    store: index_playlists.Store | None = None,
 ) -> tuple[Attention, NameMerge, Duplicates]:
     """Needs attention (R2.8): its list (Library's) told the genres the user has said are the
     same (R9.5); its actions on the Edit tags panel, Album art, the genres' merge and the merge of
     an artist's or an album's names (saved by `writing`, kept in `changes`), and Review… and Move
     the others to the trash for the same song more than once (R2.12: the kept copy's rating
     written by `writing`, its plays given on `counts`' rows, kept in `changes`), and Fix
-    encoding… on `fix` (R4.10), and Infer from path on `infer` (R3); the root's
+    encoding… on `fix` (R4.10), Infer from path on `infer` (R3), and Find on `lists` (R8.7), the
+    playlists naming a copy moved pointed at the copy kept through `store` (R2.12); the root's
     ignored.json read into the index, off the GUI thread, and again when another computer changes
     it (A2.8). A root that isn't there (R2.10) lists what the index has."""
     model = library.property("attention")
@@ -403,10 +422,11 @@ def attend(
         root, model, writing, remover(root, index), changes,
         plays=counts.change if counts is not None else None, done=library.reload,
         saved=library.saved, available=lambda: bool(library.property("available")),
+        repoint=store.repoint if store is not None else None,
     )  # fmt: skip
     needs = Attention(root, index, model, clock, edit=edit, art=art, genres=genres, names=names,
                       history=changes, copies=copies, encoding=fix, infer=infer,
-                      watching=not missing)  # fmt: skip
+                      playlists=lists, watching=not missing)  # fmt: skip
     if not missing:
         needs.start()
     else:

@@ -123,11 +123,10 @@ SONG_COLUMNS = (
 )
 
 
-# the selection bar's actions after Play next (L03-songs-bulk-edit): Edit tags (R4.2) and Infer
-# from path (R3.1), by their `action`, and those that come with later slices, with what their
-# tooltips say
+# the selection bar's actions after Play next (L03-songs-bulk-edit): Add to playlist (its menu of
+# the playlists, R8), Edit tags (R4.2) and Infer from path (R3.1), by their `action`
 SONG_LATER = [
-    {"label": "Add to playlist", "icon": "plus", "later": "Playlists come in a later version"},
+    {"label": "Add to playlist", "icon": "plus", "later": "", "action": "playlist"},
     {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"},
     {"label": "Infer from path", "icon": "wand", "later": "", "action": "infer"},
 ]
@@ -614,7 +613,7 @@ class SongsModel(PagedModel):
     plays (R7.1), the right-click menu queues (R7.2) and the Edit tags panel and ratings act on
     (R4.2, R10)."""
 
-    roles = (*COLUMNS, "playing", "selected", "current")
+    roles: tuple[str, ...] = (*COLUMNS, "playing", "selected", "current")
     key = "song.id"
     selectionChanged = Signal()
     revealRow = Signal(int)  # a selection the tour made: its first row, for the view to show

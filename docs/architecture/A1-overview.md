@@ -136,7 +136,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.genres` | tags | Genres (R9): a genre's tile, the names that look like one genre (case, accents, spacing and punctuation aside, and the user's own), renaming and merging as plans the preview shows, the built-in genre list |
 | `musikata_core.lyrics` | tags | LRC, and lyrics in files and tags (R17, A7.6) |
 | `musikata_core.patterns` | files | Path patterns, both ways (A3.3, R3, R12.1) |
-| `musikata_core.playlists` | files | M3U and M3U8, smart playlists (R8) |
+| `musikata_core.playlists` | files | M3U and M3U8 (R8): read in every shape R8.1.2 names and written as R8.1 says, where an entry is, the index's playlists kept by the scan, Find's matching, Export's plan and its copies, the store that makes MusiKata's changes and points playlists at files moved; smart playlists (R8.9) |
 | `musikata_core.organize` | files | Moving and renaming files, removing songs to the trash (R12, R2.11) |
 | `musikata_core.history` | files | The change history and Undo (A3.5, R4.9) |
 | `musikata_core.audio` | playback | `decode`, `join`, `seam`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream`, `played` (when a song counts as played, R7.9) (A4, R7, R19) |
@@ -164,6 +164,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.preview` | app | The preview of a change to many files' tags before it is saved: each file's old and new values, its checkbox, the footer and Save (R3.7, R3.8; the bulk tools', and Infer from path's) |
 | `musikata.history` | app | The change history in the running app: the entries read and watched, the Change history panel, Ctrl+Z, R4.9.1's question and the message that follows a save, with Undo (R4.9, R6.7) |
 | `musikata.ratings` | app | Ratings in the running app: a star clicked in a list or the now-playing bar, and Ctrl+0 to Ctrl+5 on the selection, saved through the batch and the change history, shown at once and put back when the save fails; the root's `ratings.json` watched and read again (R10.2, R10.3) |
+| `musikata.playlists` | app | Playlists in the running app: the sidebar's list, a playlist's page and its entries, + and New playlist from selection, Add to playlist, renaming, duplicating and deleting, removing entries, Find and Export…, each through the store off the GUI thread (R8, R6.3) |
 | `musikata.plays` | app | Play counts in the running app: the player's plays kept, the other computers' play files watched and read again (R7.9, A2.8) |
 | `musikata.media` | app | The system's media controls (A4.5): `MediaControls` over the Player bridge, `controls` (what the system is told and what its commands do, without Qt), and the backends `mpris`, `smtc` and `nowplaying_mac` |
 | `musikata.tour` | app | The tour (A1.6) |

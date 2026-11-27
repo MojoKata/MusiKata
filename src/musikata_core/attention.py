@@ -28,10 +28,14 @@ What each group holds:
   paths, or are missing where the paths give them, under the pattern detected for it
   (`song.path_diff`, kept by the scan, folders.match_folder), an entry each, about the folder, with
   how many of its files differ and the fields they differ in.
+- **Playlist entries whose file is missing** (`MISSING`, R8.7): an entry of a playlist that no
+  song of the library is at (outside the root, or not there), an entry each for the place it names
+  in each playlist, about the playlist and that place (`missing_about`), with the playlist's
+  modification time.
 - **Files that couldn't be read** (`UNREADABLE`): `song.error`.
 
-The groups owned by later pieces (playlist entries whose file is missing, R8.7; files whose tags
-say nothing, R16.6) join `KINDS` with their own finders.
+The group owned by a later piece (files whose tags say nothing, R16.6) joins `KINDS` with its own
+finder.
 
 **Ignore** (R2.8): an entry the user dismisses is kept in the root's `ignored.json`
 (rootfiles.Dismissal, A2.8) by its kind and what it is about (a song by its path and audio hash, an
@@ -70,14 +74,17 @@ UNREADABLE = "unreadable"
 COPIES = "same-song"  # R2.12
 ENCODING = "wrong-encoding"  # R4.10
 PATH = "path-differs"  # R3.9
+MISSING = "playlist-missing"  # R8.7
 # every kind this piece finds, in the order the view lists them
 KINDS = (PATH, COPIES, COVER_NONE, COVER_SMALL, NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE, ENCODING,
-         ALBUM_DIFFERS, ONE_FILE, UNREADABLE)  # fmt: skip
+         ALBUM_DIFFERS, ONE_FILE, MISSING, UNREADABLE)  # fmt: skip
 NAMES = (NAMES_ARTIST, NAMES_ALBUM, NAMES_GENRE)
 # kinds about a song (a group of copies: its first by path): dismissed by its path and audio hash
 BY_SONG = (ONE_FILE, UNREADABLE, COPIES, ENCODING)
 # kinds about an album or a folder: by the folder ("." for the root's own)
 BY_ALBUM = (ALBUM_DIFFERS, COVER_NONE, COVER_SMALL, PATH)
+# kinds about a playlist's entry: by the playlist and the place it names, and its file's time
+BY_PLAYLIST = (MISSING,)
 FIELDS = ("album", "albumartist", "year", "genre", "cover")  # what an album's songs differ in
 MIN_SIDE = 500  # R5.6: a cover smaller than this a side needs attention
 ONE_FILE_LENGTH = 20 * 60.0  # A2.6: an album in one file is 20 minutes or more
@@ -616,6 +623,38 @@ def _paths(c: sqlite3.Connection) -> list[Entry]:
     return out
 
 
+def missing_about(playlist: str, written: str) -> str:
+    """What a missing entry (R8.7) is about, as Ignore keeps it: the playlist's path under the
+    root and the place its entry names, as written, a tab between them."""
+    return f"{playlist}\t{written}"
+
+
+def missing_of(about: str) -> tuple[str, str]:
+    """The playlist and the place a missing entry is about (`missing_about` the other way)."""
+    playlist, _, written = about.partition("\t")
+    return playlist, written
+
+
+def _missing(c: sqlite3.Connection) -> list[Entry]:
+    """Playlist entries whose file is missing (R8.7, R2.8): those no song is at, by playlist and
+    the place they name, in the playlists' order: each titled by its #EXTINF, else its file's name,
+    the playlist's name as its `artist`, the place it names as its `key`, the path under the root
+    it resolves to (if any) as its `error`, and how many entries of it name that place."""
+    out = []
+    for path, name, mtime, written, under, title, n in c.execute(
+        "SELECT playlist.path, playlist.name, playlist.mtime_ns, e.written, MIN(e.path),"
+        " MAX(e.title), COUNT(*) FROM playlist_entry AS e JOIN playlist ON playlist.id ="
+        " e.playlist_id WHERE NOT EXISTS (SELECT 1 FROM song WHERE song.path = e.path)"
+        " GROUP BY playlist.id, e.written ORDER BY playlist.name_key, playlist.path,"
+        " MIN(e.position)"
+    ):
+        shown = title or os.path.splitext(str(written).replace("\\", "/").rpartition("/")[2])[0]
+        out.append(Entry(MISSING, missing_about(path, written), shown, name, key=written,
+                         error=under or "", counts=(int(n),),
+                         modified=_seconds(mtime)))  # fmt: skip
+    return out
+
+
 def _unreadable(c: sqlite3.Connection) -> list[Entry]:
     return [
         Entry(UNREADABLE, path, path, song=i, error=error, hash=h, modified=_seconds(m))
@@ -644,6 +683,7 @@ def found(
         ENCODING: _encoding(c),
         ALBUM_DIFFERS: _albums_differ(c),
         ONE_FILE: _one_file(c),
+        MISSING: _missing(c),
         UNREADABLE: _unreadable(c),
     }
     return [e for kind in KINDS for e in by_kind[kind]]
@@ -655,7 +695,7 @@ def found(
 def dismissal_of(entry: Entry, changed: str) -> Dismissal:
     """What Ignore keeps of `entry` (rootfiles.Dismissal), dismissed at `changed`: its kind, what
     it is about, and for a song or an album, its audio hash and the file's modification time."""
-    keeps_file = entry.kind in BY_SONG or entry.kind in BY_ALBUM
+    keeps_file = entry.kind in BY_SONG or entry.kind in BY_ALBUM or entry.kind in BY_PLAYLIST
     return Dismissal(
         entry.kind, entry.about, entry.hash if entry.kind in BY_SONG else None,
         entry.modified if keeps_file else None, changed,

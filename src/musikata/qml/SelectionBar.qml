@@ -5,9 +5,10 @@ import "."
 // The selection bar (R2.9.6, L06-folders-cards; L03-songs-bulk-edit): what is selected, "2 folders ·
 // 21 songs selected", "4 selected"; its first action, Play in Folders (the songs selected, from the
 // first, R7.1) or Play next in Songs (R7.2); Edit tags (R4.2) and Infer from path (R3.1), said by
-// `act`, Edit tags left out while the panel already edits the selection (`editing`); the actions of
-// later slices (Add to playlist, Organize…) faded, saying so in their tooltips, those that don't fit
-// left out from the last (L07-folders-list, the panel open beside it); and ✕, which clears it.
+// `act`, Edit tags left out while the panel already edits the selection (`editing`); Add to
+// playlist, its menu of the playlists over the bar when the view gives it `playlists` (R8); the
+// actions of later slices (Organize…) faded, saying so in their tooltips, those that don't fit left
+// out from the last (L07-folders-list, the panel open beside it); and ✕, which clears it.
 Rectangle {
     id: bar
     signal play()
@@ -18,6 +19,9 @@ Rectangle {
     property string playObjectName: "playSelection"
     property var laterActions: []
     property bool editing: false       // the Edit tags panel is open
+    property var playlists: null       // Add to playlist's bridge (musikata.playlists), and
+    property var playlistList: null    // the playlists its menu lists (library.playlists),
+    property var songs: null           // for the songs this list has selected
     readonly property real room: (parent ? parent.width - 32 : 100000) - 32
     // how many of `laterActions` fit, in order: the rest are left out
     readonly property int fits: {
@@ -103,6 +107,7 @@ Rectangle {
             id: actions
             model: bar.laterActions
             Action {
+                id: barAction
                 required property var modelData
                 required property int index
                 readonly property bool byEdit: modelData.action === "edit" && bar.editing
@@ -111,7 +116,12 @@ Rectangle {
                 label: modelData.label
                 icon: modelData.icon
                 later: modelData.later
-                onClicked: bar.act(modelData.action || "")
+                onClicked: {
+                    if (modelData.action === "playlist" && bar.playlists !== null)
+                        addMenu.openFor(bar.songs, -1, barAction, 0, -addMenu.implicitHeight - 6)
+                    else
+                        bar.act(modelData.action || "")
+                }
             }
         }
         Rectangle {
@@ -128,5 +138,11 @@ Rectangle {
             TapHandler { onTapped: bar.clear() }
             Icon { anchors.centerIn: parent; name: "close"; size: 14; color: Theme.muted }
         }
+    }
+    AddToPlaylistMenu {
+        id: addMenu
+        objectName: "addToPlaylistMenu"
+        playlists: bar.playlists
+        list: bar.playlistList
     }
 }
