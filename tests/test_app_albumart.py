@@ -12,6 +12,7 @@ choice, and a save not kept in the history can't be taken back."""
 
 import os
 import shutil
+import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -126,6 +127,45 @@ def test_transparency_is_laid_on_white_in_cover_jpg(qapp):
 def test_an_image_that_cant_be_used_is_prepared_with_why_never_an_error(qapp, data, why):
     ready = prepare(data if data is not None else image(8, 8))
     assert ready.forms is None and ready.thumb.isNull() and ready.problem.startswith(why)
+
+
+# The dialog's thread decodes while a cover is decoded on another thread holding the GIL, as
+# QML's pixmap reader does in covers.Covers (QImage.fromData keeps the GIL while it decodes):
+# Qt's reader takes a mutex of its own to find the image's handler, so a decode there that
+# called into Python (a Python-made QBuffer's methods take the GIL) waited on the GIL while the
+# other waited on that mutex, and neither ever ran again. In a process of its own, as a deadlock
+# can't be ended from inside it.
+CROSSED = """
+import sys, threading
+from PySide6.QtGui import QGuiApplication
+from musikata import albumart, covers
+app = QGuiApplication([])
+data = open(sys.argv[1], "rb").read()
+inside = threading.Event()
+def dialog():
+    inside.set()
+    albumart.decode(data)
+reading = threading.Thread(target=dialog)
+reading.start()
+inside.wait()
+sum(range(4_000_000))  # the GIL held in one C call, as while the dialog's thread is inside Qt
+covers.thumbnail(data, 256)
+reading.join()
+"""
+
+
+@pytest.mark.slow
+def test_an_image_decoded_while_a_cover_is_decoded_on_another_thread_never_deadlocks(tmp_path):
+    path = tmp_path / "cover.png"
+    path.write_bytes(image(64, 64))
+    src = os.pathsep.join(p for p in (os.path.join(ROOT, "src"), os.environ.get("PYTHONPATH")) if p)
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PYTHONPATH=src)
+    try:
+        done = subprocess.run([sys.executable, "-c", CROSSED, str(path)], env=env,
+                              capture_output=True, text=True, timeout=30)  # fmt: skip
+    except subprocess.TimeoutExpired:
+        pytest.fail("the two decodes deadlocked")
+    assert done.returncode == 0, done.stderr
 
 
 def test_a_prepared_images_thumbnail_is_small_and_a_small_one_stays_as_it_is(qapp):

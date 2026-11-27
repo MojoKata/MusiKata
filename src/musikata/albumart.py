@@ -33,7 +33,7 @@ from typing import Any
 
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QObject, QSize, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QImageReader, QPainter
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter
 from PySide6.QtQuick import QQuickImageProvider
 
 from musikata_core import art, scanner
@@ -73,14 +73,14 @@ class ArtError(Exception):
 
 
 def decode(data: bytes) -> QImage:
-    """`data` decoded; ArtError when Qt can't, the bytes damaged or cut short."""
-    buffer = QBuffer()
-    buffer.setData(data)
-    buffer.open(QIODevice.OpenModeFlag.ReadOnly)
-    reader = QImageReader(buffer)
-    image = reader.read()
+    """`data` decoded; ArtError when Qt can't, the bytes damaged or cut short. From the bytes
+    with QImage.fromData, never a QImageReader on a QBuffer made here: Qt's reader holds a mutex
+    while it finds the handler, and calls on a Python-made device take the GIL, which a cover
+    decoding on QML's pixmap reader (covers.thumbnail) holds while it waits on that mutex: a
+    deadlock (coding.md, "Threads and processes")."""
+    image = QImage.fromData(data)
     if image.isNull():
-        raise ArtError(f"it can't be decoded ({reader.errorString()}): the file is damaged")
+        raise ArtError("it can't be decoded: the file is damaged")
     return image
 
 
