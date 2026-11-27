@@ -5,6 +5,7 @@ what MusiKata writes (docs/process/testing.md, "Shapes", `tags`)."""
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 
@@ -120,13 +121,14 @@ def popm_rating(popms: Sequence[tuple[str, int]]) -> int | None:
 
 def vorbis_rating(rating: str | None, fmps: str | None) -> int | None:
     """RATING as stars when 5 or less and as hundredths when more; FMPS_RATING as 0.0 to 1.0;
-    RATING wins when both are there (R10.4.2)."""
+    RATING wins when both are there (R10.4.2). What float reads that isn't a number of stars
+    ("inf", "nan") is no rating."""
     for value, scale in ((rating, None), (fmps, 5.0)):
         try:
             x = float((value or "").strip().replace(",", "."))
         except ValueError:
             continue
-        if x < 0:
+        if not math.isfinite(x) or x < 0:
             continue
         stars = (x if x <= 5 else x / 20) if scale is None else min(x, 1.0) * scale
         return max(0, min(5, round(stars)))

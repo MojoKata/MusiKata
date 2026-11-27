@@ -2,8 +2,9 @@
 from each kind is parse.py's, as plain data. Writing goes the other way: compose.py's plain data
 applied by write.py, always to a copy that safe.save checks and puts in the song's place (A3.4),
 a file at a time or many in a batch (R4.7). What the Edit tags panel shows for a set of songs, and
-the save its edits make, is edit.py's (R4.2 to R4.4); what a song keeps without showing, read.kept
-(R4.1.1, R4.8)."""
+the save its edits make, is edit.py's (R4.2 to R4.4), and what its bulk tools would make of the
+songs, tools.py's (R4.5), Tidy case among them (case.py, R3.6.1); what a song keeps without
+showing, read.kept (R4.1.1, R4.8)."""
 
 from .batch import Batch, Failed, Job, Outcome, Recorder
 from .fields import AudioInfo, Picture, Tags

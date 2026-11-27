@@ -129,7 +129,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.settings` | library | The two `settings.json`, their defaults and the split (R13, R13.9, A2.10) |
 | `musikata_core.workers` | library | The worker processes, at low priority (A1.3) |
 | `musikata_core.clock` | library | The clock every timed piece is given (`docs/process/coding.md`) |
-| `musikata_core.tags` | tags | The field mapping, reading and writing, the safe write: `fields`, `parse` and `read` (reading), `compose` and `write` (writing), `safe` (the safe write), `batch` (a save of many files), `edit` (what the Edit tags panel shows for a set of songs and the save its edits make) (A3.1, A3.2, A3.4, R4) |
+| `musikata_core.tags` | tags | The field mapping, reading and writing, the safe write: `fields`, `parse` and `read` (reading), `compose` and `write` (writing), `safe` (the safe write), `batch` (a save of many files), `edit` (what the Edit tags panel shows for a set of songs and the save its edits make), `tools` (the panel's bulk tools: what each would make of the songs, R4.5), `case` (Tidy case, R3.6.1) (A3.1, A3.2, A3.4, R4) |
 | `musikata_core.encodings` | tags | Scoring and fixing text in the wrong encoding (A3.6, R4.10) |
 | `musikata_core.art` | tags | Finding, embedding and saving covers (R5) |
 | `musikata_core.genres` | tags | Several genres per song, renaming, merging, near duplicates (R9) |
@@ -153,6 +153,8 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
 | `musikata.edittags` | app | The Edit tags panel in the running app: what it edits and follows, its fields, suggestions, saving through the batch with progress, Cancel and Retry, and one song's file (R4.2 to R4.4, R4.6 to R4.8) |
+| `musikata.bulktools` | app | The Edit tags panel's bulk tools: the ⋯ menu, and a tool's dialog with its options and its preview, saved through the panel (R4.5) |
+| `musikata.preview` | app | The preview of a change to many files' tags before it is saved: each file's old and new values, its checkbox, the footer and Save (R3.7, R3.8; the bulk tools', and Infer from path's) |
 | `musikata.history` | app | The change history in the running app: the entries read and watched, the Change history panel, Ctrl+Z, R4.9.1's question and the message that follows a save, with Undo (R4.9, R6.7) |
 | `musikata.plays` | app | Play counts in the running app: the player's plays kept, the other computers' play files watched and read again (R7.9, A2.8) |
 | `musikata.media` | app | The system's media controls (A4.5): `MediaControls` over the Player bridge, `controls` (what the system is told and what its commands do, without Qt), and the backends `mpris`, `smtc` and `nowplaying_mac` |

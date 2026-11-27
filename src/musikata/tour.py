@@ -44,7 +44,8 @@ SIZES = (SHOT, DESIGN)
 # chips of R3.9, the tint by a cover's colour). The first queues Glass Harbor, paused at its first
 # song, so every screen after it shows the now-playing bar (R6.5) and the playing album and song
 # marked, with no sound to wait on (Player.go). X03 has no mockup: the Change history panel (R4.9)
-# over Songs, listing the demo library's saves (demo_library.HISTORY).
+# over Songs, listing the demo library's saves (demo_library.HISTORY). T07 has no mockup either: a
+# bulk tool's preview (R4.5, R3.7), Number tracks over L03's four songs.
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -57,6 +58,16 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "search": "electronic",
             "select": ["Neap Tide", "Spring Tide", "Slack Water", "Moonpull"],
             "edit": {"artist": "Lumen Drift", "genres": "Electronic", "year": "2022"},
+        },
+    ),
+    (
+        "T07-number-tracks",
+        {
+            "view": "songs",
+            "search": "electronic",
+            "select": ["Neap Tide", "Spring Tide", "Slack Water", "Moonpull"],
+            "edit": {},
+            "tool": {"name": "number"},
         },
     ),
     ("L04-folders", {"view": "folders", "folder": "", "mode": "small"}),

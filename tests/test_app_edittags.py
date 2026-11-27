@@ -265,7 +265,8 @@ def test_four_songs_show_what_they_share_and_whats_mixed(root, panel, qtbot):
     panel.openMore()
     panel.openMore()  # it stays open
     assert panel.property("more")
-    assert panel.property("tools") == []  # R4.5's tools come with 5.5
+    assert [t["name"] for t in panel.property("tools")] == [
+        "number", "replace", "tidy", "copy", "infer"]  # R4.5's ⋯ menu  # fmt: skip
 
 
 def test_typing_marks_what_will_change_and_revert_clears_it(root, panel, qtbot):
@@ -361,6 +362,80 @@ def test_the_files_that_fail_are_listed_with_why_and_retry_saves_them(root, pane
     panel.setText("album", "x")
     panel.dismissFailed()
     assert panel.property("failed") == {}
+
+
+def test_a_bulk_tool_saves_through_the_panel_as_one_entry_named_for_it(root, panel, qtbot):
+    """R4.5.1 in its preview (R3.7), saved as the panel saves (R4.7), one entry in the change
+    history named for the tool, its message offering Undo (R4.9)."""
+    music, index, ids, paths = root
+    opened(panel, qtbot, ids[::-1])  # the list in another order: numbered in that order
+    panel.runTool("number")
+    tool = panel.property("tool")
+    assert tool.property("opened") and tool.property("title") == "Number tracks"
+    preview = tool.property("preview")
+    assert preview.property("saveLabel") == "Save 4 files"
+    preview.toggle(0)  # 04.flac, unchecked: left alone
+    h = panel.history_
+    with qtbot.waitSignal(h.messageChanged, timeout=WAIT):
+        tool.save()
+    assert not tool.property("opened")
+    assert [(tags.read(p)[0].track, tags.read(p)[0].tracktotal) for p in paths] == [
+        (4, 4), (3, 4), (2, 4), (4, 9)]  # fmt: skip
+    assert h.property("message")["text"] == "Saved 3 files" and h.property("message")["undo"]
+    folder = os.path.join(music, ".musikata", "history")
+    (name,) = [n for n in os.listdir(folder) if n.endswith(".json")]
+    with open(os.path.join(folder, name), encoding="utf-8") as f:
+        assert json.load(f)["description"] == "Number tracks: Track and Track total on 3 songs"
+    assert field(panel, "track")["mixed"]  # the panel shows the songs as they now are
+    with qtbot.waitSignal(h.messageChanged, timeout=WAIT):
+        h.undoMessage()
+    qtbot.waitUntil(lambda: tags.read(paths[0])[0].track == 1, timeout=WAIT)
+
+
+def test_the_tools_wait_on_changes_not_saved_and_infer_from_path_on_r3(root, panel, qtbot):
+    """R4.5: a tool plans from the files' tags, so typed changes are saved or reverted first;
+    R4.5.5: Infer from path is shown, disabled, for later; a new selection closes a tool."""
+    music, index, ids, paths = root
+    opened(panel, qtbot, ids)
+    tool = panel.property("tool")
+    panel.runTool("infer")
+    assert not tool.property("opened")
+    panel.setText("album", "Tide Tables (2022)")
+    menu = {t["name"]: t["later"] for t in panel.property("tools")}
+    assert menu["number"] == "Save or revert your changes first"
+    panel.runTool("number")
+    assert not tool.property("opened")
+    panel.revert()
+    panel.runTool("copy")
+    assert tool.property("opened") and tool.property("tool") == "copy"
+    opened(panel, qtbot, ids[:1])  # another selection: the tool's songs are gone
+    assert not tool.property("opened")
+    assert {t["name"]: t["later"] for t in panel.property("tools")}["copy"] == (
+        "Select two or more songs to copy between")  # fmt: skip
+    panel.runTool("tidy")
+    assert tool.property("opened")
+    panel.hide()
+    assert not tool.property("opened")
+
+
+def test_a_tools_save_waits_for_the_root_and_another_save(root, qtbot, qapp):
+    """R2.10: no root, no save; one save at a time (R4.7)."""
+    there = [True]
+    e = make(root, qtbot, available=lambda: there[0])
+    try:
+        music, index, ids, paths = root
+        opened(e, qtbot, ids)
+        e.runTool("number")
+        there[0] = False
+        assert {t["later"] for t in e.property("tools")} == {
+            "Saving waits until the music folder is back",
+            "Tags from paths come in a later version"}  # fmt: skip
+        e.property("tool").save()  # it doesn't start: nothing written, the dialog left open
+        assert [tags.read(p)[0].tracktotal for p in paths] == [9] * 4
+        assert e.property("tool").property("opened")
+    finally:
+        e.close()
+        e.history_.close()
 
 
 def written(job):
@@ -633,6 +708,55 @@ def test_the_panel_opens_from_ctrl_e_edits_and_saves_with_undo_and_no_qml_warnin
 
 
 @pytest.mark.slow
+def test_a_bulk_tool_opens_from_the_menu_previews_and_saves_with_no_qml_warning(
+    shell, qtbot, qtlog
+):
+    """R4.5 in the window: the ⋯ menu, a tool's dialog over the window with its options and
+    R3.7's preview, Infer from path faded; Save writes the files checked; every text in its box."""
+    e, lib = shell.edit, shell.library
+    lib.show("songs")
+    songs = lib.property("songs")
+    qtbot.waitUntil(lambda: songs.rowCount() == 4, timeout=WAIT)
+    songs.selectAll()
+    e.editSelection(songs)
+    qtbot.waitUntil(lambda: e.property("count") == 4 and not e.property("loading"), timeout=WAIT)
+    settled(shell, qtbot)
+    click(shell, find(shell, "editTools")[0])
+    qtbot.waitUntil(lambda: bool(find(shell, "tool-replace")), timeout=WAIT)
+    assert find(shell, "tool-infer")[0].opacity() < 1  # R4.5.5: for later, saying so
+    click(shell, find(shell, "tool-replace")[0])
+    tool = e.property("tool")
+    qtbot.waitUntil(lambda: bool(find(shell, "toolDialog")), timeout=WAIT)
+    assert tool.property("tool") == "replace"
+    settled(shell, qtbot)  # the chips laid out where they are clicked
+    click(shell, find(shell, "toolField-artist")[0])
+    click(shell, find(shell, "tool-find")[0])
+    for ch in "lumen drift":
+        QTest.keyClick(shell.window, ch)
+    click(shell, find(shell, "tool-by")[0])
+    for ch in "Lumen Drift":
+        QTest.keyClick(shell.window, ch)
+    preview = tool.property("preview")
+    preview = tool.property("preview")
+    qtbot.waitUntil(lambda: preview.property("saveLabel") == "Save 1 file", timeout=WAIT)
+    settled(shell, qtbot)
+    assert layout.faults(shell.window) == []
+    assert len(find(shell, "previewCheck")) == 4
+    with qtbot.waitSignal(shell.changes.messageChanged, timeout=WAIT):
+        click(shell, find(shell, "saveTool")[0])
+    assert not find(shell, "toolDialog")
+    moonpull = os.path.join(shell.music_, "Lumen Drift", "Tide Tables", "04.flac")
+    assert tags.read(moonpull)[0].artist == "Lumen Drift"
+    for name in ("number", "tidy", "copy"):  # each dialog lays out in its box
+        e.runTool(name)
+        settled(shell, qtbot)
+        assert layout.faults(shell.window) == [], name
+        click(shell, find(shell, "cancelTool")[0])
+        assert not tool.property("opened")
+    assert [r.message for r in qtlog.records if "qml" in r.message.lower()] == []
+
+
+@pytest.mark.slow
 def test_edit_tags_opens_from_an_album_a_songs_menu_the_selection_bar_and_folders(shell, qtbot):
     """R4.2: on an album, a song, a selection; R2.9.6: on folders, every song beneath them, from
     the selection bar and the right-click menu; R2.9.7: a folder of songs' Edit tags."""
@@ -685,7 +809,8 @@ def test_edit_tags_opens_from_an_album_a_songs_menu_the_selection_bar_and_folder
     shell.changes.show()  # Change history over it; Edit tags opened again closes it
     e.editCurrent(lib)
     assert not shell.changes.property("opened")
-    e.runTool("number")  # no bulk tools yet (5.5): nothing
+    e.runTool("number")  # no songs edited: no tool to open
+    assert not e.property("tool").property("opened")
     lib.show("songs")
     songs.selectAll()
     e.go({"view": "songs", "edit": {"composer": "Ada"}}, lib)  # the tour's L03

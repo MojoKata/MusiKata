@@ -6,7 +6,7 @@ numbers, dates, genres and ratings each come in several forms, and each form her
 player or tagger writes."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from musikata_core.tags import parse
@@ -75,6 +75,7 @@ def test_popm_ranges_are_the_common_players():
     [
         ("4", None, 4), ("80", None, 4), ("100", None, 5), ("20", None, 1), (None, "0.8", 4),
         ("3", "1.0", 3), ("4,0", None, 4), ("x", "0.6", 3), ("-1", None, None), (None, None, None),
+        ("INFINITY", None, None), ("nan", "0.6", 3), (None, "inf", None), ("1e999", None, None),
     ],
 )  # fmt: skip
 def test_vorbis_and_mp4_ratings_as_stars_hundredths_or_fmps(rating, fmps, stars):
@@ -212,6 +213,8 @@ def test_a_riff_chunk_cut_short_or_not_a_wave_reads_as_nothing():
 
 
 @given(st.text())
+@example("INFINITY")  # a rating no number of stars: found by Hypothesis
+@example("nan")
 def test_any_text_is_read_without_an_error(value):
     parse.number_pair(value)
     parse.year_and_date(value)

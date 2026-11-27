@@ -10,8 +10,9 @@ import "."
 // without showing (R4.8), read only. At its foot: R4.2's question when the selection changes, or it
 // closes, with changes not saved; a save's progress with Cancel (R4.7); the files that failed with
 // why, Retry and Dismiss; "3 fields will change on 4 songs", **Revert** and **Save to 4 files**.
-// The ⋯ menu holds the bulk tools of R4.5 once they come (`tools`, empty until then). Esc or the ×
-// closes it. What it shows and does is the bridge's (musikata.edittags).
+// The ⋯ menu holds the bulk tools of R4.5 (`tools`), each opening its dialog (ToolDialog); one that
+// can't be used now is faded and says why in its tooltip, as Infer from path does until R3 comes.
+// Esc or the × closes it. What it shows and does is the bridge's (musikata.edittags).
 Rectangle {
     id: panel
     required property var edit
@@ -36,14 +37,14 @@ Rectangle {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 13; weight: Font.Bold; letterSpacing: 0.5; capitalization: Font.AllUppercase }
     }
-    Item {  // ⋯: R4.5's bulk tools, once they come
+    Item {  // ⋯: R4.5's bulk tools
         id: tools
         objectName: "editTools"
         x: close.x - (visible ? width + 4 : 0)
         y: 18
         width: 32
         height: 32
-        visible: panel.edit.tools.length > 0
+        visible: panel.edit.tools.length > 0 && panel.edit.count > 0
         Accessible.role: Accessible.ButtonMenu
         Accessible.name: qsTr("More tools")
         Rectangle { anchors.fill: parent; radius: 16; color: toolsHover.hovered ? Theme.hover : "transparent" }
@@ -52,12 +53,19 @@ Rectangle {
         TapHandler { onTapped: toolMenu.popup(tools, 0, tools.height) }
         Menu {
             id: toolMenu
+            objectName: "toolMenu"
             Repeater {
                 model: panel.edit.tools
                 MenuItem {
                     required property var modelData
+                    objectName: "tool-" + modelData.name
                     text: modelData.label
-                    onTriggered: panel.edit.runTool(modelData.name)
+                    opacity: modelData.later === "" ? 1 : 0.45
+                    Accessible.description: modelData.later
+                    ToolTip.visible: hovered && modelData.later !== ""
+                    ToolTip.text: modelData.later
+                    ToolTip.delay: 400
+                    onTriggered: if (modelData.later === "") panel.edit.runTool(modelData.name)
                 }
             }
         }

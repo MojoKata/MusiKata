@@ -15,8 +15,9 @@ written updated in the index (Library.saved). MP3s are written in the root's ID3
 modification times kept as its settings say (settings.root_tags, R4.7.1, R4.7.2).
 
 What the panel says is decided here as plain data and text, tested without a window; which
-songs change, and how, is tags.edit's. The bulk tools of R4.5 (5.5) join the panel's ⋯ menu
-through `tools`, empty until then: the menu shows only when it has some."""
+songs change, and how, is tags.edit's. The bulk tools of R4.5 are its ⋯ menu (`tools`): a tool
+opens its dialog (bulktools.BulkTool, `tool`) over the songs edited, in the list's order, and its
+save is saved here as the panel's own are, named for the tool in the change history."""
 
 from __future__ import annotations
 
@@ -31,12 +32,13 @@ from typing import Any
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, Signal, Slot
 
-from musikata_core import scanner, search, settings
-from musikata_core.tags import Batch, Failed, Job, Outcome, TagReadError, Tags, Written, edit
+from musikata_core import albums, scanner, search, settings
+from musikata_core.tags import Batch, Failed, Job, Outcome, TagReadError, Tags, Written, edit, tools
 from musikata_core.tags import kept as kept_tags
 from musikata_core.tags import save as save_tags
 
 from .bridges import shown_path
+from .bulktools import BulkTool, menu_of
 from .folders import FolderModel
 from .history import LABELS, ChangeHistory
 from .models import KINDS, Searcher, SongsModel, cover_url, plural, size_text, time_text, title_of
@@ -385,8 +387,11 @@ class EditTags(QObject):
         self._suggest_for = ""
         self._suggestions: list[str] = []
         self._closed = False
+        self._bulk = BulkTool(root, self)  # R4.5's tool open, if one is
+        self._then_tool: dict[str, Any] | None = None  # the tour's, once its songs are read
         self._progressed.connect(self._on_progress)
         self._done.connect(self._on_done)
+        self._bulk.saved.connect(self._on_tool_saved)
 
     # ---------- what it edits (R4.2) ----------
 
@@ -418,16 +423,21 @@ class EditTags(QObject):
         """An album's Edit tags (L02-album): its songs, in its order; then the selection of its
         page's list."""
         c = self._read()
-        ids = [r[0] for r in c.execute("SELECT id FROM song WHERE album_id = ?", (album_id,))]
+        ids = [r[0] for r in c.execute(
+            f"SELECT id FROM song WHERE album_id = ? ORDER BY {albums.ALBUM_ORDER}", (album_id,)
+        )]  # fmt: skip
         self.edit_songs(ids, songs_text(len(ids)), model)
 
     @Slot(QObject)
     def editFolder(self, folders: QObject) -> None:  # noqa: N802
-        """A folder of songs' Edit tags (R2.9.7): every song in it; then the selection in it."""
+        """A folder of songs' Edit tags (R2.9.7): every song in it, in its list's order (by name);
+        then the selection in it."""
         model = folders.property("model")
         c = self._read()
         path = str(folders.property("path"))
-        ids = [r[0] for r in c.execute("SELECT id FROM song WHERE folder = ?", (path,))]
+        ids = [r[0] for r in c.execute(
+            "SELECT id FROM song WHERE folder = ? ORDER BY name_key, path", (path,)
+        )]  # fmt: skip
         self.edit_songs(ids, songs_text(len(ids)), model)
 
     @Slot(QObject)
@@ -458,8 +468,37 @@ class EditTags(QObject):
 
     @Slot(str)
     def runTool(self, name: str) -> None:  # noqa: N802
-        """A bulk tool of the ⋯ menu (R4.5), by name: none until they come (5.5)."""
-        log.warning("no bulk tool %r yet", name)
+        """A bulk tool of the ⋯ menu (R4.5), by name: its dialog opens over the songs edited, in
+        the list's order, showing what it would do; one that can't be used now does nothing."""
+        self.open_tool(name)
+
+    def open_tool(self, name: str, options: dict[str, Any] | None = None) -> None:
+        """Tool `name` opened with `options` set (BulkTool.open), unless it can't be used now."""
+        item = next((t for t in self._menu() if t["name"] == name), None)
+        if item is None or item["later"] or not self._songs:
+            log.info("bulk tool %r not opened: %s", name, item["later"] if item else "no such tool")
+            return
+        songs = [tools.Song(scanner.full_path(self._root, s.path), s.tags) for s in self._songs]
+        undoable = self._history is not None and self._settings.history
+        self._bulk.open(name, songs, options, undoable)
+
+    def _menu(self) -> list[dict[str, str]]:
+        menu = menu_of(len(self._songs), self.unsaved(), self._batch is not None)
+        if not self._available():
+            for t in menu:
+                t["later"] = t["later"] or "Saving waits until the music folder is back"
+        return menu
+
+    @Slot(object, str)
+    def _on_tool_saved(self, jobs: list[Job], description: str) -> None:
+        """A bulk tool's Save (R3.8): its files saved as the panel saves (R4.7), one entry in the
+        change history named for the tool (R4.9), and its dialog closed; while the root isn't
+        there (R2.10) it stays open, saving nothing."""
+        if self._batch is not None or not self._available():
+            log.warning("a bulk tool's save wasn't started: a save goes on, or the root is gone")
+            return
+        self._bulk.close()
+        self._start(jobs, description)
 
     def _follow(self, source: QObject | None) -> None:
         if source is self._source:
@@ -495,6 +534,7 @@ class EditTags(QObject):
     def _load(self, ids: list[int], what: str) -> None:
         self._ids, self._what = ids, what
         self._edits = {}
+        self._bulk.close()  # a tool's songs were those edited until now
         self._ticket += 1
         ticket, root, read = self._ticket, self._root, self._read
         self._loading = True
@@ -516,12 +556,19 @@ class EditTags(QObject):
         self._shown = edit.fields_of([s.tags for s in songs])
         self._edits = {}
         self._loading = False
-        if songs:
+        self._then()
+
+    def _then(self) -> None:
+        """The tour's typing and tool, once the songs it shows are read."""
+        if self._songs:
             for name, text in self._then_edits.items():
                 self._set(name, text)
             self._then_edits = {}
         self._replan()
         self.changed.emit()
+        if self._songs and self._then_tool is not None:
+            then, self._then_tool = self._then_tool, None
+            self.open_tool(then.pop("name"), then)
 
     @Slot()
     def refresh(self) -> None:
@@ -748,6 +795,7 @@ class EditTags(QObject):
 
     def _shut(self) -> None:
         self._open = False
+        self._bulk.close()
         self._ids, self._what = [], ""
         self._follow(None)
         self._edits, self._failed, self._question = {}, [], {}
@@ -759,9 +807,11 @@ class EditTags(QObject):
 
     def go(self, step: Mapping[str, Any], library: QObject) -> None:
         """A tour's step (A1.6): {"edit": {field: text}} opens the panel as Ctrl+E does on the
-        view the step shows, with those fields typed once its songs are read; without it the
-        panel is closed."""
+        view the step shows, with those fields typed once its songs are read, and {"tool":
+        {"name": …, option: value}} a bulk tool over them (R4.5); without "edit" the panel is
+        closed."""
         edits = step.get("edit")
+        self._bulk.close()
         if edits is None:
             if self._open:
                 self._shut()
@@ -769,12 +819,17 @@ class EditTags(QObject):
         self._edits = {}  # an earlier step's typing, never asked about
         self._replan()
         self._then_edits = dict(edits)
+        tool = step.get("tool")
+        self._then_tool = dict(tool) if tool is not None else None
         self.editCurrent(library)
+        if not self._loading:  # the songs it edits already: nothing to read first
+            self._then()
 
     def close(self) -> None:
         """For closing the window: a save going on stops before its next file and is waited for;
         nothing starts after. What the threads held is let go (A1.3)."""
         self._closed = True
+        self._bulk.close()
         if self._batch is not None:
             self._batch.cancel()
         if self._executor is not None:
@@ -876,7 +931,8 @@ class EditTags(QObject):
     question = QtProperty(dict, lambda self: self._question, notify=questionChanged)
     suggestions = QtProperty(list, lambda self: self._suggestions, notify=suggestionsChanged)
     suggestFor = QtProperty(str, lambda self: self._suggest_for, notify=suggestionsChanged)
-    tools = QtProperty(list, lambda self: [], constant=True)  # R4.5's bulk tools (5.5)
+    tools = QtProperty(list, _menu, notify=fieldsChanged)  # R4.5's bulk tools, the ⋯ menu
+    tool = QtProperty(QObject, lambda self: self._bulk, constant=True)  # the tool open
 
 
 def _gone() -> bool:

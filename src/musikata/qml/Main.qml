@@ -14,7 +14,8 @@ import "."
 // recent save unless a text box takes it, and the message that follows a save or an undo, with its
 // Undo, shows at the foot of the view (R6.7). Edit tags (R4.2) docks its panel in the same place,
 // under Change history while that is open; Ctrl+E (⌘E) opens it on the open view's selection, and
-// the views open it from their buttons, selection bars and right-click menus.
+// the views open it from their buttons, selection bars and right-click menus. A bulk tool of its ⋯
+// menu (R4.5) opens its dialog over the whole window.
 Window {
     id: win
     required property var library
@@ -160,6 +161,11 @@ Window {
         objectName: "nowPlayingBar"
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         player: win.player
+    }
+    ToolDialog {
+        objectName: "toolOverlay"
+        anchors.fill: parent
+        tool: win.edit.tool
     }
     Shortcut {
         sequence: "Ctrl+E"

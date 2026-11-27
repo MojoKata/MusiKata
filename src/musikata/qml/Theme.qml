@@ -33,5 +33,6 @@ QtObject {
     readonly property color progress: "#4ade80"
     readonly property color input: "#0f1217"
     readonly property color bar: "#0b0d11"         // the now-playing bar (R6.5), under the window
+    readonly property color scrim: "#8c000000"     // over the window, behind a dialog (T01)
     readonly property string sans: "Noto Sans"
 }
