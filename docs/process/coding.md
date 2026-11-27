@@ -124,9 +124,16 @@ and mutation testing finds them only slowly.
   and the app freezes. `QImageReader.read`, `QImage(path)` and `QImage.save` let go of the GIL while
   Qt works, and Qt's own file or buffer (`covers.decoded` reads the one `QDataStream` makes) never
   calls into Python. `QImage.scaled`, `convertToFormat` and `QPainter` keep the GIL while Qt works,
-  a few milliseconds for a cover, but take no lock such a thread holds: the threads they share the
-  work with come from Qt's GUI thread pool, which the GUI thread makes as the window loads. A wait
-  there is the app's stutter, not a freeze.
+  a few milliseconds for a cover, but take no lock such a thread holds once Qt's GUI thread pool,
+  which they share the work with, is there: made at its first use, it is made on the GUI thread as
+  the window loads (`covers.start_image_threads`), never first by a cover's thread, whose making
+  of it would take the connection locks. A wait there is the app's stutter, not a freeze.
+- Off the GUI thread, no QObject whose making connects one inside Qt is made while PySide holds
+  the GIL: a `QAudioSink`, made on the GUI thread and moved to the playback thread
+  (`player.Sinks`). A signal emitted, `connect` and `disconnect`, `QFile.moveToTrash`, a sink's
+  `start` and `stop`, and `Shiboken.delete` let go of the GIL while Qt waits on a lock, or take
+  none. `tests/locks.py` holds every connection lock from threads waiting on the GIL, so a test
+  shows a call made with the GIL held waiting on one, and never returning.
 - The sound device's callback only copies samples out of the ring buffer, at the volume (A4.4).
 
 ## QML
