@@ -53,10 +53,11 @@ import logging
 import os
 import sqlite3
 import unicodedata
+from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from . import art, duplicates, encodings, folders, genres, patterns
+from . import art, duplicates, encodings, folders, genres, patterns, rootfiles
 from .rootfiles import Dismissal
 from .tags import Picture, Tags
 from .tags.tools import Planned, Song
@@ -734,6 +735,34 @@ def dismissed(
                 hit = by_hash.get((e.kind, e.hash))
         if hit is None or not _same_time(hit.modified, e.modified):
             out.append(e)
+    return out
+
+
+def followed(c: sqlite3.Connection, moves: Sequence[tuple[str, str]]) -> list[Dismissal]:
+    """In the writer's transaction, once files MusiKata moved (R12) are followed in the index
+    (organize.index_moves): the dismissals about an album's or a folder's songs (BY_ALBUM) whose
+    folder the moves (old and new paths under the root) left with no song, made anew about the
+    folder most of its songs went to, with their kind, file time and when they were dismissed, and
+    put in the index (rootfiles.load_ignored); those made, for ignored.json. A dismissal about a
+    song follows it by its audio hash already (A2.8)."""
+    went: dict[str, Counter[str]] = {}
+    for old, new in moves:
+        went.setdefault(old.rpartition("/")[0], Counter())[new.rpartition("/")[0]] += 1
+    out: list[Dismissal] = []
+    for old, to in went.items():
+        dest = to.most_common(1)[0][0]
+        if dest == old or c.execute("SELECT 1 FROM song WHERE folder = ? LIMIT 1",
+                                    (old,)).fetchone():  # fmt: skip
+            continue
+        marks = ", ".join("?" * len(BY_ALBUM))
+        for kind, hash_, modified, changed in c.execute(
+            f"SELECT kind, hash, modified, changed FROM ignored WHERE about = ?"
+            f" AND kind IN ({marks})",
+            (folder_about(old), *BY_ALBUM),
+        ).fetchall():
+            out.append(Dismissal(kind, folder_about(dest), hash_, modified, changed))
+    if out:
+        rootfiles.load_ignored(c, out)
     return out
 
 

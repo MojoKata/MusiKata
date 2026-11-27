@@ -48,7 +48,7 @@ from PySide6.QtCore import (
 from musikata_core import attention, organize, patterns, scanner
 from musikata_core import folders as index_folders
 from musikata_core.clock import Clock, SystemClock
-from musikata_core.organize import Followed, Move, Moved, Outside, Plan, Source
+from musikata_core.organize import Checking, Followed, Move, Moved, Outside, Source
 from musikata_core.tags import Batch, Failed, Job, Outcome, Tags, Written
 
 from .bridges import shown_path
@@ -227,27 +227,43 @@ def with_fields(tags: Tags, changes: Mapping[str, object]) -> Tags:
 @dataclass
 class Loaded:
     """What the thread read for the dialog: the songs to place, the folders' entries beside them,
-    the paths a file has taken already (among the new paths any move could take), the playlists
-    naming each song; brought from outside, the files read, those the library has, and the tags
-    their paths give."""
+    the plan made once and checked over (organize.Checking; brought from outside, one with the
+    tags Infer from path fills, under True, and one without), the playlists naming each song;
+    brought from outside, the files read, those the library has, and the tags their paths
+    give."""
 
     sources: list[Source] = field(default_factory=list)
     beside: dict[str, list[str]] = field(default_factory=dict)
-    taken: set[str] = field(default_factory=set)
+    checking: dict[bool, Checking] = field(default_factory=dict)
     naming: dict[str, list[str]] = field(default_factory=dict)
     outside: list[Outside] = field(default_factory=list)
     known: list[str] = field(default_factory=list)
     inferred: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
+def checked_over(
+    root: str,
+    sources: Sequence[Source],
+    layout: patterns.Pattern,
+    beside: Mapping[str, Collection[str]],
+    prune: bool = True,
+) -> Checking:
+    """The plan of `sources`, made once on the thread with what the disk says is taken, then
+    checked over with a lookup of the paths its moves take that a file has, so a checkbox reads
+    nothing from the disk (R12.4)."""
+    on_disk = organize.taken_in(root)
+    checking = Checking(sources, layout, beside, on_disk, prune=prune)
+    taken = {m.new for m in checking.rows if on_disk(m.new)}
+    checking.exists = taken.__contains__
+    return checking
+
+
 def load_songs(c: sqlite3.Connection, root: str, ids: Sequence[int], layout: patterns.Pattern
                ) -> Loaded:  # fmt: skip
-    """On the thread: Organize files' songs (`ids`), the folders beside them and what is taken."""
+    """On the thread: Organize files' songs (`ids`), the folders beside them, and the plan."""
     sources = organize.sources_of(c, ids)
     beside = organize.listing(root, [s.path for s in sources])
-    whole = organize.plan(sources, layout, beside, lambda _p: False)
-    taken = organize.taken_in(root)
-    return Loaded(sources, beside, {m.new for m in whole.moves if taken(m.new)},
+    return Loaded(sources, beside, {False: checked_over(root, sources, layout, beside)},
                   organize.playlists_naming(c, [s.path for s in sources]))  # fmt: skip
 
 
@@ -274,12 +290,10 @@ def load_outside(c: sqlite3.Connection, root: str, paths: Sequence[str], layout:
                 out.beside[folder] = sorted(e.name + "/" if e.is_dir() else e.name for e in it)
         except OSError:
             out.beside[folder] = []
-    taken = organize.taken_in(root)
     for filled in (False, True):
         sources = [replace(s, tags=with_fields(s.tags, out.inferred.get(s.path, {})))
                    if filled else s for s in out.sources]  # fmt: skip
-        whole = organize.plan(sources, layout, out.beside, lambda _p: False, prune=False)
-        out.taken |= {m.new for m in whole.moves if taken(m.new)}
+        out.checking[filled] = checked_over(root, sources, layout, out.beside, prune=False)
     return out
 
 
@@ -294,27 +308,30 @@ class MovesModel(QAbstractListModel):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._rows: list[Move] = []
-        self._now: dict[str, Move] = {}
+        self._rows: Sequence[Move] = ()
+        self._now: Callable[[str], Move | None] = lambda _old: None
         self._shown: Callable[[str], str] = str
 
-    def show(self, rows: Sequence[Move], now: Plan, shown: Callable[[str], str] = str) -> None:
-        """`rows` (the plan with every move checked) as `now` (the plan as checked) makes them,
-        their paths as `shown` gives them."""
-        same = [m.old for m in rows] == [m.old for m in self._rows]
-        self._now = {m.old: m for m in now.moves}
-        self._shown = shown
-        if same and rows:
-            self._rows = list(rows)
-            self.dataChanged.emit(self.index(0), self.index(len(rows) - 1))
+    def show(self, rows: Sequence[Move], now: Callable[[str], Move | None],
+             shown: Callable[[str], str] = str) -> None:  # fmt: skip
+        """`rows` (the plan with every move checked), each as `now` (Checking.now: as checked)
+        makes it, their paths as `shown` gives them."""
+        self._now, self._shown = now, shown
+        if rows is self._rows and rows:
+            self.refresh()
             return
         self.beginResetModel()
-        self._rows = list(rows)
+        self._rows = rows
         self.endResetModel()
+
+    def refresh(self) -> None:
+        """The rows as checked now: each row's checkbox, whether it moves, and why not."""
+        if self._rows:
+            self.dataChanged.emit(self.index(0), self.index(len(self._rows) - 1))
 
     def row(self, n: int) -> dict[str, Any]:
         base = self._rows[n]
-        now = self._now.get(base.old)
+        now = self._now(base.old)
         note = ""
         if now is None:
             note = STAYS
@@ -409,8 +426,7 @@ class OrganizeFiles(QObject):
         self._playlist = -1
         self._ticket = 0
         self._loaded = Loaded()
-        self._unchecked: set[str] = set()
-        self._plan = Plan()
+        self._checking = Checking([], self._layout, {}, _taken_none)  # the plan as checked
         self._batch: Batch[Any] | None = None
         self._progress = (0, 0)
         self._shown = 4  # the rows the list shows without scrolling (T03)
@@ -488,7 +504,7 @@ class OrganizeFiles(QObject):
             return
         self._open, self._loading, self._adding = True, True, adding
         self._way, self._infer, self._playlist = COPY, True, -1
-        self._loaded, self._unchecked = Loaded(), set()
+        self._loaded = Loaded()
         self._ticket += 1
         ticket, read = self._ticket, self._read
         self._replan()
@@ -504,22 +520,15 @@ class OrganizeFiles(QObject):
 
     # ---------- the plan ----------
 
-    def _sources(self) -> list[Source]:
-        if not self._adding or not self._infer:
-            return self._loaded.sources
-        fills = self._loaded.inferred
-        return [replace(s, tags=with_fields(s.tags, fills[s.path])) if s.path in fills else s
-                for s in self._loaded.sources]  # fmt: skip
-
-    def _plan_of(self, unchecked: Collection[str]) -> Plan:
-        taken = self._loaded.taken
-        return organize.plan(self._sources(), self._layout, self._loaded.beside,
-                             lambda p: p in taken, unchecked, prune=not self._adding)  # fmt: skip
-
     def _replan(self) -> None:
-        self._plan = self._plan_of(self._unchecked)
-        rows = self._plan_of(()).moves
-        self._moves.show(rows, self._plan, self._shown_path)
+        """The plan loaded (or none), Infer from path's or not (R12.5), the checkboxes of the
+        one shown before kept."""
+        was = self._checking.unchecked
+        found = self._loaded.checking.get(self._adding and self._infer)
+        self._checking = found or Checking([], self._layout, {}, _taken_none)
+        for old in was ^ self._checking.unchecked if found is not None else ():
+            self._checking.toggle(old)
+        self._moves.show(self._checking.rows, self._checking.now, self._shown_path)
         self.changed.emit()
         self.moreChanged.emit()
 
@@ -533,8 +542,10 @@ class OrganizeFiles(QObject):
         old = self._moves.old_at(row)
         if old is None or self._batch is not None:
             return
-        self._unchecked ^= {old}
-        self._replan()
+        self._checking.toggle(old)  # what it touches recounted, never the whole plan anew
+        self._moves.refresh()
+        self.changed.emit()
+        self.moreChanged.emit()
 
     @Slot(str)
     def setWay(self, way: str) -> None:  # noqa: N802
@@ -563,7 +574,7 @@ class OrganizeFiles(QObject):
     def run(self) -> None:
         """Move N files (or Copy): the moves checked with no conflict, in one batch off this
         thread; Organize files' kept as one entry in the change history."""
-        chosen = self._plan.chosen
+        chosen = self._checking.chosen()
         if self._batch is not None or not chosen or not self._available():
             return
         root = self._root
@@ -577,7 +588,7 @@ class OrganizeFiles(QObject):
 
             batch: Batch[Any] = Batch(jobs, writer, self._progressed.emit)
         else:
-            jobs = [organize.move_job(root, m) for m in chosen]
+            jobs = organize.move_jobs(root, chosen)
             record = self._history.recording() if self._history is not None else None
             batch = Batch(jobs, organize.move_file, self._progressed.emit, record=record,
                           action=ORGANIZE, description=description_of(len(jobs)))  # fmt: skip
@@ -636,7 +647,8 @@ class OrganizeFiles(QObject):
             return
         adding, way, playlist = self._adding, self._way, self._playlist
         self._open = False
-        self._loaded, self._unchecked = Loaded(), set()
+        self._loaded = Loaded()
+        self._checking = Checking([], self._layout, {}, _taken_none)
         self._replan()
         if self._library is not None:
             self._library.reload()
@@ -661,7 +673,8 @@ class OrganizeFiles(QObject):
         if self._open:
             self._open = False
             self._ticket += 1
-            self._loaded, self._unchecked = Loaded(), set()
+            self._loaded = Loaded()
+            self._checking = Checking([], self._layout, {}, _taken_none)
             self._replan()
 
     # ---------- the tour, and closing ----------
@@ -697,7 +710,7 @@ class OrganizeFiles(QObject):
             return progress_text(*self._progress, self._adding, self._way)
         if self._loading:
             return "Reading the files…" if self._adding else "Reading the songs…"
-        return footer_text(len(self._plan.chosen), len(self._plan.conflicts))
+        return footer_text(self._checking.chosen_count, self._checking.conflict_count)
 
     def _get_action_later(self) -> str:
         if self._batch is not None:
@@ -706,20 +719,21 @@ class OrganizeFiles(QObject):
             return NOT_THERE
         if self._loading:
             return ""
-        return "" if self._plan.chosen else "Nothing to move"
+        return "" if self._checking.chosen_count else "Nothing to move"
 
     def _get_playlists(self) -> str:
-        naming = self._loaded.naming
         names: dict[str, None] = {}
-        for m in self._plan.chosen:
-            names.update(dict.fromkeys(naming.get(m.old, ())))
+        for old, naming in self._loaded.naming.items():
+            if self._checking.ready(old):
+                names.update(dict.fromkeys(naming))
         return playlists_text(sorted(names, key=str.casefold))
 
     def _get_notes(self) -> str:
         if self._loading:
             return ""
         unread = sum(1 for f in self._loaded.outside if f.error)
-        return notes_text(self._plan.in_place, len(self._plan.untagged), self._loaded.known, unread)
+        c = self._checking
+        return notes_text(c.in_place, len(c.untagged), self._loaded.known, unread)
 
     def _get_infer_label(self) -> str:
         n = len(self._loaded.inferred)
@@ -739,14 +753,15 @@ class OrganizeFiles(QObject):
     moves = QtProperty(QObject, lambda self: self._moves, constant=True)
     more = QtProperty(
         str,
-        lambda self: more_text(self._moves.count(), self._shown, len(self._plan.emptied)),
+        lambda self: more_text(self._moves.count(), self._shown, self._checking.emptied_count),
         notify=moreChanged,
     )
     playlists = QtProperty(str, _get_playlists, notify=changed)
     notes = QtProperty(str, _get_notes, notify=changed)
     footer = QtProperty(str, _get_footer, notify=changed)
-    actionLabel = QtProperty(str, lambda self: action_label(len(self._plan.chosen), self._adding,
-                                                            self._way), notify=changed)  # fmt: skip
+    actionLabel = QtProperty(str, lambda self: action_label(self._checking.chosen_count,
+                                                            self._adding, self._way),
+                             notify=changed)  # fmt: skip
     actionLater = QtProperty(str, _get_action_later, notify=changed)
     moving = QtProperty(bool, lambda self: self._batch is not None, notify=changed)
     ways = QtProperty(list, lambda self: [{"name": n, "label": label, "chosen": n == self._way}
@@ -756,4 +771,8 @@ class OrganizeFiles(QObject):
 
 
 def _gone() -> bool:
+    return False
+
+
+def _taken_none(_path: str) -> bool:
     return False

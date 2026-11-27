@@ -616,3 +616,37 @@ def test_the_selection_bars_and_menus_name_organize():
     organize_action = {"label": "Organize…", "icon": "arrow", "later": "", "action": "organize"}
     assert organize_action in models.SONG_LATER and organize_action in folders.LATER
     assert folders.selection_actions(True)[-1] == organize_action
+
+
+@pytest.mark.slow
+def test_a_checkbox_over_50000_moves_answers_within_a_frame(qapp, tmp_path):
+    """R12.2: the plan is made once, on the thread; a checkbox changed recounts what it touches
+    and the dialog's footer, banner and button follow within a frame, conflicts included."""
+    import time
+
+    from musikata.organize import Loaded, checked_over
+    from musikata_core.organize import Source
+
+    sources, beside = [], {"": [f"Old{a}/" for a in range(5000)]}
+    for a in range(5000):
+        beside[f"Old{a}"] = [f"{t}.flac" for t in range(10)] + ["cover.jpg"]
+        sources += [Source(a * 10 + t, f"Old{a}/{t}.flac",
+                           Tags(title=f"S{t % 9}", artist="A", album=f"B{a}", track=t % 9 + 1))
+                    for t in range(10)]  # fmt: skip
+    layout = organize.patterns.parse(organize.patterns.LAYOUT, naming=True)
+    o = OrganizeFiles(str(tmp_path), lambda: None, executor=ThreadPoolExecutor(1))
+    try:
+        o._loaded = Loaded(sources, beside, {False: checked_over(str(tmp_path), sources, layout,
+                                                                 beside)})  # fmt: skip
+        o._replan()
+        assert o.property("footer").startswith("45,000 files · 10,000 name conflicts")
+        start = time.perf_counter()
+        for row in range(0, 200, 10):
+            o.toggle(row)
+            o.property("footer"), o.property("actionLabel"), o.property("more")
+            o.property("playlists")
+        took = (time.perf_counter() - start) / 20
+        assert took < 0.016, f"a checkbox took {took * 1000:.1f} ms"
+        assert o.property("footer").startswith("45,000 files · 9,960 name conflicts")
+    finally:
+        o.shut()

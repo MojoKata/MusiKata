@@ -1062,12 +1062,19 @@ def jobs(plan_: Plan, root: str, overwrite: bool) -> list[Job]:
     """The files to write to undo `plan_`: each that can be, with its old values; those changed
     since (R4.9.1) only when `overwrite`, the user's answer."""
     out = []
-    for f in plan_.files:
-        if f.why or f.path is None or (f.lost and not overwrite):
-            continue
+    doing = [f for f in plan_.files if not f.why and f.path is not None
+             and (not f.lost or overwrite)]  # fmt: skip
+    # the moves (R12) back, a .cue sheet's FILE lines with them (organize.move_jobs)
+    moves = [
+        organize.Move(f.path, f.change.moved_from, hash=f.change.hash)
+        for f in doing
+        if f.path is not None and f.change.moved_from is not None and not f.change.tags
+    ]
+    back = {m.old: job for m, job in zip(moves, organize.move_jobs(root, moves), strict=True)}
+    for f in doing:
+        assert f.path is not None
         if f.change.moved_from is not None and not f.change.tags:  # a move (R12): back
-            out.append(organize.move_job(root, organize.Move(f.path, f.change.moved_from,
-                                                             hash=f.change.hash)))  # fmt: skip
+            out.append(back[f.path])
             continue
         if not f.change.image and not f.change.tags:
             continue  # its plays alone (R2.12): `undo` gives them back
