@@ -347,6 +347,11 @@ def test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title(v
     assert [paths[i] for i in m.songs_at(3)] == ["Lumen Drift/ebb & flow.mp3"]
     assert paths[m.song_at(3)] == "Lumen Drift/ebb & flow.mp3" and m.song_at(2) is None  # R10.2
     assert m.songs_at(99) == []
+    # Show in file manager's (R2.9.6): a row's folder or file, by its path under the root
+    assert (
+        m.path_at(2) == "Lumen Drift/Tide Tables" and m.path_at(3) == "Lumen Drift/ebb & flow.mp3"
+    )
+    assert m.path_at(99) is None
     queued, source = m.queue_from(3)
     assert [paths[i] for i in queued][0] == "Lumen Drift/ebb & flow.mp3" and source == "Lumen Drift"
     m.selectRows([2, 1], False)  # a folder and the folder beside it, in the list's order

@@ -35,4 +35,5 @@ QtObject {
     readonly property color bar: "#0b0d11"         // the now-playing bar (R6.5), under the window
     readonly property color scrim: "#8c000000"     // over the window, behind a dialog (T01)
     readonly property string sans: "Noto Sans"
+    readonly property string mono: "Noto Sans Mono"  // paths and patterns as T03 shows them
 }

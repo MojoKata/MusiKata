@@ -17,6 +17,7 @@ import gc
 import logging
 import os
 import platform
+import sqlite3
 import sys
 import threading
 from collections.abc import Callable, Mapping, Sequence
@@ -29,12 +30,26 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from shiboken6 import Shiboken
 
-from musikata_core import __version__, db, history, nowplaying, rootfiles, roots, settings, workers
+from musikata_core import (
+    __version__,
+    db,
+    history,
+    nowplaying,
+    organize,
+    patterns,
+    rootfiles,
+    roots,
+    scanner,
+    settings,
+    workers,
+)
 from musikata_core import folders as index_folders
 from musikata_core import playlists as index_playlists
 from musikata_core.audio.decode import DecodeError
 from musikata_core.clock import Clock, SystemClock
 from musikata_core.ratings import Writing, set_everything
+from musikata_core.tags import Job, Written
+from musikata_core.tags import save as save_tags
 
 from . import garbage, media
 from .albumart import AlbumArt, ArtImages
@@ -49,6 +64,7 @@ from .firstrun import FirstRun, music_folder
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .organize import OrganizeFiles
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .playlists import Playlists
 from .plays import PlayCounts
@@ -168,6 +184,7 @@ class Shell:
     playlists: Playlists | None = None
     dragging: Dragging | None = None
     smart: SmartPlaylists | None = None
+    organize: OrganizeFiles | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -178,6 +195,7 @@ class Shell:
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
             self.copies, self.encodings, self.infer, self.playlists, self.dragging, self.smart,
+            self.organize,
         )  # fmt: skip
 
 
@@ -200,10 +218,12 @@ def close_bridges(
     playlists: Playlists | None = None,
     dragging: Dragging | None = None,
     smart: SmartPlaylists | None = None,
+    organize: OrganizeFiles | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's, Album art's, the merges', Fix encoding…'s and Infer
-    from path's saves (stopped before their next file) and threads, the playlists' changes (an
+    from path's saves and Organize files' moves (stopped before their next file) and threads, the
+    playlists' changes (an
     export stopped) and the smart playlists' checks, Needs attention's dismissals
     and watching, the ratings' save and watching, the play counts (their file written), the change
     history's thread, the watcher, the scan's thread and the worker processes, and the index; then
@@ -229,6 +249,8 @@ def close_bridges(
         playlists.shut()
     if smart is not None:
         smart.shut()
+    if organize is not None:
+        organize.shut()
     if dragging is not None:
         dragging.close()
     if attention is not None:
@@ -243,7 +265,7 @@ def close_bridges(
     index.close()
     release(
         controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, dragging,
-        smart, attention, ratings, changes, player, library,
+        smart, organize, attention, ratings, changes, player, library,
     )  # fmt: skip
 
 
@@ -367,6 +389,8 @@ def load(
         counts.changed.connect(smart.pokePlays)
     # drag and drop (R6.10, R8.5): onto playlists through `lists`, onto the queue through `player`
     dragging = Dragging(root, index.read, library, lists, player, say=changes.say)
+    files = organize_files(root, index, library, changes, store, lists, dragging, tags_settings,
+                           home_of(env), clock)  # fmt: skip
     needs, names, copies = attend(
         library, root, index, clock, edit, album_art, genre_tools, writing, changes, tags_settings,
         missing, counts, fix, infer, lists, store,
@@ -388,6 +412,7 @@ def load(
             "playlists": lists,
             "dragging": dragging,
             "smart": smart,
+            "organize": files,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -398,7 +423,7 @@ def load(
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
                       art=album_art, genres=genre_tools, attention=needs, names=names,
                       copies=copies, encodings=fix, infer=infer, playlists=lists,
-                      dragging=dragging, smart=smart)  # fmt: skip
+                      dragging=dragging, smart=smart, organize=files)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -406,8 +431,56 @@ def load(
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
         changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
-        dragging, smart,
+        dragging, smart, files,
     )  # fmt: skip
+
+
+def organize_files(
+    root: str,
+    index: db.Index,
+    library: Library,
+    changes: ChangeHistory,
+    store: index_playlists.Store,
+    lists: Playlists,
+    dragging: Dragging,
+    tags_settings: settings.RootTags,
+    home: str,
+    clock: Clock,
+) -> OrganizeFiles:
+    """Organize files (R12): its moves, and an undo's, followed by the index (on the writer
+    thread), the playlists naming the files (`store`) and the folders left empty
+    (organize.Follower), the library read again after and this computer's plays named anew; files
+    dropped from outside the root on the window, the queue (`dragging`) or a playlist (`lists`)
+    brought in by its dialog (R12.5), their tags filled from their paths written with the root's
+    settings (R4.7.1, R4.7.2), and added to the playlist they were dropped on."""
+
+    def write(fn: Callable[[sqlite3.Connection], object]) -> object:
+        return index.write(fn).result()
+
+    follow = organize.Follower(root, write, store.repoint)
+
+    def save_one(job: Job) -> Written:
+        return save_tags(
+            job.path, job.changes, audio_hash=scanner.audio_hash,
+            id3_version=tags_settings.id3_version, keep_mtime=tags_settings.keep_modified_times,
+            rating_scale=tags_settings.rating_scale,
+        )  # fmt: skip
+
+    files = OrganizeFiles(
+        root, index.read, follow, changes, library, write, save_one, lists.add_songs,
+        available=lambda: bool(library.property("available")), home=home,
+        layout=tags_settings.layout or patterns.LAYOUT, user=tags_settings.patterns, clock=clock,
+    )  # fmt: skip
+    changes.follow = follow
+
+    def moved() -> None:
+        library.reload()
+        library.songsMoved.emit()  # this computer's plays file names them anew (A2.8)
+
+    changes.moved = moved
+    lists.outside = files.add_files
+    dragging.outside = files.add_files
+    return files
 
 
 def attend(
@@ -830,10 +903,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         infer = session.shell.infer if session.shell is not None else None
         dragging = session.shell.dragging if session.shell is not None else None
         smart = session.shell.smart if session.shell is not None else None
+        files = session.shell.organize if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
             copies=copies, encodings=fix, infer=infer, dragging=dragging, smart=smart,
+            organize=files,
         ).start()  # fmt: skip
     else:
         session.window.show()

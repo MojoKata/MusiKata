@@ -14,6 +14,7 @@ Item {
     id: header
     required property var library
     property var history: null
+    property var organize: null        // Organize files (R12.2), in Folders and on an album's page
     property bool open: false           // the search box opened from its icon on a narrow header
     readonly property real fieldMax: 250
     readonly property real fieldMin: 180
@@ -329,7 +330,8 @@ Item {
             }
         }
 
-        Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, and Change history, R4.9, so far)
+        Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, and Change history, R4.9, so far; Organize
+            // files…, R12.2, first in Folders and on an album's page)
             id: moreButton
             objectName: "more"
             width: 34
@@ -360,6 +362,13 @@ Item {
     Menu {
         id: moreMenu
         objectName: "moreMenu"
+        MenuItem {
+            objectName: "organizeView"
+            text: qsTr("Organize files…")
+            visible: header.organize !== null && header.library.canOrganize
+            height: visible ? implicitHeight : 0
+            onTriggered: header.organize.openView(header.library)
+        }
         MenuItem {
             objectName: "rescan"
             text: qsTr("Rescan library")

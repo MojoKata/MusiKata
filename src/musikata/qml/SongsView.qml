@@ -22,6 +22,7 @@ Item {
     property var playlists: null  // Add to playlist and New playlist from selection (R8)
     property var edit: null
     property var infer: null    // Infer from path's dialog (R3)
+    property var organize: null  // Organize files' dialog (R12.2)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var dragging: null  // a row dragged: the selection when it is in it (R6.10)
     readonly property var songs: library.songs
@@ -166,6 +167,8 @@ Item {
                     view.edit.editSelection(view.songs)
                 else if (action === "infer" && view.infer !== null)
                     view.infer.openSelection(view.songs)
+                else if (action === "organize" && view.organize !== null)
+                    view.organize.openSelection(view.songs)
             }
             visible: view.songs.selectionCount > 0
             anchors.horizontalCenter: list.horizontalCenter

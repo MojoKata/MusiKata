@@ -372,6 +372,26 @@ def row_of(model, kind):
                 if model.entry_at(i) is not None and model.entry_at(i).kind == kind)  # fmt: skip
 
 
+def test_show_in_file_manager_on_a_folders_row_shows_its_folder_or_file(root, index, qtbot):
+    """R2.9.6: the right-click menu of a folder or file in Folders, with Show in file manager."""
+    from PySide6.QtCore import QObject
+
+    class Rows(QObject):
+        def path_at(self, row):
+            return ["MO/K", "MO/K/01.wav"][row] if row < 2 else None
+
+    needs, _model = make(root, index)
+    try:
+        needs.showRow(Rows(), 0)
+        needs.showRow(Rows(), 1)
+        needs.showRow(Rows(), 5)  # no such row: nothing
+        qtbot.waitUntil(lambda: len(needs.runs_) == 2, timeout=WAIT)
+        assert needs.runs_ == [["show", os.path.join(root, "MO", "K")],
+                               ["show", os.path.join(root, "MO", "K", "01.wav")]]  # fmt: skip
+    finally:
+        needs.close()
+
+
 def test_each_action_reaches_the_tool_that_fixes_its_entry(root, index, qtbot):
     """R2.8: Edit tags and Album art on the album, Merge on the genres' or the names' merge, Show
     in folder through the file manager, its folder opened when that fails."""

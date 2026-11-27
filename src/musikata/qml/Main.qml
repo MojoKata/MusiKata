@@ -32,7 +32,9 @@ import "."
 // artists, genres, folders and a playlist's entries are dragged from every view (R6.10) onto a
 // playlist in the sidebar, within a playlist's page, onto Up next or the queue button, and out of
 // MusiKata as their files; the drag's picture is a card kept off the window (DragCard), and files
-// from another app dropped anywhere else are R12.5's.
+// from another app dropped anywhere else are brought into the library (R12.5). Organize files (R12)
+// opens its dialog over the whole window, from the header's ⋮ menu in Folders and on an album's
+// page, the selection bars and the right-click menus, and for files dropped from outside.
 Window {
     id: win
     required property var library
@@ -50,6 +52,7 @@ Window {
     required property var playlists
     required property var dragging
     required property var smart
+    required property var organize
     width: 1280
     height: 800
     minimumWidth: 960
@@ -62,8 +65,9 @@ Window {
                                   || win.copies.question.title !== undefined
                                   || win.encodings.opened || win.infer.opened
                                   || win.playlists.opened || win.smart.opened
+                                  || win.organize.opened
 
-    DropArea {  // files from another app dropped anywhere else (R6.10): R12.5's, a later version
+    DropArea {  // files from another app dropped anywhere else (R6.10): into the library (R12.5)
         objectName: "windowDrop"
         anchors.fill: parent
         enabled: !win.modal
@@ -96,6 +100,7 @@ Window {
         visible: win.library.searchable
         library: win.library
         history: win.history
+        organize: win.organize
     }
     Item {  // the panel docked on the right: Change history over Edit tags
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -196,14 +201,14 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art; dragging: win.dragging } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize } }
     Component { id: artists; ArtistsView { library: win.library; dragging: win.dragging } }
     Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists; dragging: win.dragging } }
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres; dragging: win.dragging } }
     Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists; dragging: win.dragging } }
-    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; attention: win.attention } }
     Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; smart: win.smart } }
 
     UpNext {
@@ -261,6 +266,11 @@ Window {
         objectName: "inferOverlay"
         anchors.fill: parent
         infer: win.infer
+    }
+    OrganizeDialog {
+        objectName: "organizeOverlay"
+        anchors.fill: parent
+        organize: win.organize
     }
     FindDialog {
         objectName: "findOverlay"

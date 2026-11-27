@@ -23,6 +23,7 @@ Item {
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // the Album art dialog (R5.2)
     property var infer: null  // Infer from path's dialog (R3.1)
+    property var organize: null  // Organize files' dialog (R12.2)
     property var dragging: null  // a song dragged: the selection when it is in it (R6.10)
     readonly property var album: library.album
     readonly property var tracks: album.songs
@@ -160,6 +161,12 @@ Item {
                         text: qsTr("Infer from path")
                         enabled: page.infer !== null
                         onTriggered: page.infer.openAlbum(page.album.id)
+                    }
+                    MenuItem {
+                        objectName: "organizeAlbum"
+                        text: qsTr("Organize files…")
+                        enabled: page.organize !== null
+                        onTriggered: page.organize.openAlbum(page.album.id)
                     }
                     MenuItem {
                         objectName: "saveCoverToFolder"

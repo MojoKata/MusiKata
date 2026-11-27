@@ -127,6 +127,24 @@ def test_a_double_click_plays_the_song_and_queues_the_rest_of_its_list(made, ind
     assert p.property("timeName") == "0:00 of 0:42" and p.property("failed") is False
 
 
+def test_the_song_playing_moved_by_organize_files_is_marked_where_it_is_now(made, index, qtbot):
+    """R12.4, A2.8: the queue holds songs by id, so a song moved while it plays stays the one
+    playing; the lists mark it at its new path once the index's rows are read again."""
+    p, engine, songs = made
+    now = []
+    p.nowPlaying.connect(now.append)
+    p.playFrom(songs, 1)
+    wait_playing(qtbot, p, engine, 1)
+    index.write(lambda c: c.execute(
+        "UPDATE song SET path = 'LD/2019 - GH/02 - Glass Harbor.flac' WHERE path = 'LD/GH/02.flac'"
+    )).result()  # fmt: skip
+    p.reread()
+    assert now == ["LD/GH/02.flac", "LD/2019 - GH/02 - Glass Harbor.flac"]
+    assert p.property("path") == "LD/2019 - GH/02 - Glass Harbor.flac"
+    p.reread()  # nothing changed since: nothing said
+    assert len(now) == 2
+
+
 def test_enter_on_a_selection_plays_its_first_song_and_queues_the_rest_of_its_list(
     made, index, qtbot
 ):

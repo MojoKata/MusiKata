@@ -19,6 +19,11 @@
   with its path under the pattern detected for the folder, as Infer from path's defaults would
   read it: MATCH, FIX (and how: `Difference`), or BARE (no tags at all); None when no pattern fits
   it.
+- **The layout** (R12.1, R12.1.1, A3.3): the same language run the other way, a path made from a
+  song's tags for Organize files. `parse(text, naming=True)` takes R12.1's naming forms too
+  (`{track:02}`, `{disc-}`, the sort names) and refuses `{*}`, which names nothing; `values_for`
+  gives a song's value for every token, `render` the path under the root, each part cleaned
+  (`clean_part`) so a layout gives the same path on every platform.
 
 A value the path gives keeps the tag's own spelling where the path couldn't spell it otherwise: a
 tag that holds what a file's name can't (`\\ / : * ? " < > |`) and is the path's text once those
@@ -37,6 +42,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
+from . import sortnames
 from .tags import parse as tag_parse
 from .tags.case import has_mixed_case, tidy_case
 from .tags.fields import Tags
@@ -72,6 +78,11 @@ DOESNT_FIT = "Doesn't fit the pattern"  # R3.4
 # R3.9's states, worst last
 MATCH, FIX, BARE = 0, 1, 2
 _TOKEN = re.compile(r"\{([^{}]*)\}")
+# R12.1's naming forms, which only a layout (parse's `naming`) takes: a number padded with zeros
+# ({track:02}), the disc and "-" when the album has more than one ({disc-}), the sort names
+SORT_TOKENS = {"artistsort": "artist", "albumartistsort": "albumartist", "albumsort": "album"}
+DISC_DASH = "disc-"
+_PADDED = re.compile(r"(track|disc):0([1-9])")
 # R3.2.1: a run of spaces, and the three separators that match one another
 _SEPARATOR = r"(?: +[-–] +|_-_)"
 _LITERAL = re.compile(r"( +[-–] +|_-_| +)")
@@ -119,9 +130,16 @@ class Pattern:
         return tuple(TOKENS[t] for t in self.tokens)
 
 
-def parse(text: str) -> Pattern:
+def _naming_form(name: str) -> bool:
+    """Whether `name` (a token's, lower case) is one of R12.1's naming forms."""
+    return name in SORT_TOKENS or name == DISC_DASH or _PADDED.fullmatch(name) is not None
+
+
+def parse(text: str, naming: bool = False) -> Pattern:
     """`text` as a pattern (R3.2); never fails: a pattern that can't be used says why in its
-    `problem` (no text, a brace not closed, a token R3.2 hasn't, no token that fills a field)."""
+    `problem` (no text, a brace not closed, a token R3.2 hasn't, no token that fills a field).
+    With `naming`, it is a layout (R12.1): R12.1's naming forms are tokens too, `{*}` is refused,
+    and it has no regular expression, as it only makes paths (`render`)."""
     stripped = text.strip().strip("/")
     parts: list[tuple[str, str]] = []
     at = 0
@@ -130,7 +148,14 @@ def parse(text: str) -> Pattern:
         if m.start() > at:
             parts.append(("text", stripped[at : m.start()]))
         name = m.group(1).strip().lower()
-        if name != SKIP and name not in TOKENS and not problem:
+        if not problem and naming and name == SKIP:
+            problem = "{*} names nothing: a layout can't use it"
+        elif (
+            not problem
+            and name != SKIP
+            and name not in TOKENS
+            and not (naming and _naming_form(name))
+        ):
             problem = f"{{{m.group(1)}}} isn't a token"
         parts.append(("token", name))
         at = m.end()
@@ -139,9 +164,10 @@ def parse(text: str) -> Pattern:
     if not problem and any("{" in v or "}" in v for k, v in parts if k == "text"):
         problem = "A brace isn't closed"
     pattern = Pattern(text, tuple(parts), problem)
-    if not problem and not pattern.tokens:
+    named = pattern.tokens or (naming and any(k == "token" for k, _ in parts))
+    if not problem and not named:
         problem = "Put at least one token in it, such as {title}"
-    if problem:
+    if problem or naming:
         return Pattern(text, tuple(parts), problem)
     return replace(pattern, regex=re.compile(_compiled(pattern.parts)))
 
@@ -499,3 +525,124 @@ def states(
         else:
             out.append((FIX if diffs else MATCH, diffs))
     return out
+
+
+# ---------- the layout: paths made from tags (R12.1, R12.1.1) ----------
+
+LAYOUT = "{albumartist}/{year} - {album}/{disc-}{track:02} - {title}"  # R12.1's default
+UNKNOWN_ARTIST = "Unknown artist"  # a song naming no artist or album artist
+UNKNOWN_ALBUM = "Unknown album"  # a song naming no album
+VARIOUS = "Various Artists"  # a compilation naming no album artist (R2.5.3, albums.VARIOUS)
+PART_MAX = 120  # R12.1.1: each part of a path, in characters
+BYTES_MAX = 255  # and in UTF-8 bytes, the most Linux's and macOS's file systems take in a name
+# R12.1.1: what a file system refuses in a name, on some platform: Windows' marks, and control
+# characters
+_REFUSED = re.compile(r'[/\\:*?"<>|\x00-\x1f\x7f]')
+# the names Windows keeps for its devices, whatever follows them after a dot ("CON.flac")
+RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"{d}{n}" for d in ("COM", "LPT") for n in [*"123456789", "¹", "²", "³"]}
+)
+
+
+def _cut(text: str, chars: int, size: int) -> str:
+    """`text` cut to at most `chars` characters and `size` bytes of UTF-8, whole characters."""
+    text = text[:chars]
+    while len(text.encode("utf-8")) > size:
+        text = text[:-1]
+    return text
+
+
+def clean_part(text: str, ext: str = "") -> str:
+    """One part of a path (a folder's name, or a file's without its extension `ext`) as every
+    platform takes it (R12.1.1): composed (NFC, as macOS may hand names decomposed), what a file
+    system refuses (`/ \\ : * ? " < > |` and control characters) replaced with `_`, trimmed of
+    spaces and dots at its ends, cut to PART_MAX characters and BYTES_MAX bytes with `ext`, and a
+    name Windows keeps for a device (CON, NUL, COM1, …) given a `_` after it ("CON_"). "" when
+    nothing is left."""
+    plain = _REFUSED.sub("_", unicodedata.normalize("NFC", text)).strip(" .")
+    plain = _cut(plain, PART_MAX - len(ext), BYTES_MAX - len(ext.encode("utf-8"))).rstrip(" .")
+    head, dot, rest = plain.partition(".")
+    if head.rstrip(" ").upper() in RESERVED:
+        plain = _cut(f"{head.rstrip(' ')}_{head[len(head.rstrip(' ')) :]}{dot}{rest}",
+                     PART_MAX - len(ext), BYTES_MAX - len(ext.encode("utf-8")))  # fmt: skip
+    return plain
+
+
+def values_for(
+    tags: Tags, discs: int = 1, articles: Sequence[str] = sortnames.ARTICLES
+) -> dict[str, str]:
+    """A song's value for each token a layout can hold (R12.1), "" where it has none: the album
+    artist, else "Various Artists" for a compilation naming none, else the artist, else "Unknown
+    artist" (and the artist likewise); the album, else "Unknown album"; the title as tagged (the
+    caller's file name stands in for none); numbers as written, `{track:02}` padded, `{disc-}`
+    the disc and "-" only when the album has more than one (`discs`); the first genre; the sort
+    names as tagged (the album artist's the artist's when it is the artist's name, as albums.place
+    sorts it), else the name with its leading article moved to its end (R2.13)."""
+    artist = (tags.artist or "").strip()
+    albumartist = (tags.albumartist or "").strip()
+    if not albumartist:
+        albumartist = VARIOUS if tags.compilation else artist or UNKNOWN_ARTIST
+    artist = artist or albumartist
+    album = (tags.album or "").strip() or UNKNOWN_ALBUM
+    out = {
+        "artist": artist,
+        "albumartist": albumartist,
+        "album": album,
+        "title": (tags.title or "").strip(),
+        "year": str(tags.year) if tags.year else "",
+        "track": str(tags.track) if tags.track else "",
+        "disc": str(tags.disc) if tags.disc else "",
+        "genre": tags.genres[0].strip() if tags.genres else "",
+        DISC_DASH: f"{tags.disc}-" if tags.disc and max(discs, tags.disctotal or 0) > 1 else "",
+        "artistsort": (tags.artistsort or "").strip() or sortnames.article_last(artist, articles),
+        "albumartistsort": (tags.albumartistsort or "").strip()
+        or ("" if (tags.albumartist or "").strip() else (tags.artistsort or "").strip())
+        or sortnames.article_last(albumartist, articles),
+        "albumsort": (tags.albumsort or "").strip() or sortnames.article_last(album, articles),
+    }
+    for field in ("track", "disc"):
+        number = getattr(tags, field)
+        for width in range(1, 10):
+            out[f"{field}:0{width}"] = f"{number:0{width}d}" if number else ""
+    return out
+
+
+def _filled(items: list[tuple[str, str]]) -> str:
+    """A part's text and its tokens' values: a token with no value left out with the text that
+    joins it to the next token (or, for the last, to the one before), so "{year} - {album}" with
+    no year is the album alone."""
+    items = list(items)
+    while True:
+        empty = next((i for i, (k, v) in enumerate(items) if k == "token" and not v), None)
+        if empty is None:
+            return "".join(v for _, v in items)
+        later = any(k == "token" for k, _ in items[empty + 1 :])
+        earlier = any(k == "token" for k, _ in items[:empty])
+        if later and empty + 1 < len(items) and items[empty + 1][0] == "text":
+            del items[empty : empty + 2]
+        elif earlier and not later and items[empty - 1][0] == "text":
+            del items[empty - 1 : empty + 1]
+        else:
+            del items[empty]
+
+
+def render(layout: Pattern, values: Mapping[str, str], name: str, ext: str) -> str:
+    """The path under the root, with `/`, that `layout` (parse's, `naming`) makes of a song's
+    `values` (`values_for`), its file's extension `ext` (".flac") after it: each part filled
+    (a token with no value left out with what joins it; no title is the file's own `name`,
+    without its extension), then cleaned (`clean_part`); a folder that comes out empty is left
+    out, and a file's name that does is the file's own."""
+    values = {**values, "title": values.get("title") or name}
+    parts: list[list[tuple[str, str]]] = [[]]
+    for kind, value in layout.parts:
+        if kind == "token":
+            parts[-1].append(("token", values.get(value, "")))
+            continue
+        pieces = value.split("/")
+        parts[-1].append(("text", pieces[0]))
+        for piece in pieces[1:]:
+            parts.append([("text", piece)])
+    folders = [clean_part(_filled(p)) for p in parts[:-1]]
+    file = clean_part(_filled(parts[-1]), ext) or clean_part(name, ext) or "_"
+    return "/".join([*(f for f in folders if f), file + ext])

@@ -56,10 +56,9 @@ MODES = [
 DEFAULT_MODE = "small"
 # the selection bar's actions (R2.9.6) after Play: Add to playlist (R8), Edit tags (R4.2), Infer
 # from path (R3.1) and Album art (R5.2), by their `action`, Album art only when the songs are one
-# album (`selection_actions`), and those that come with later slices, with what their tooltips
-# say; the right-click menu holds Play next, Add to queue (R7.2), Add to playlist, Edit tags, Infer
-# from path and Album art (when the row's songs are one album) until the slices that fill the
-# rest, and dragging (R6.10) comes whole with its own
+# album (`selection_actions`), and Organize… (R12.2); the right-click menu holds Play next, Add to
+# queue (R7.2), Add to playlist, Edit tags, Infer from path, Album art (when the row's songs are one
+# album), Organize files… and Show in file manager, and dragging (R6.10) comes whole with its own
 EDIT = {"label": "Edit tags", "icon": "genre", "later": "", "action": "edit"}
 ART = {"label": "Album art", "icon": "image", "later": "", "action": "art"}
 INFER = {"label": "Infer from path", "icon": "wand", "later": "", "action": "infer"}
@@ -67,7 +66,7 @@ LATER = [
     {"label": "Add to playlist", "icon": "plus", "later": "", "action": "playlist"},
     EDIT,
     INFER,
-    {"label": "Organize…", "icon": "arrow", "later": "Organizing files comes in a later version"},
+    {"label": "Organize…", "icon": "arrow", "later": "", "action": "organize"},
 ]
 # a folder of songs' buttons (R2.9.7, L08): Infer from path (R3.1, the first), Edit tags (R4.2)
 # and Album art (R5.2)
@@ -509,6 +508,11 @@ class FolderModel(PagedModel):
         if row_["kind"] == "folder":
             return index_folders.songs_beneath(self._read(), row_["path"])
         return [int(row_["key"]) // 2]
+
+    def path_at(self, n: int) -> str | None:
+        """Row n's folder or file, by its path under the root; None past the rows."""
+        row_ = self.row(n)
+        return None if row_ is None else str(row_["path"])
 
     def song_at(self, n: int) -> int | None:
         """A file's song, by id (its key is odd); None for a folder's row."""

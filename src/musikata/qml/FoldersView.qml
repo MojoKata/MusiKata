@@ -13,7 +13,8 @@ import "."
 // A click selects (Ctrl/⌘-click adds, Shift-click takes the range), as does a cover's checkbox and
 // List's, and a drag box in the image modes (R2.9.6); a double click or Enter opens a folder or
 // plays a file and the files after it (R7.1); a right click on a row of files or of List opens its
-// menu, Play next, Add to queue (R7.2), Edit tags and Album art; Alt+↑ (⌘↑ on macOS) or Backspace
+// menu, Play next, Add to queue (R7.2), Edit tags, Album art, Organize files… (R12.2) and Show in
+// file manager (R2.9.6); Alt+↑ (⌘↑ on macOS) or Backspace
 // goes up, Alt+← or the mouse's back button back. Edit tags, on the selection bar, in the menu and on
 // a folder of songs' strip, opens the panel on the songs selected or beneath the folders (R2.9.6,
 // R4.2); Infer from path, in the same places, its dialog on the same songs (R3.1); Album art opens
@@ -34,6 +35,8 @@ Item {
     property var infer: null    // Infer from path's dialog (R3)
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var dragging: null  // folders and files dragged: the selection when the row is in it
+    property var organize: null  // Organize files' dialog (R12.2)
+    property var attention: null  // Show in file manager (R2.9.6), as Needs attention's Show in folder
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
     readonly property string mode: folders.mode
@@ -480,7 +483,7 @@ Item {
         return out
     }
 
-    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer; playlists: view.playlists; playlistList: view.library.playlists }
+    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer; organize: view.organize; reveal: view.attention; playlists: view.playlists; playlistList: view.library.playlists }
 
     SelectionBar {
         objectName: "selectionBar"
@@ -497,6 +500,8 @@ Item {
                 view.art.openAlbum(view.folders.selectedAlbum)
             else if (action === "infer" && view.infer !== null)
                 view.infer.openSelection(view.rowsModel)
+            else if (action === "organize" && view.organize !== null)
+                view.organize.openSelection(view.rowsModel)
         }
         playNote: view.library.playNote
         onPlay: view.folders.playSelection()
