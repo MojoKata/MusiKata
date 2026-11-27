@@ -13,6 +13,9 @@ folder added or gone) reads every other computer's again."""
 from __future__ import annotations
 
 import os
+import sqlite3
+from collections.abc import Callable
+from concurrent.futures import Future
 
 from PySide6.QtCore import QObject, Signal, Slot
 
@@ -82,6 +85,11 @@ class PlayCounts(QObject):
     def tick(self) -> None:
         """While playing: this computer's file is written when it is due (A2.8)."""
         self._keeping.tick()
+
+    def change(self, fn: Callable[[sqlite3.Connection, str], object]) -> Future[object]:
+        """A change to this computer's plays that isn't a play (R2.12's plays moved to the copy
+        kept, and their Undo): rootfiles.Keeping.change."""
+        return self._keeping.change(fn)
 
     def moved(self) -> None:
         """A scan moved songs: this computer's file names them where they are now."""

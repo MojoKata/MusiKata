@@ -146,6 +146,23 @@ def _entry(value: object, problems: list[str]) -> tuple[Entry, dict[str, object]
     return Entry(path, hash_, count, last), extras
 
 
+def entry_of(value: object, problems: list[str]) -> Entry | None:
+    """A song's plays as a root's file names them (`{"path", "hash", "count", "last"}`, as in
+    plays.json and a history entry's plays moved, R2.12); None, with the problem, when it can't
+    be used."""
+    found = _entry(value, problems)
+    return found[0] if found is not None else None
+
+
+def entry_document(e: Entry) -> dict[str, object]:
+    """A song's plays as a root's file writes them (`entry_of` reads it back)."""
+    out: dict[str, object] = {"path": e.path}
+    if e.hash is not None:
+        out["hash"] = e.hash
+    out.update(count=e.count, last=e.last)
+    return out
+
+
 def parse(text: str) -> Plays:
     """The plays in `text`, a plays.json's content, whatever was written there: a file that
     can't be used whole gives none, and an entry that can't be used is left out, each named in
@@ -424,6 +441,122 @@ def _insert(c: sqlite3.Connection, computer: str, entries: Sequence[Entry]) -> N
     _merge_twins(c, {s for s in songs if s is not None})
 
 
+def _add(c: sqlite3.Connection, computer: str, song: int, count: int, last: str) -> None:
+    """`count` more plays of `song` by `computer`, last played `last` at the latest: added to its
+    row, or a row made for it, named as the song is now."""
+    row = c.execute(
+        "SELECT id FROM play WHERE computer = ? AND song_id = ? ORDER BY id LIMIT 1",
+        (computer, song),
+    ).fetchone()
+    if row is not None:
+        c.execute(
+            "UPDATE play SET count = count + ?, last = max(last, ?) WHERE id = ?",
+            (count, last, row[0]),
+        )
+        return
+    found = c.execute("SELECT path, audio_hash FROM song WHERE id = ?", (song,)).fetchone()
+    if found is not None:
+        c.execute(
+            "INSERT INTO play (computer, song_id, path, hash, count, last)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (computer, song, found[0], found[1], count, last),
+        )
+
+
+def _take(c: sqlite3.Connection, rows: Sequence[tuple[int, int]], wanted: int) -> int:
+    """Up to `wanted` plays taken from `rows` (each its id and count), in order, a row left with
+    none removed; how many were taken."""
+    taken = 0
+    for row, n in rows:
+        part = min(n, wanted - taken)
+        if part <= 0:
+            break
+        if part == n:
+            c.execute("DELETE FROM play WHERE id = ?", (row,))
+        else:
+            c.execute("UPDATE play SET count = count - ? WHERE id = ?", (part, row))
+        taken += part
+    return taken
+
+
+def take_plays(
+    c: sqlite3.Connection, computer: str, into: int, songs: Collection[int], paths: Collection[str]
+) -> list[Entry]:
+    """R2.12: `computer`'s plays of the songs `songs` (by id) moved into song `into`'s: their rows
+    taken out and their counts added to its row (made when it has none), the latest time kept.
+    `paths` (the songs' paths) find their rows too when a scan has taken the songs out first and
+    left them standing for none (A2.8). What was taken, a song once, as its path and hash named
+    it, for Undo (`give_plays`)."""
+    marks_s = ", ".join("?" * len(songs)) or "NULL"
+    marks_p = ", ".join("?" * len(paths)) or "NULL"
+    rows = c.execute(
+        "SELECT play.id, coalesce(song.path, play.path), coalesce(song.audio_hash, play.hash),"
+        " play.count, play.last FROM play LEFT JOIN song ON song.id = play.song_id"
+        f" WHERE play.computer = ? AND (play.song_id IN ({marks_s})"
+        f" OR (play.song_id IS NULL AND play.path IN ({marks_p}))) AND play.song_id IS NOT ?"
+        " ORDER BY play.id",
+        (computer, *songs, *paths, into),
+    ).fetchall()
+    taken: dict[str, Entry] = {}
+    for _row, path, digest, n, last in rows:
+        had = taken.get(path)
+        taken[path] = Entry(path, digest, n + (had.count if had else 0),
+                            max(last, had.last) if had else last)  # fmt: skip
+    c.executemany("DELETE FROM play WHERE id = ?", [(r[0],) for r in rows])
+    if taken:
+        _add(c, computer, into, sum(e.count for e in taken.values()),
+             max(e.last for e in taken.values()))  # fmt: skip
+    return list(taken.values())
+
+
+def give_plays(
+    c: sqlite3.Connection, computer: str, song: int, moved: Sequence[Entry]
+) -> list[Entry]:
+    """Undoing `take_plays`: song `song`'s plays by `computer` lessened by those `moved` into it
+    (never below none), and each entry of `moved` a row again, standing for the song it names (by
+    path, else by hash: a copy gone in the trash stands for its exact copy, A2.8, else waits for
+    its file to come back). The plays given back, by the entries of `moved`."""
+    rows = c.execute(
+        "SELECT id, count FROM play WHERE computer = ? AND song_id = ? ORDER BY id",
+        (computer, song),
+    ).fetchall()
+    given = _take(c, rows, sum(e.count for e in moved))
+    back: list[Entry] = []
+    left = given
+    for e in moved:
+        if left <= 0:
+            break
+        back.append(Entry(e.path, e.hash, min(e.count, left), e.last))
+        left -= back[-1].count
+    _insert(c, computer, back)
+    return back
+
+
+def take_back(
+    c: sqlite3.Connection, computer: str, song: int, moved: Sequence[Entry]
+) -> list[Entry]:
+    """Redoing `take_plays` (an Undo undone): the plays `moved` named, as many as `computer`'s rows
+    naming each path still have, moved into song `song` again. The plays moved, by the entries of
+    `moved`."""
+    total = 0
+    last = UNKNOWN
+    taken: list[Entry] = []
+    for e in moved:
+        rows = c.execute(
+            "SELECT id, count FROM play WHERE computer = ? AND path = ? AND song_id IS NOT ?"
+            " ORDER BY id",
+            (computer, e.path, song),
+        ).fetchall()
+        n = _take(c, rows, e.count)
+        total += n
+        if n:
+            last = max(last, e.last)
+            taken.append(Entry(e.path, e.hash, n, e.last))
+    if total:
+        _add(c, computer, song, total, last)
+    return taken
+
+
 def replace(c: sqlite3.Connection, computer: str, entries: Sequence[Entry]) -> None:
     """Another computer's plays, as its file has them now, in place of what was read of it."""
     c.execute("DELETE FROM play WHERE computer = ?", (computer,))
@@ -690,6 +823,23 @@ class Keeping:
         self.due.change()
         self.tick()
         return done
+
+    def change(self, fn: Callable[[sqlite3.Connection, str], object]) -> Future[object]:
+        """A change to this computer's plays that isn't a play (R2.12's plays moved to the copy
+        kept, and their Undo): `fn` run in the writer's transaction with the key of this
+        computer's rows (`me`), off this thread; then its file written when it is due. The
+        future's result is `fn`'s."""
+
+        def job() -> object:
+            me = self.me
+            done = self._index.write(lambda c: fn(c, me)).result()
+            self.due.change()
+            if self.due.take():
+                self._write()
+            self._tell()
+            return done
+
+        return self._submit(job)
 
     def tick(self) -> Future[object] | None:
         """While playing: the file written when it is due; None when it isn't."""

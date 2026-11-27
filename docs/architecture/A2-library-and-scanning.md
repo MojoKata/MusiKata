@@ -309,7 +309,11 @@ UTC to the millisecond (`20261125T204512000Z-b2c4….json`): what the save was (
 name), and each file saved, by its path and audio hash, with the old value of each field that
 changed (`fields`) and the value written (`new`, which Undo checks the file against, R4.9.1), its
 old path when it moved (`from`), and, when the cover changed, its old cover by hash (`cover`,
-`null` when it had none) and the new one's (`new_cover`):
+`null` when it had none) and the new one's (`new_cover`). Moving a song's other copies to the
+trash (R2.12) names each file moved (`trashed`, true: Undo can't take it out, R2.11) and, on the
+copy kept, the plays it took from them on the computer that saved the entry (`plays_from`, each as
+`plays.json` names a song), which Undo gives back; the Undo's own entry names those it gave back
+(`plays_to`), which undoing it takes again:
 
 ```json
 {

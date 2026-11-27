@@ -23,7 +23,7 @@ from fakes import FakeClock, fill, wav
 from hypothesis import given
 from hypothesis import strategies as st
 
-from musikata_core import art, db, history, ratings, scanner, tags
+from musikata_core import art, db, history, ratings, rootfiles, scanner, tags
 from musikata_core.history import Broken, Current, Entry, FileChange, Recording
 from musikata_core.tags import AudioInfo, Batch, Job, Picture, Tags, Written
 
@@ -943,3 +943,163 @@ def test_an_image_file_that_cant_be_read_isnt_undone_and_says_why(tmp_path):
                   None, H1, image=True),))  # fmt: skip
     (f,) = history.plan(entry, root, lambda h: []).files
     assert f.why.startswith("it can't be read")
+
+
+# ---------- the same song more than once (R2.12): files to the trash, plays moved ----------
+
+PLAYED = "2026-11-25T20:41:00Z"
+
+
+def test_a_move_to_the_trash_is_one_entry_with_the_rating_plays_and_files_it_moved(tmp_path):
+    """R2.12, R2.11: the kept copy's rating (a file written), the plays it took (noted) and the
+    copies moved to the trash (noted) are one entry, each file named once, valid under its
+    schema and read back; the index lists the plays and the trash among its fields."""
+    root = str(tmp_path / "Music")
+    rec = Recording(root, lambda: ME, FakeClock(WHEN))
+    took = history.Plays("_Incoming/Moonpull.m4a", H2, 6, PLAYED)
+    rec.note(FileChange("LD/04.flac", H1, {}, plays_from=(took,)))
+    rec.note(FileChange("_Incoming/Moonpull.m4a", H2, {}, trashed=True))
+    jobs = [Job(os.path.join(root, "LD", "04.flac"), {"rating": 5})]
+
+    def write(job):
+        return written(job.path, Tags(rating=4), Tags(rating=5), ("rating",))
+
+    out = Batch(jobs, write, record=rec, action="copies", description="Moonpull").run()
+    with open(os.path.join(history.folder_of(root), out.entry), encoding="utf-8") as f:
+        doc = json.load(f)
+    valid(doc)
+    assert doc["files"] == [
+        {"path": "LD/04.flac", "hash": H1, "fields": {"rating": 4}, "new": {"rating": 5},
+         "plays_from": [{"path": "_Incoming/Moonpull.m4a", "hash": H2, "count": 6,
+                         "last": PLAYED}]},
+        {"path": "_Incoming/Moonpull.m4a", "hash": H2, "fields": {}, "new": {}, "trashed": True},
+    ]  # fmt: skip
+    entry = parse(doc, out.entry)
+    kept, gone = entry.files
+    assert kept.plays_from == (took,) and kept.fields() == ["rating", "plays"]
+    assert gone.trashed and gone.fields() == ["trashed"] and not gone.tags and not gone.plays
+    assert history.document(entry)["files"] == doc["files"]
+
+
+def test_changes_of_one_file_are_one_file_of_the_entry():
+    """history.combined: a file's fields saved and what was noted of it are one."""
+    took = history.Plays("b.m4a", H2, 2, PLAYED)
+    a = FileChange("a.flac", None, {"rating": 3}, {"rating": 4})
+    b = FileChange("a.flac", H1, {"title": "x"}, {"title": "y"}, True, H2, H3, plays_from=(took,))
+    c = FileChange("b.m4a", H2, {}, trashed=True)
+    one, two = history.combined([a, c, b])
+    assert (one.path, one.hash, one.old, one.new) == (
+        "a.flac", H1, {"rating": 3, "title": "x"}, {"rating": 4, "title": "y"}
+    )  # fmt: skip
+    assert (one.cover, one.old_cover, one.new_cover, one.plays_from) == (True, H2, H3, (took,))
+    assert two == c
+
+
+def test_shapes_of_plays_moved_and_files_in_the_trash_each_read_for_what_can_be_used(caplog):
+    """testing.md's `history` shapes for R2.12's fields."""
+    good = {"path": "x.m4a", "hash": H2, "count": 6, "last": PLAYED}
+    doc = entry_doc(files=[
+        {"path": "a.flac", "plays_from": [good, {"path": "../out.mp3", "count": 1, "last": PLAYED},
+                                          {"path": "y.mp3", "count": 0}, "z"]},
+        {"path": "b.flac", "plays_to": "not a list", "trashed": "yes"},
+        {"path": "c.flac", "plays_to": [dict(good, hash="short", last="today")]},
+        {"path": "d.flac", "trashed": True},
+        {"path": "e.flac", "plays_from": None},
+    ])  # fmt: skip
+    found = parse(doc)
+    a, c, d = found.files
+    assert a.plays_from == (history.Plays("x.m4a", H2, 6, PLAYED),)
+    assert c.plays_to == (history.Plays("x.m4a", None, 6, "1970-01-01T00:00:00Z"),)
+    assert d.trashed and not d.tags
+    said = "\n".join(found.problems)
+    for problem in (
+        "'../out.mp3' isn't a path under the root",
+        "count isn't a number",
+        "a song isn't an object",
+        "plays_to isn't a list",
+        "trashed isn't true or false",
+        "b.flac: no field",
+        "e.flac: no field",
+    ):
+        assert problem in said, problem  # fmt: skip
+
+
+def test_undo_gives_back_the_plays_and_leaves_the_files_in_the_trash(tmp_path):
+    """R2.12, R2.11: the plan of a move to the trash finds the kept copy without reading it for
+    its plays alone, lists the files in the trash apart (neither undone nor failed), and the undo
+    gives back the plays (`plays`), kept in its entry so it can be redone."""
+    root = tmp_path / "Music"
+    (root / "LD").mkdir(parents=True)
+    (root / "LD" / "04.flac").write_bytes(b"")
+    took = history.Plays("_Incoming/Moonpull.m4a", H2, 6, PLAYED)
+    e = Entry(NAME, WHEN, ME, "copies", "Moonpull", (
+        FileChange("LD/04.flac", H1, {}, plays_from=(took,)),
+        FileChange("_Incoming/Moonpull.m4a", H2, {}, trashed=True),
+    ))  # fmt: skip
+
+    def look(path, cover):
+        raise AssertionError("a file's plays need no reading")
+
+    p = history.plan(e, str(root), lambda h: [], look=look)
+    assert [(f.path, f.why) for f in p.files] == [("LD/04.flac", ""), (None, "")]
+    assert p.failed == [] and [f.change.path for f in p.in_trash] == ["_Incoming/Moonpull.m4a"]
+    assert history.jobs(p, str(root), overwrite=False) == []
+    asked = []
+
+    def plays(computer, files):
+        asked.append((computer, [f.path for f in files]))
+        return [history.plays_undone(f, f.change.plays_from) for f in files]
+
+    rec = Recording(str(root), lambda: ME, FakeClock(WHEN + timedelta(minutes=1)), NAME)
+    out = history.undo(p, str(root), False, lambda j: None, rec, plays=plays)
+    assert asked == [(ME, ["LD/04.flac"])] and out.failed == [] and out.saved == []
+    undone = history.read(history.folder_of(str(root)), out.entry)
+    assert undone.description == "Undo: Moonpull" and undone.undoes == NAME
+    (f,) = undone.files
+    assert (f.path, f.plays_to, f.plays_from) == ("LD/04.flac", (took,), ())
+    # its own undo (a redo) takes them again
+    redo = history.plan(undone, str(root), lambda h: [], look=look)
+    assert history.plays_undone(redo.files[0], (took,)).plays_from == (took,)
+    # without a way to give plays back (the history's caller has no play counts), nothing moves
+    out = history.undo(p, str(root), False, lambda j: None, None)
+    assert out.entry is None and out.failed == []
+    # the kept copy gone: its plays can't go back
+    os.remove(root / "LD" / "04.flac")
+    assert history.plan(e, str(root), lambda h: [], look=look).files[0].why
+
+
+def test_the_plays_an_entry_moved_go_back_in_the_index_and_come_again(tmp_path):
+    """history.plays_back: this computer's rows, given back to the copies (a copy in the trash
+    waiting for its file) and taken again by a redo; a file the index hasn't is passed by."""
+    index = db.Index(str(tmp_path / "musikata.db"))
+    try:
+        fill(index, [{"path": "LD/04.flac", "title": "Moonpull"}])
+        (song,) = index.read().execute("SELECT id FROM song").fetchone()
+        when = datetime(2026, 11, 25, 20, 41, tzinfo=UTC)
+
+        def play(c):
+            for _ in range(24):
+                rootfiles.count(c, "me", song, when)
+
+        index.write(play).result()
+        took = history.Plays("_Incoming/Moonpull.m4a", H2, 6, PLAYED)
+        kept = history.FileUndo(FileChange("LD/04.flac", H1, {}, plays_from=(took,)), "LD/04.flac")
+        gone = history.FileUndo(FileChange("X.flac", H1, {}, plays_from=(took,)), "X.flac")
+        done = index.write(lambda c: history.plays_back(c, "me", [kept, gone])).result()
+        assert [(f.path, f.plays_to) for f in done] == [("LD/04.flac", (took,))]
+        assert rootfiles.totals(index.read(), [song]) == {song: 18}
+        redo = history.FileUndo(done[0], "LD/04.flac")
+        again = index.write(lambda c: history.plays_back(c, "me", [redo])).result()
+        assert [f.plays_from for f in again] == [(took,)]
+        assert rootfiles.totals(index.read(), [song]) == {song: 24}
+        assert index.write(lambda c: history.plays_back(c, "me", [redo])).result() == []
+    finally:
+        index.close()
+
+
+def test_an_undo_of_a_move_to_the_trash_counts_the_files_it_can_undo():
+    e = Entry(NAME, WHEN, ME, "copies", "Moonpull", (
+        FileChange("a.flac", H1, {"rating": 4}), FileChange("b.m4a", H2, {}, trashed=True),
+        FileChange("c.m4a", H3, {}, trashed=True),
+    ))  # fmt: skip
+    assert history.description_of(e, 1) == "Undo: Moonpull"

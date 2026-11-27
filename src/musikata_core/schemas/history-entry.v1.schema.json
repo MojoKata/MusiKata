@@ -126,6 +126,76 @@
             ],
             "pattern": "^[0-9a-f]{64}$",
             "description": "The image file's bytes written, by their sha256; null when it was moved to the trash"
+          },
+          "plays_from": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The song's path under the root, with / separators"
+                },
+                "hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "Its audio hash (A2.3)"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "last": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it was last played, UTC, ISO 8601"
+                }
+              },
+              "required": [
+                "path",
+                "count",
+                "last"
+              ]
+            },
+            "description": "The plays this file, the copy kept, took from the copies moved to the trash (R2.12), on the computer that saved the entry, each as plays.json names a song; Undo gives them back"
+          },
+          "plays_to": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The song's path under the root, with / separators"
+                },
+                "hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "Its audio hash (A2.3)"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "last": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it was last played, UTC, ISO 8601"
+                }
+              },
+              "required": [
+                "path",
+                "count",
+                "last"
+              ]
+            },
+            "description": "In an Undo of plays_from: the plays this file gave back, which undoing it takes again"
+          },
+          "trashed": {
+            "type": "boolean",
+            "description": "True when the save moved this file to the system's trash (R2.11, R2.12): Undo can't take it out"
           }
         },
         "required": [

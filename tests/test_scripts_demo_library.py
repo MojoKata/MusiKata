@@ -204,3 +204,26 @@ def test_the_roots_settings_say_electronica_is_electronic_as_g01_offers_it(tmp_p
     with open(schema, encoding="utf-8") as f:
         jsonschema.validate(written, json.load(f))
     assert written["tags"]["same_genres"] == [["Electronic", "Electronica"]]
+
+
+def test_l09s_copies_are_the_only_songs_of_one_audio_or_one_artist_and_title():
+    """R2.12, L09-needs-attention: Signal Fires and its exact copy (one kind, tone and length,
+    so one audio, A2.3), Moonpull and its likely copy (its artist and title, a second longer);
+    every other song's audio its own, and no other likely copy."""
+    sys.path.insert(0, os.path.join(ROOT, "src"))
+    from musikata_core import duplicates
+
+    lib = demo.plan()
+    audio, keys = {}, {}
+    for s in lib.songs:
+        audio.setdefault((s.kind, s.tone, s.seconds), []).append(s.path)
+        if s.tags is not None:
+            key = duplicates.song_key(s.tags.get("artist"), s.tags.get("title"))
+            if key is not None:
+                keys.setdefault(key, []).append(s.path)
+    assert [v for v in audio.values() if len(v) > 1] == [[demo.SIGNAL_FIRES, demo.SIGNAL_COPY]]
+    assert [v for v in keys.values() if len(v) > 1] == [
+        [demo.SIGNAL_FIRES, demo.SIGNAL_COPY], [demo.MOONPULL, demo.MOONPULL_COPY]
+    ]  # fmt: skip
+    assert set(demo.PLAYS) == {demo.SIGNAL_FIRES, demo.SIGNAL_COPY, demo.MOONPULL,
+                               demo.MOONPULL_COPY}  # fmt: skip
