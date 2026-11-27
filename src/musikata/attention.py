@@ -1103,6 +1103,14 @@ class Attention(QObject):
 
         self._submit(job)
 
+    @Slot(QObject, int)
+    def showRow(self, model: QObject, row: int) -> None:  # noqa: N802
+        """Show in file manager on a row of Folders (R2.9.6): its folder or file shown there, as
+        Show in folder shows an entry's."""
+        path = model.path_at(row)  # type: ignore[attr-defined]
+        if path is not None:
+            self.show_in_folder(scanner.full_path(self._root, path))
+
     @Slot(str)
     def _on_fallback(self, folder: str) -> None:
         self._open_folder(folder)

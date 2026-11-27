@@ -74,3 +74,12 @@ def sort_key(
     it sorts last there."""
     text = sort_name(name, sort_tag, articles)
     return None if text is None else key_of(text)
+
+
+def article_last(name: str, articles: Sequence[str] = ARTICLES) -> str:
+    """`name` with its leading article moved to its end, as R12.1's sort tokens name a folder:
+    "The Beatles" gives "Beatles, The"; a name without one, or that is only one, is kept."""
+    rest = skip_article(name, articles)
+    if rest == name:
+        return name
+    return f"{rest}, {name[: len(name) - len(rest)].strip()}"

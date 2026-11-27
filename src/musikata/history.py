@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, tzinfo
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
-from musikata_core import art, db, history, rootfiles, scanner, settings, watch
+from musikata_core import art, db, history, organize, rootfiles, scanner, settings, watch
 from musikata_core.clock import Clock
 from musikata_core.history import Lost, Plan, Recording, Row
 from musikata_core.tags import Job, Outcome, Written
@@ -48,6 +48,7 @@ LABELS = {
     "compilation": "Compilation", "rating": "Rating", "artistsort": "Artist sort",
     "albumartistsort": "Album artist sort", "albumsort": "Album sort", "cover": "Cover",
     "others": "Other pictures", "plays": "Plays", "trashed": "Moved to the trash",
+    "path": "Place",
 }  # fmt: skip
 RATE = "rate"  # a save of ratings (R10.2)
 ART = "album-art"  # a save of the Album art dialog, or Save cover to folder (R5.3, R5.5)
@@ -56,11 +57,12 @@ NAMES = "names"  # an artist's or an album's names merged, from Needs attention 
 COPIES = "copies"  # a song's other copies moved to the trash (R2.12)
 ENCODING = "encoding"  # text in the wrong encoding written as Unicode (R4.10)
 INFER = "infer"  # tags filled or corrected from the files' paths (R3.8)
+ORGANIZE = "organize"  # files moved and renamed to match their tags (R12)
 OFFERED = "offered"  # a message's Undo that isn't an entry's: the change's own (`offer`)
 ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
            ART: "Album art", GENRE: "Genres", NAMES: "Names merged",
            COPIES: "Copies moved to the trash", ENCODING: "Encoding fixed",
-           INFER: "Tags from paths"}  # fmt: skip  # an entry
+           INFER: "Tags from paths", ORGANIZE: "Organize files"}  # fmt: skip  # an entry
 # with no description, by its action
 
 
@@ -170,22 +172,35 @@ def lost_text(lost: Lost) -> str:
 
 def question_of(plan: Plan) -> dict[str, object]:
     """R4.9.1's question, for the files changed since the entry: its heading, a line per file
-    with what undoing it would lose, and whether skipping them leaves files to undo."""
-    changed = plan.changed
+    with what undoing it would lose, and whether skipping them leaves files to undo; and the files
+    moved (R12) whose old place another file has taken since, which stay where they are, never
+    written over (R12.4), so Undo anyway is offered only when files changed."""
+    changed, taken = plan.changed, plan.taken
     lines = []
     for f in changed:
         name = (f.path or f.change.path).rpartition("/")[2]
         lines.append({"file": name, "lost": "; ".join(lost_text(x) for x in f.lost)})
+    for f in taken:
+        name = (f.path or f.change.path).rpartition("/")[2]
+        lines.append({"file": name, "lost": f"Stays where it is: {f.why}"})
     rest = [f for f in plan.files if not f.why and not f.lost]
     n = len(changed)
+    if n:
+        title = f"{files_text(n)} changed since this save" if n != 1 else (
+            "1 file has changed since this save")  # fmt: skip
+        detail = "Undoing puts back the old values over what is there now:"
+    else:
+        title = f"{files_text(len(taken))} can't go back" if len(taken) != 1 else (
+            "1 file can't go back")  # fmt: skip
+        detail = "Another file is where it was; it stays where it is now:"
     return {
-        "title": f"{files_text(n)} changed since this save" if n != 1
-        else "1 file has changed since this save",
-        "detail": "Undoing puts back the old values over what is there now:",
+        "title": title,
+        "detail": detail,
         "lines": lines,
+        "anyway": bool(n),
         "skip": bool(rest),
         "skipText": f"Undo the other {files_text(len(rest))}" if rest else "",
-    }  # fmt: skip
+    }
 
 
 def saved_text(outcome: Outcome[Written]) -> str:
@@ -277,6 +292,10 @@ class ChangeHistory(QObject):
         super().__init__(parent)
         self._writer, self._look, self._available = write, look, available
         self.plays = plays
+        # what follows files an undo moves back (R12.4: organize.Follower), and is told on this
+        # thread once it has (the library read again)
+        self.follow: Callable[[Sequence[tuple[str, str]]], object] | None = None
+        self.moved: Callable[[], object] | None = None
         self._root, self._index, self._clock = root, index, clock
         self._computer, self._own, self._own_name = computer, own, own_name
         self._settings, self._saved, self._zone = tags_settings, saved, zone
@@ -458,7 +477,7 @@ class ChangeHistory(QObject):
             self.say(planned)
             self.changed.emit()
             return
-        if planned.changed:  # R4.9.1: asked first
+        if planned.changed or planned.taken:  # R4.9.1: asked first (R12.4: a place taken)
             self._plan = planned
             self._question = question_of(planned)
             self._open = True
@@ -499,11 +518,14 @@ class ChangeHistory(QObject):
 
         write = self._writer or save_one
 
-        plays = self.plays
+        plays, follow = self.plays, self.follow
         in_trash = len(planned.in_trash)
 
         def job() -> None:
             out = history.undo(planned, root, overwrite, write, record, plays=plays)
+            moves = organize.pairs_of(root, out.saved)
+            if moves and follow is not None:  # R12.4: the index, the playlists, the folders
+                follow(moves)
             history.refresh(self._index, self._folder)
             self._undone.emit(out, what, skipped, self._computer() if out.entry else None,
                               in_trash)  # fmt: skip
@@ -518,6 +540,8 @@ class ChangeHistory(QObject):
         self._own = self._own or own  # its entries named as this computer's from now on
         if out.saved and self._saved is not None:  # their rows, on this thread (Library.saved)
             self._saved(art.written_songs(out.saved))  # a cover.jpg's folder is rescanned
+        if self.moved is not None and organize.pairs_of(self._root, out.saved):
+            self.moved()  # files moved back (R12): the lists read again, the plays named anew
         self._offered = None
         self._message = {"text": undone_text(out, what, skipped, in_trash),
                          "undo": out.entry or ""}  # fmt: skip
@@ -585,6 +609,7 @@ class ChangeHistory(QObject):
             self._executor = None
         self._plan = None
         self._saved = self._writer = self._look = self.plays = None
+        self.follow = self.moved = None
         self._offered = None
 
     # ---------- what QML reads ----------

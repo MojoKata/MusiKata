@@ -11,8 +11,9 @@
   through `Playlists.add_songs`, whose message offers Undo); within a playlist's page, its own
   entries moved to the insertion line (R8.5, `Playlists.move_entries`); onto Up next or the queue
   button, played next (R7.2); files from a file manager onto a playlist, added when under the
-  root (`Playlists.add_files`), and onto the window, which R12.5 (a later version) will add to
-  the library. A smart playlist refuses what is dropped on it, its rule choosing its songs, and
+  root (`Playlists.add_files`); those from outside the root, onto any target, brought into the
+  library through Organize files' dialog first (R12.5, `outside`). A smart playlist refuses what
+  is dropped on it, its rule choosing its songs, and
   its own page moves none of its entries (R8.9). Each target, while a drag is over it, is
   highlighted and named (`target_text`: "Add to Evening Focus", or why a smart playlist refuses),
   and a reorder draws its insertion line (`line`).
@@ -44,7 +45,7 @@ from .edittags import target_at
 from .folders import FolderModel
 from .models import SongsModel, plural, song_order
 from .nowplaying import read_songs
-from .playlists import OUTSIDE_LATER, EntriesModel, is_smart, smart_text
+from .playlists import OUTSIDE_NOT_ADDED, EntriesModel, is_smart, smart_text
 
 if TYPE_CHECKING:
     from .bridges import Library, Player
@@ -208,9 +209,9 @@ def target_text(what: str, kind: str, name: str) -> str:
 
 
 def window_text(outside: int) -> str:
-    """Files dropped onto the window: those from outside the music folder wait for R12.5 (a later
-    version); those under it are in the library already."""
-    return OUTSIDE_LATER if outside else IN_LIBRARY
+    """Files dropped onto the window: those from outside the music folder when there is no way to
+    bring them in (R12.5); those under it are in the library already."""
+    return OUTSIDE_NOT_ADDED if outside else IN_LIBRARY
 
 
 # ---------- the songs of an album, an artist, a genre ----------
@@ -275,6 +276,9 @@ class Dragging(QObject):
         super().__init__(parent)
         self._root, self._read, self._run = root, read, run
         self._library, self._playlists, self._player, self._say_to = library, playlists, player, say
+        # files from outside the root dropped on the window or the queue, brought into the
+        # library (R12.5: OrganizeFiles.add_files); None: they aren't
+        self.outside: Callable[[Sequence[str], int], object] | None = None
         self._carried: Carried | None = None
         self._card: QQuickItem | None = None  # DragCard.qml, grabbed as the drag's picture
         # the card's picture being made (QQuickItemGrabResult, behind a shared pointer)
@@ -506,14 +510,21 @@ class Dragging(QObject):
             self._playlists.add_files(key, paths)
             return
         inside, outside = core.dropped(paths, self._root)
+        brought = bool(outside) and self.outside is not None
+        if brought:  # into the library first, through Organize files' dialog (R12.5)
+            assert self.outside is not None
+            self.outside(outside, -1)
+            outside = []
         if kind == QUEUE and self._player is not None and inside:
             songs = core.songs_dropped(self._read(), inside)
             if songs:
                 self._player.play_next(songs)
             if outside or not songs:
-                self._say(OUTSIDE_LATER if outside else "Nothing dropped is a song in your library")
+                self._say(OUTSIDE_NOT_ADDED if outside else "Nothing dropped is a song in your"
+                          " library")  # fmt: skip
             return
-        self._say(window_text(len(outside)))
+        if not brought:
+            self._say(window_text(len(outside)))
 
     # ---------- the tour ----------
 

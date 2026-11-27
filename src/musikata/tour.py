@@ -34,6 +34,7 @@ from .encodings import FixEncoding
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .organize import OrganizeFiles
 from .smart import SmartPlaylists
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
@@ -49,7 +50,8 @@ SIZES = (SHOT, DESIGN)
 # panel (R4.2) as their mockups do, open on the songs selected with fields typed into it ("edit");
 # an album's page and an artist's show a search typed into the header over them, as their mockups do
 # (L02, L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the tint by a cover's
-# colour). T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it. The
+# colour). T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03
+# is Organize files (R12) over Your music folders, on the whole library, as its mockup draws it. The
 # first queues Glass Harbor, paused at its first song, so every screen after it shows the
 # now-playing bar (R6.5) and the playing album and song marked, with no sound to wait on
 # (Player.go). X03 has no mockup: the Change history panel (R4.9) over Songs, listing the demo
@@ -118,6 +120,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         "T01-infer-from-path",
         {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small", "infer": True},
     ),
+    ("T03-organize-files", {"view": "folders", "folder": "", "mode": "small", "organize": ""}),
     ("L12-search", {"view": "albums", "search": "lumen dri"}),
     (
         "N08-up-next",
@@ -201,6 +204,7 @@ class Tour(QObject):
         infer: InferFromPath | None = None,
         dragging: Dragging | None = None,
         smart: SmartPlaylists | None = None,
+        organize: OrganizeFiles | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -213,7 +217,7 @@ class Tour(QObject):
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
-        self.smart = smart
+        self.smart, self.organize = smart, organize
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -265,6 +269,8 @@ class Tour(QObject):
             self.dragging.go(step)
         if self.smart is not None and "view" in step:
             self.smart.go(step)
+        if self.organize is not None and "view" in step:
+            self.organize.go(step)
         self._size = 0
         self._at_size()
 

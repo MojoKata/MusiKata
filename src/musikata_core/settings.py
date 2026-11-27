@@ -350,7 +350,8 @@ class RootTags:
     genres the user has said are the same (`same_genres`, R9.5: groups of names, each offered for
     a merge whatever their spelling), both edited in Settings (R13.3); the user's own path
     patterns (`patterns`, R3.3: the `patterns` group's `user`, tried before the presets, edited in
-    Settings, R13.4); what couldn't be used, for the log."""
+    Settings, R13.4) and Organize files' layout (`layout`, R12.1: its `organize`; None, the
+    default); what couldn't be used, for the log."""
 
     id3_version: str = "2.4"
     keep_modified_times: bool = False
@@ -362,6 +363,7 @@ class RootTags:
     genres: tuple[str, ...] | None = None
     same_genres: tuple[tuple[str, ...], ...] = ()
     patterns: tuple[str, ...] = ()
+    layout: str | None = None
 
 
 def _days(value: object) -> int | None:
@@ -472,10 +474,24 @@ def parse_root_tags(text: str) -> RootTags:
             )
     same = _same_genres(group.get("same_genres", []), problems)
     user = _user_patterns(data.get("patterns", {}), problems)
+    layout = _layout(data.get("patterns", {}), problems)
     return RootTags(
         str(version), keep, history, days, write_ratings, str(scale), tuple(problems), genres, same,
-        user,
+        user, layout,
     )  # fmt: skip
+
+
+def _layout(group: object, problems: list[str]) -> str | None:
+    """The `patterns` group's `organize` (R12.1, R13.4): Organize files' layout, as written; None
+    (the default) when there is none, or it isn't text or is blank, named in `problems`. A layout
+    R12.1 can't use is the dialog's to pass by (patterns.parse, `naming`)."""
+    if not isinstance(group, dict) or "organize" not in group:
+        return None
+    text = group["organize"]
+    if not isinstance(text, str) or not text.strip():
+        problems.append(f"patterns.organize isn't a layout: {text!r}; the default")
+        return None
+    return text.strip()
 
 
 def _user_patterns(group: object, problems: list[str]) -> tuple[str, ...]:

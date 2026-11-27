@@ -133,6 +133,31 @@ def test_what_undoing_would_lose_is_said_field_by_field_file_by_file():
     assert two["title"] == "2 files changed since this save" and not two["skip"]
 
 
+def test_a_moves_undo_asks_about_a_file_moved_since_and_says_which_stay_where_they_are():
+    """R4.9.1, R12.4: undoing Organize files' moves asks first when a file moved again since (what
+    undoing would lose is where it is now), and says which can't go back because another file is
+    where they were: those stay, never written over, so only the others are offered."""
+    e = Entry("n", NOW, ME, "organize", "Organize files: 2 files", (
+        FileChange("New/a.flac", None, {}, moved_from="Old/a.flac"),
+        FileChange("New/b.flac", None, {}, moved_from="Old/b.flac"),
+        FileChange("New/c.flac", None, {}, moved_from="Old/c.flac"),
+    ))  # fmt: skip
+    assert lost_text(Lost("path", "Else/a.flac", "Old/a.flac")) == (
+        "Place: Else/a.flac → Old/a.flac"
+    )
+    taken = FileUndo(e.files[1], "New/b.flac", why="its old place, Old/b.flac, holds another file"
+                     " now", taken=True)  # fmt: skip
+    q = question_of(Plan(e, (taken, FileUndo(e.files[2], "New/c.flac"))))
+    assert q["title"] == "1 file can't go back" and not q["anyway"] and q["skip"]
+    assert q["lines"] == [{"file": "b.flac", "lost": "Stays where it is: its old place,"
+                           " Old/b.flac, holds another file now"}]  # fmt: skip
+    moved = FileUndo(e.files[0], "Else/a.flac", (Lost("path", "Else/a.flac", "Old/a.flac"),))
+    both = question_of(Plan(e, (moved, taken, taken)))
+    assert both["title"] == "1 file has changed since this save" and both["anyway"]
+    assert len(both["lines"]) == 3 and not both["skip"]
+    assert question_of(Plan(e, (taken, taken)))["title"] == "2 files can't go back"
+
+
 def test_the_message_says_what_was_saved_or_undone_and_what_wasnt():
     """R6.7: finished actions are shown in a short-lived message."""
     ok = Outcome(saved=[1, 2, 3, 4])

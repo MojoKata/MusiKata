@@ -510,3 +510,22 @@ def test_the_users_patterns_broken_or_in_another_form(group, problem):
     found = settings.parse_root_tags(json.dumps({"format": 1, "patterns": group}))
     assert [p for p in found.problems if problem in p]
     assert found.patterns in ((), ("{title}",))
+
+
+@pytest.mark.parametrize(
+    ("group", "layout", "problem"),
+    [
+        ({}, None, ""),
+        ({"organize": " {artist}/{album}/{track:02} {title} "},
+         "{artist}/{album}/{track:02} {title}", ""),
+        ({"organize": ""}, None, "patterns.organize isn't a layout"),
+        ({"organize": 5}, None, "patterns.organize isn't a layout"),
+        ("x", None, "patterns isn't a group"),
+    ],
+)  # fmt: skip
+def test_the_roots_own_settings_give_organize_files_layout(group, layout, problem):
+    """R12.1, A2.10: the `patterns` group's `organize`, Organize files' layout (R13 edits it);
+    the default when it has none or it isn't text."""
+    found = settings.parse_root_tags(json.dumps({"format": 1, "patterns": group}))
+    assert found.layout == layout
+    assert any(problem in p for p in found.problems) if problem else not found.problems

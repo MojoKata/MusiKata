@@ -8,6 +8,8 @@ token that swallows a folder, or a tidying step that rewrites a name the user sp
 writes wrong tags into every file it fits; and R3.9's state, kept for every song, would flag a
 whole library that is fine, or pass over one that isn't."""
 
+import unicodedata
+
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -486,3 +488,182 @@ def test_any_folder_of_any_songs_has_a_state_for_each_and_never_fails(songs, use
             assert patterns.infer(tags, patterns.given(chosen, path)) == tags
         assert (state == MATCH) <= (diffs == ())
         assert (state == FIX) <= bool(diffs) and (state is None) <= (diffs == ())
+
+
+# ---------- the layout: paths made from tags (R12.1, R12.1.1) ----------
+
+LAYOUT = parse(patterns.LAYOUT, naming=True)
+NEAP = Tags(title="Neap Tide", artist=LD, albumartist=LD, album="Tide Tables", year=2022, track=1)
+
+
+def placed(tags, name="x", ext=".flac", layout=LAYOUT, discs=1):
+    return patterns.render(layout, patterns.values_for(tags, discs), name, ext)
+
+
+def test_the_default_layout_makes_a_songs_path_from_its_tags():
+    """R12.1: {albumartist}/{year} - {album}/{disc-}{track:02} - {title}, the track padded to two
+    digits, the disc and "-" only when the album has more than one disc."""
+    assert placed(NEAP) == "Lumen Drift/2022 - Tide Tables/01 - Neap Tide.flac"
+    two = Tags(title="Moonpull", artist=LD, album="Tide Tables", year=2022, track=12, disc=2)
+    assert placed(two) == "Lumen Drift/2022 - Tide Tables/12 - Moonpull.flac"  # one disc
+    assert placed(two, discs=2) == "Lumen Drift/2022 - Tide Tables/2-12 - Moonpull.flac"
+    assert placed(replace_tags(two, disctotal=2)).endswith("/2-12 - Moonpull.flac")
+    assert placed(replace_tags(NEAP, track=104)).endswith("/104 - Neap Tide.flac")
+    p = parse("{artist}/{track:03} {disc:02}.{track} {genre}", naming=True)
+    assert placed(replace_tags(NEAP, disc=1, genres=("Electronic", "Ambient")), layout=p) == (
+        "Lumen Drift/001 01.1 Electronic.flac"
+    )
+
+
+def replace_tags(tags, **kw):
+    from dataclasses import replace
+
+    return replace(tags, **kw)
+
+
+def test_a_layout_takes_the_naming_forms_and_refuses_what_names_nothing():
+    """R12.1: the naming forms are a layout's alone; Infer from path reads none of them (R3.2), and
+    a layout can't hold {*}, which names nothing."""
+    assert LAYOUT.problem == "" and LAYOUT.regex is None
+    assert parse("{track:02} - {title}").problem == "{track:02} isn't a token"
+    assert parse("{artistsort}").problem == "{artistsort} isn't a token"
+    assert parse("{*}/{title}", naming=True).problem == "{*} names nothing: a layout can't use it"
+    assert parse("{track:2}", naming=True).problem == "{track:2} isn't a token"
+    assert parse("{disc-}", naming=True).problem == ""
+    assert parse("Music", naming=True).problem == "Put at least one token in it, such as {title}"
+    assert parse("{album", naming=True).problem == "A brace isn't closed"
+
+
+def test_the_sort_tokens_take_the_sort_tag_else_move_the_article_to_the_end():
+    """R12.1, R2.13: {artistsort}, {albumartistsort}, {albumsort}: the sort tag, or without one the
+    name with its leading article moved to the end ("Beatles, The")."""
+    p = parse("{albumartistsort}/{albumsort}/{artistsort} - {title}", naming=True)
+    beatles = Tags(title="Help", artist="The Beatles", album="A Hard Day's Night")
+    assert placed(beatles, layout=p) == "Beatles, The/Hard Day's Night, A/Beatles, The - Help.flac"
+    bowie = Tags(
+        title="Heroes", artist="David Bowie", artistsort="Bowie, David", albumsort="Heroes"
+    )
+    assert placed(bowie, layout=p) == "Bowie, David/Heroes/Bowie, David - Heroes.flac"
+    assert placed(replace_tags(bowie, albumartistsort="Z"), layout=p).startswith("Z/")
+    assert patterns.values_for(Tags(artist="The Who"), articles=["Die"])["artistsort"] == "The Who"
+
+
+def test_a_token_with_no_value_goes_with_the_text_that_joins_it():
+    """R12.1: no year leaves the album alone ("Tide Tables", not " - Tide Tables"), no track the
+    title; no album artist is the artist's, a compilation naming none "Various Artists" (R2.5.3,
+    under it like any album, R12.1.1), no artist "Unknown artist", no album "Unknown album", no
+    title the file's own name; a folder that comes out empty is left out."""
+    bare = Tags(title="Neap Tide", artist=LD, album="Tide Tables")
+    assert placed(bare) == "Lumen Drift/Tide Tables/Neap Tide.flac"
+    assert placed(Tags(artist="Saffron Avenue")) == "Saffron Avenue/Unknown album/x.flac"
+    assert placed(Tags(title="Solo", track=3)) == "Unknown artist/Unknown album/03 - Solo.flac"
+    various = Tags(title="Tide", artist="A", album="Night Ferry", compilation=True, year=2024)
+    assert placed(various) == "Various Artists/2024 - Night Ferry/Tide.flac"
+    named = replace_tags(various, albumartist="Various Artists")
+    assert placed(named) == "Various Artists/2024 - Night Ferry/Tide.flac"
+    p = parse("{genre}/{artist}/{year}{title}", naming=True)
+    assert placed(Tags(title="T", artist="A"), layout=p) == "A/T.flac"
+    p = parse("{year} - {title}", naming=True)
+    assert placed(Tags(title="T"), layout=p) == "T.flac"
+    assert placed(Tags(year=1999), layout=p, name="orig") == "1999 - orig.flac"
+    p = parse("{disc-}{track:02}", naming=True)
+    assert placed(Tags(artist="A"), layout=p, name="orig") == "orig.flac"
+
+
+@pytest.mark.parametrize(
+    ("tags", "path"),
+    [
+        (Tags(title="What?", artist="AC/DC", album="Live: Paris"),
+         "AC_DC/Live_ Paris/What_.flac"),
+        (Tags(title='a "b" <c> | d*', artist="x\\y", album="tab\there"),
+         "x_y/tab_here/a _b_ _c_ _ d_.flac"),
+        (Tags(title=" ...Dots and spaces... ", artist=". Hidden", album="Vol. 2."),
+         "Hidden/Vol. 2/Dots and spaces.flac"),
+        (Tags(title="Café", artist="Björk", album="x"),  # as macOS writes them
+         "Björk/x/Café.flac"),
+        (Tags(title="\x00\x1f\x7f", artist="A", album="B"), "A/B/___.flac"),
+    ],
+)  # fmt: skip
+def test_what_a_file_system_refuses_is_replaced_and_names_trimmed(tags, path):
+    """R12.1.1: `/ \\ : * ? " < > |` and control characters replaced with `_`, names trimmed of
+    spaces and dots at their ends, composed, so a layout gives the same path on every platform."""
+    assert placed(tags) == path
+
+
+def test_each_part_is_cut_to_120_characters_and_255_bytes_with_its_extension():
+    """R12.1.1: each part cut to 120 characters; and to 255 bytes, the most Linux's and macOS's
+    file systems take in a name, which 120 letters of a script of three or four bytes each pass
+    (testing.md, "Shapes": names longer than a platform allows)."""
+    long = Tags(title="t" * 300, artist="a" * 300, album="b" * 130)
+    folder, album, name = placed(long).split("/")
+    assert (len(folder), len(album), len(name)) == (120, 120, 120)
+    assert name.endswith("t.flac")
+    wide = Tags(title="音" * 200, artist="\U0001f3b5" * 100, album="b")
+    folder, _, name = placed(wide).split("/")
+    assert len(folder.encode()) <= 255 and len(name.encode()) <= 255 and name.endswith(".flac")
+    assert len(folder) == 63 and len(name) == 88  # whole characters, never half of one
+    assert patterns.clean_part("x" * 119 + " .y") == "x" * 119
+
+
+@pytest.mark.parametrize(
+    ("name", "ext", "made"),
+    [
+        ("CON", "", "CON_"), ("con", ".flac", "con_"), ("Nul.txt", "", "Nul_.txt"),
+        ("COM1", "", "COM1_"), ("lpt9 ", "", "lpt9_"), ("COM¹", "", "COM¹_"),
+        ("CONSOLE", "", "CONSOLE"), ("COM10", "", "COM10"), ("AUX - Live", "", "AUX - Live"),
+        ("PRN.", ".mp3", "PRN_"), ("", ".flac", ""), (" . ", "", ""),
+    ],
+)  # fmt: skip
+def test_windows_device_names_are_given_an_underscore(name, ext, made):
+    """R12.1.1: a name Windows keeps for a device (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to
+    LPT9, the last digit as a superscript too), whatever follows it after a dot, can't be a file
+    or a folder there; an underscore after it makes it one, the same on every platform."""
+    assert patterns.clean_part(name, ext) == made
+
+
+def valid_everywhere(path):
+    parts = path.split("/")
+    for part in parts:
+        assert part and part not in (".", "..")
+        assert not set(part) & set('\\:*?"<>|') and all(
+            ord(ch) >= 32 and ch != "\x7f" for ch in part
+        )
+        assert part == part.strip(" .") or part.endswith((".flac",))
+        assert len(part) <= 120 and len(part.encode()) <= 255
+        assert part.split(".")[0].rstrip(" ").upper() not in patterns.RESERVED
+        assert unicodedata.normalize("NFC", part) == part
+
+
+TEXT = st.one_of(st.none(), st.text(max_size=300), st.sampled_from(["CON", "AC/DC", " . ", "nul"]))
+
+
+@given(
+    st.builds(
+        Tags, title=TEXT, artist=TEXT, album=TEXT, albumartist=TEXT,
+        track=st.one_of(st.none(), st.integers(0, 10**6)), disc=st.one_of(st.none(),
+        st.integers(0, 99)), year=st.one_of(st.none(), st.integers(0, 9999)),
+        genres=st.lists(st.text(max_size=40), max_size=2).map(tuple), compilation=st.booleans(),
+        artistsort=TEXT, albumsort=TEXT,
+    ),
+    st.integers(1, 3),
+    st.text(max_size=200),
+)  # fmt: skip
+@example(Tags(title="CON", artist="..", album="\x00"), 1, "")
+def test_any_tags_give_a_path_every_platform_takes(tags, discs, name):
+    """R12.1.1, a property: whatever the tags, the default layout and one of every token give a
+    relative path every platform's file systems take: no part empty, `.` or `..`, none holding
+    what one refuses, none ending in a space or a dot, none longer than 120 characters or 255
+    bytes, none a Windows device's name, each composed."""
+    for layout in (LAYOUT, parse("{genre}/{albumartistsort}/{albumsort} ({year})/{disc}.{track}"
+                                 " {artist} {artistsort} {title}", naming=True)):  # fmt: skip
+        path = placed(tags, name=name, layout=layout, discs=discs)
+        valid_everywhere(path)
+        assert path.endswith(".flac")
+
+
+@given(st.text())
+def test_any_text_as_a_layout_is_one_or_says_why(text):
+    p = parse(text, naming=True)
+    assert p.regex is None and isinstance(p.problem, str)
+    if not p.problem:
+        valid_everywhere(patterns.render(p, patterns.values_for(NEAP), "x", ".flac"))

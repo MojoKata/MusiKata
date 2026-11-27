@@ -18,8 +18,9 @@ page, and what changes them.
   in the selection bars and menus and songs dropped on one (R8.5), its message saying those there
   already and offering Undo, which takes them back out (`offer`: the playlist's own undo, its
   change being no save of the change history, R4.9); a file manager's files dropped on one (those
-  outside the root wait for R12.5); renaming, duplicating and deleting (R8.4); moving entries,
-  dragged within the page or by Ctrl+Shift+↑ / ↓ (R8.5, R6.9, R18.2), and removing them (R8.6);
+  outside the root brought into the library first, R12.5); renaming, duplicating and deleting
+  (R8.4); moving entries, dragged within the page or by Ctrl+Shift+↑ / ↓ (R8.5, R6.9, R18.2),
+  and removing them (R8.6);
   Find and its choice (R8.7, from the page or Needs attention), and Export… (R8.8), each run on a
   thread of its own through musikata_core.playlists.Store, the views read again after, and a
   message saying what was done (R6.7).
@@ -75,8 +76,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 NOT_THERE = "Playlists can't be changed while the music folder isn't available"  # R2.10
-# files dropped from outside the root are R12.5's: copied or moved into the library, a later piece
-OUTSIDE_LATER = "Adding files from outside the music folder comes in a later version"
+# files dropped from outside the root are R12.5's: copied or moved into the library through
+# Organize files' dialog (`Playlists.outside`); without it, they aren't added
+OUTSIDE_NOT_ADDED = "Files from outside the music folder can't be added here"
 MISSING = "Missing"
 OUTSIDE = "Not in your music folder"
 REMOVE = {"label": "Remove from playlist", "icon": "close", "later": "", "action": "remove"}
@@ -170,9 +172,10 @@ def took_back_text(n: int, wanted: int, name: str) -> str:
 
 def dropped_text(outside: int, found: int) -> str:
     """What a drop of files says when it adds none of them, or not all: those from outside the
-    music folder wait for R12.5 (a later version), and those under it that aren't songs."""
+    music folder when there is no way to bring them in (R12.5), and those under it that aren't
+    songs."""
     if outside:
-        return OUTSIDE_LATER
+        return OUTSIDE_NOT_ADDED
     return "" if found else "Nothing dropped is a song in your library"
 
 
@@ -643,6 +646,9 @@ class Playlists(QObject):
         super().__init__(parent)
         self._store, self._read, self._say_to, self._offer_to = store, read, say, offer
         self._library: Library | None = library
+        # files from outside the root dropped on a playlist, brought into the library and added
+        # to it (R12.5, R8.5: OrganizeFiles.add_files); None: they aren't
+        self.outside: Callable[[Sequence[str], int], object] | None = None
         self._trash, self._available, self._home = trash, available, home
         self._executor = executor
         self._closed = False
@@ -788,11 +794,17 @@ class Playlists(QObject):
 
     def add_files(self, playlist: int, paths: Sequence[str]) -> None:
         """Files and folders a file manager dropped on the playlist (R8.5), by their whole paths:
-        the songs of those under the root added; those outside it wait for R12.5 (a later
-        version), which the message says."""
+        the songs of those under the root added; those outside it brought into the library first
+        (R12.5, `outside`: Organize files' dialog, which adds them to the playlist once they are
+        in)."""
         if not self._can():
             return
         inside, outside = core.dropped(paths, self._store.root)
+        if outside and self.outside is not None:
+            self.outside(outside, playlist)
+            if not inside:
+                return
+            outside = []
         songs = core.songs_dropped(self._read(), inside)
         note = dropped_text(len(outside), len(songs))
         if songs:

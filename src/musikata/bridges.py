@@ -1497,6 +1497,9 @@ class Library(QObject):
     sortText = QtProperty(str, _get_sort_text, notify=viewChanged)  # Sort: Artist
     songHeaders = QtProperty(list, _get_song_headers, notify=viewChanged)
     view = QtProperty(str, _get_view, notify=viewChanged)  # albums, …, songs, folders
+    # Organize files is in the header's ⋮ menu in Folders and on an album's page (R12.2)
+    canOrganize = QtProperty(bool, lambda self: self._view in ("folders", "album"),
+                             notify=viewChanged)  # fmt: skip
     section = QtProperty(str, _get_section, notify=viewChanged)
     backText = QtProperty(str, _get_back_text, notify=viewChanged)
     genres = QtProperty(list, _get_genres, notify=changed)  # the chips after All
@@ -2031,12 +2034,15 @@ class Player(QObject):
 
     @Slot()
     def reread(self) -> None:
-        """The index's rows changed (a scan, a save): the song shown read again, its words and
-        rating as they are now."""
+        """The index's rows changed (a scan, a save, a move): the song shown read again, its words,
+        rating and path as they are now."""
         song = self.song_id()
         info = self._song(song) if song is not None else None
         if info is not None and info != self._info:
+            moved = self._info is not None and info.path != self._info.path
             self._info = info
+            if moved:  # Organize files moved it (R12): the lists mark it where it is now
+                self._set_path(info.path)
             self.changed.emit()
 
     def play_file(self, path: str) -> None:

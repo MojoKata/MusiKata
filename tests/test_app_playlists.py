@@ -584,7 +584,7 @@ def test_the_messages_of_r8_5_say_what_was_there_already_what_was_taken_back_and
     assert lists_app.took_back_text(3, 3, "Road Trip") == "Took 3 songs back out of Road Trip"
     assert lists_app.took_back_text(1, 3, "Road Trip").endswith("; 2 had moved since and stay")
     assert lists_app.took_back_text(0, 3, "Road Trip").startswith("Nothing was taken out")
-    assert lists_app.dropped_text(2, 0) == lists_app.OUTSIDE_LATER
+    assert lists_app.dropped_text(2, 0) == lists_app.OUTSIDE_NOT_ADDED
     assert lists_app.dropped_text(0, 0) == "Nothing dropped is a song in your library"
     assert lists_app.dropped_text(0, 4) == ""
 
@@ -637,18 +637,24 @@ def test_songs_added_say_those_there_already_and_undo_takes_the_addition_back_ou
     assert len(offering.said) == n
 
 
-def test_a_file_managers_files_dropped_on_a_playlist_are_added_and_those_outside_wait(
+def test_a_file_managers_files_dropped_on_a_playlist_are_added_and_those_outside_brought_in(
     offering, root, qtbot, tmp_path
 ):
-    """R8.5: files and folders under the root added, their songs; those outside it are R12.5's,
-    a later version, which the message says."""
+    """R8.5: files and folders under the root added, their songs; those outside it brought into
+    the library first (R12.5: Organize files' dialog, which adds them to the playlist), or, with
+    no way to, said not added."""
     music, index, library = root
     evening = ids_of(index, "Evening")
     offering.add_files(evening, [os.path.join(music, "A"), "/elsewhere/x.mp3"])
     said = done(offering, qtbot, 0)
-    assert said == f"Added 2 songs to Evening; {lists_app.OUTSIDE_LATER}"
+    assert said == f"Added 2 songs to Evening; {lists_app.OUTSIDE_NOT_ADDED}"
     offering.add_files(evening, ["/elsewhere/x.mp3"])
-    assert offering.said[-1] == lists_app.OUTSIDE_LATER
+    assert offering.said[-1] == lists_app.OUTSIDE_NOT_ADDED
+    brought = []
+    offering.outside = lambda paths, playlist: brought.append((list(paths), playlist))
+    n = len(offering.said)
+    offering.add_files(evening, ["/elsewhere/x.mp3"])
+    assert brought == [(["/elsewhere/x.mp3"], evening)] and len(offering.said) == n
     offering.add_files(evening, [os.path.join(music, "A", "cover.jpg")])
     assert offering.said[-1] == "Nothing dropped is a song in your library"
     offering.add_files(evening, [os.path.join(music, "B", "Gamma.mp3")])

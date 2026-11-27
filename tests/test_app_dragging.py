@@ -30,7 +30,7 @@ from PySide6.QtTest import QTest
 from musikata import app, bridges, layout, tour
 from musikata import dragging as dnd
 from musikata.dragging import Carried, Dragging, drop_of
-from musikata.playlists import OUTSIDE_LATER, Playlists
+from musikata.playlists import OUTSIDE_NOT_ADDED, Playlists
 from musikata_core import playlists
 from musikata_core.playlists import Store
 
@@ -115,7 +115,7 @@ def test_each_target_says_what_dropping_does():
     assert dnd.target_text("move", "page", "Road Trip") == ""
     assert dnd.target_text("play-next", "queue", "") == "Play next"
     assert dnd.target_text("files", "window", "") == ""
-    assert dnd.window_text(2) == OUTSIDE_LATER and dnd.window_text(0) == dnd.IN_LIBRARY
+    assert dnd.window_text(2) == OUTSIDE_NOT_ADDED and dnd.window_text(0) == dnd.IN_LIBRARY
 
 
 # ---------- the bridge, without a window ----------
@@ -276,8 +276,11 @@ def test_a_drag_within_a_playlist_draws_its_line_and_moves_the_entries_there(roo
     assert bridge.drop("page", road, text, []) is True  # no line: nothing moves
 
 
-def test_songs_or_files_dropped_on_the_queue_play_next_and_files_from_outside_wait(root, bridge):
-    """R7.2, R6.10, R12.5."""
+def test_songs_or_files_dropped_on_the_queue_play_next_and_files_from_outside_are_brought_in(
+    root, bridge
+):
+    """R7.2, R6.10, R12.5: files from outside the music folder, onto the queue or the window, are
+    brought into the library (Organize files' dialog), or, with no way to, said not added."""
     music, index, library = root
     alpha = song_id(index, "Alpha")
     text = dnd.encode(Carried((alpha,)), music)
@@ -286,13 +289,21 @@ def test_songs_or_files_dropped_on_the_queue_play_next_and_files_from_outside_wa
     assert bridge.queue.next == [[alpha]]
     gamma = QUrl.fromLocalFile(os.path.join(music, "B", "Gamma.mp3"))
     assert bridge.drop("queue", 0, "", [gamma, QUrl.fromLocalFile("/elsewhere/x.mp3")])
-    assert bridge.queue.next[-1] == [song_id(index, "Gamma")] and bridge.said[-1] == OUTSIDE_LATER
+    assert bridge.queue.next[-1] == [song_id(index, "Gamma")]
+    assert bridge.said[-1] == OUTSIDE_NOT_ADDED
     assert bridge.drop("queue", 0, "", [QUrl.fromLocalFile(os.path.join(music, "A", "x.jpg"))])
     assert bridge.said[-1] == "Nothing dropped is a song in your library"
     assert bridge.drop("window", -1, "", [QUrl.fromLocalFile("/elsewhere/x.mp3")])
-    assert bridge.said[-1] == OUTSIDE_LATER
+    assert bridge.said[-1] == OUTSIDE_NOT_ADDED
     assert bridge.drop("window", -1, "", [gamma])
     assert bridge.said[-1] == dnd.IN_LIBRARY
+    brought = []
+    bridge.outside = lambda paths, playlist: brought.append((list(paths), playlist))
+    n = len(bridge.said)
+    assert bridge.drop("window", -1, "", [QUrl.fromLocalFile("/elsewhere/x.mp3")])
+    assert bridge.drop("queue", 0, "", [gamma, QUrl.fromLocalFile("/elsewhere/y.mp3")])
+    assert brought == [(["/elsewhere/x.mp3"], -1), (["/elsewhere/y.mp3"], -1)]
+    assert len(bridge.said) == n and bridge.queue.next[-1] == [song_id(index, "Gamma")]
 
 
 def test_a_file_managers_files_dropped_on_a_playlist_are_added(root, bridge, qtbot):
@@ -640,21 +651,25 @@ def test_up_nexts_own_rows_are_still_moved_by_their_handles_beside_the_songs_dro
 
 
 @pytest.mark.slow
-def test_files_from_outside_wait_for_a_later_version_and_images_still_set_a_cover(
+def test_files_from_outside_open_add_to_your_library_and_images_still_set_a_cover(
     shell, qtbot, tmp_path
 ):
-    """R8.5, R12.5: files from outside the music folder dropped onto a playlist or the window say
-    they come in a later version; an image dropped on an album's cover still opens Album art
-    (R5.4), and MusiKata's own songs dragged over a cover aren't taken for an image."""
+    """R8.5, R12.5: files from outside the music folder dropped onto a playlist or the window open
+    Add to your library, to bring them in; an image dropped on an album's cover still opens Album
+    art (R5.4), and MusiKata's own songs dragged over a cover aren't taken for an image."""
     settled(shell, qtbot)
     outside = QUrl.fromLocalFile(str(tmp_path / "elsewhere.mp3"))
     side = find(shell, "side-playlist")[0]
     Hand(shell.window, urls=[outside]).drop(middle(side))
-    assert shell.changes.property("message")["text"] == OUTSIDE_LATER
-    shell.changes.dismiss()
+    qtbot.waitUntil(lambda: not shell.organize.property("loading"), timeout=WAIT)
+    assert shell.organize.property("opened") and shell.organize.property("adding")
+    assert shell.organize.property("notes") == "1 file couldn't be read"
+    shell.organize.close()
     view = find(shell, "view")[0]
     Hand(shell.window, urls=[outside]).drop(middle(view))
-    assert shell.changes.property("message")["text"] == OUTSIDE_LATER
+    assert shell.organize.property("opened")
+    qtbot.waitUntil(lambda: not shell.organize.property("loading"), timeout=WAIT)
+    shell.organize.close()
     shell.library.show("albums")
     settled(shell, qtbot)
     grid = find(shell, "albums")[0]
