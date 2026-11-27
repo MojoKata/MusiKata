@@ -15,7 +15,8 @@ import "."
 // Undo, shows at the foot of the view (R6.7). Edit tags (R4.2) docks its panel in the same place,
 // under Change history while that is open; Ctrl+E (⌘E) opens it on the open view's selection, and
 // the views open it from their buttons, selection bars and right-click menus. A bulk tool of its ⋯
-// menu (R4.5) opens its dialog over the whole window.
+// menu (R4.5) opens its dialog over the whole window. While a modal dialog is open over the window
+// (`modal`: a bulk tool's), the window's shortcuts don't act on what is behind it.
 Window {
     id: win
     required property var library
@@ -28,6 +29,8 @@ Window {
     minimumHeight: 600
     title: win.library.windowTitle
     color: Theme.bg
+    // a modal dialog is open over the window: its shortcuts are the dialog's, not the window's
+    readonly property bool modal: win.edit.tool.opened
 
     Sidebar {
         id: sidebar
@@ -119,7 +122,7 @@ Window {
     }
     Shortcut {
         sequence: "/"
-        enabled: win.library.searchable
+        enabled: win.library.searchable && !win.modal
         onActivated: header.openSearch()
     }
     Loader {
@@ -169,30 +172,37 @@ Window {
     }
     Shortcut {
         sequence: "Ctrl+E"
+        enabled: !win.modal
         onActivated: win.edit.editCurrent(win.library)
     }
     Shortcut {
         sequences: [StandardKey.Undo]
+        enabled: !win.modal
         onActivated: win.history.undoLast()
     }
     Shortcut {
         sequence: "Space"
+        enabled: !win.modal
         onActivated: win.player.toggle()
     }
     Shortcut {
         sequence: "Ctrl+Right"
+        enabled: !win.modal
         onActivated: win.player.next()
     }
     Shortcut {
         sequence: "Ctrl+Left"
+        enabled: !win.modal
         onActivated: win.player.previous()
     }
     Shortcut {
         sequence: "Left"
+        enabled: !win.modal
         onActivated: win.player.seekBack()
     }
     Shortcut {
         sequence: "Right"
+        enabled: !win.modal
         onActivated: win.player.seekAhead()
     }
 }

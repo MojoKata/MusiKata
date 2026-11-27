@@ -42,8 +42,10 @@ Item {
         rows.positionViewAtIndex(n, ListView.Contain)
     }
 
-    Shortcut { sequences: view.folders.upKeys; onActivated: view.folders.up() }
-    Shortcut { sequence: "Alt+Left"; onActivated: view.folders.back() }
+    // not behind a modal dialog (Main's `modal`)
+    readonly property bool behindModal: view.Window.window !== null && view.Window.window.modal === true
+    Shortcut { sequences: view.folders.upKeys; enabled: !view.behindModal; onActivated: view.folders.up() }
+    Shortcut { sequence: "Alt+Left"; enabled: !view.behindModal; onActivated: view.folders.back() }
     TapHandler { acceptedButtons: Qt.BackButton; onTapped: view.folders.back() }
     Keys.onReturnPressed: if (view.current >= 0) view.folders.activate(view.current)
     Keys.onEnterPressed: if (view.current >= 0) view.folders.activate(view.current)

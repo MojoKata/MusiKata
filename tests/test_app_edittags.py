@@ -757,6 +757,38 @@ def test_a_bulk_tool_opens_from_the_menu_previews_and_saves_with_no_qml_warning(
 
 
 @pytest.mark.slow
+def test_the_windows_shortcuts_do_nothing_behind_a_bulk_tools_dialog(shell, qtbot):
+    """R4.5 with R6.9: while a tool's dialog is open over the window, Ctrl+Z and Space (and the
+    window's other shortcuts) don't act on what is behind it; closed, they do again."""
+    e, lib, p, h = shell.edit, shell.library, shell.player, shell.changes
+    lib.show("songs")
+    songs = lib.property("songs")
+    qtbot.waitUntil(lambda: songs.rowCount() == 4, timeout=WAIT)
+    p.cue(songs.queue_from(0)[0], "Songs")  # Space would start it
+    songs.selectAll()
+    e.editSelection(songs)
+    qtbot.waitUntil(lambda: e.property("count") == 4 and not e.property("loading"), timeout=WAIT)
+    e.runTool("number")
+    qtbot.waitUntil(lambda: bool(find(shell, "toolDialog")), timeout=WAIT)
+    shell.window.requestActivate()
+    qtbot.waitUntil(lambda: shell.window.isActive(), timeout=WAIT)
+    acted = []
+    p.changed.connect(lambda: acted.append("space"))
+    h.messageChanged.connect(lambda: acted.append("undo"))  # Ctrl+Z says "Nothing to undo"
+    QTest.keyClick(shell.window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(shell.window, Qt.Key.Key_Space)
+    qtbot.wait(200)  # the one fixed wait: to show nothing happens
+    assert acted == [] and e.property("tool").property("opened")
+    click(shell, find(shell, "cancelTool")[0])
+    assert not e.property("tool").property("opened")
+    with qtbot.waitSignal(h.messageChanged, timeout=WAIT):
+        QTest.keyClick(shell.window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert h.property("message")["text"] == "Nothing to undo"
+    with qtbot.waitSignal(p.changed, timeout=WAIT):
+        QTest.keyClick(shell.window, Qt.Key.Key_Space)
+
+
+@pytest.mark.slow
 def test_edit_tags_opens_from_an_album_a_songs_menu_the_selection_bar_and_folders(shell, qtbot):
     """R4.2: on an album, a song, a selection; R2.9.6: on folders, every song beneath them, from
     the selection bar and the right-click menu; R2.9.7: a folder of songs' Edit tags."""
