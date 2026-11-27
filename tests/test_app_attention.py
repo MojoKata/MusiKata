@@ -11,6 +11,8 @@ them, as one entry Undo puts back."""
 import json
 import os
 import shutil
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
@@ -166,6 +168,32 @@ def test_show_in_folder_asks_each_platforms_file_manager_to_select_the_file():
     assert linux[0] == "dbus-send" and "array:string:file:///M/a b.mp3" in linux
     assert "org.freedesktop.FileManager1.ShowItems" in linux
     assert reveal_command("/M/a.mp3", "linux", lambda name: None) is None
+
+
+def test_a_file_manager_that_fails_or_cant_start_is_logged_and_the_folder_opened_instead(
+    monkeypatch, caplog
+):
+    """R2.8's Show in folder runs its command to the end: one that can't be started, or that says
+    it failed, is logged and its folder is opened instead; Explorer says 1 when it worked."""
+    ran = []
+
+    def answering(code=0, error=None):
+        def run(command, **_kw):
+            ran.append(command)
+            if error is not None:
+                raise error
+            return subprocess.CompletedProcess(command, code, b"", b"no FileManager1")
+
+        return run
+
+    monkeypatch.setattr(attention_app.subprocess, "run", answering(0))
+    assert attention_app._run(["dbus-send", "--session"]) is True
+    monkeypatch.setattr(attention_app.subprocess, "run", answering(1))
+    assert attention_app._run(["explorer", "/select,a"]) is (sys.platform in ("win32", "darwin"))
+    monkeypatch.setattr(attention_app.subprocess, "run", answering(error=OSError("not found")))
+    assert attention_app._run(["dbus-send"]) is False
+    assert "couldn't show the file in its folder: not found" in caplog.text
+    assert len(ran) == 3
 
 
 # ---------- the list in the library ----------

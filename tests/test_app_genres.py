@@ -216,6 +216,32 @@ def test_select_its_songs_selects_every_song_of_the_genre_on_its_page(lib, qtbot
     assert songs.property("selectionCount") == 3
 
 
+def test_a_genre_not_there_opens_nothing_and_select_on_its_own_page_clears_its_search(
+    lib, index, qtbot
+):
+    """R9.4's Select its songs on the genre's page already open with a search typed: the search
+    cleared and every song selected; a genre gone opens nothing, and back to its page goes to
+    Genres."""
+    lib.show("genres")
+    lib.openGenre("Nope")
+    lib.selectGenre("Nope")
+    assert lib.property("view") == "genres"
+    lib.openGenre("Electronic")
+    songs = lib.property("genrePage").property("songs")
+    lib.setSearch("moon")
+    came(songs, qtbot)
+    lib.selectGenre("Electronic")
+    came(songs, qtbot)
+    assert lib.property("search") == "" and songs.property("selectionCount") == 3
+    lib.show("genres")
+    lib.openGenre("Jazz")
+    (album,) = index.read().execute("SELECT id FROM album").fetchone()
+    lib.openAlbum(album)
+    index.write(lambda c: c.execute("DELETE FROM song_genre WHERE genre = 'Jazz'")).result()
+    lib.back()
+    assert lib.property("view") == "genres"
+
+
 def test_a_genre_gone_after_a_save_sends_its_page_back_to_genres(lib, index, qtbot):
     lib.show("genres")
     lib.openGenre("Jazz")
@@ -468,6 +494,10 @@ def test_rename_takes_the_new_name_as_typed_and_says_why_one_cant_be_written(roo
         g.rename("Electronica")
         opened(g, qtbot)
         assert g.property("title") == "Rename Electronica"
+        assert g.property("about") == (
+            "Every song with Electronica gets the new name instead. A name another genre has"
+            " already merges the two."
+        )
         assert g.property("options") == {"name": "Electronica"}
         assert g.property("saveLater") == "Nothing to save"  # the name it has: no change
         g.setOption("name", "Rock; Pop")
@@ -491,8 +521,11 @@ def test_merge_into_with_no_other_genre_says_so(root, qapp, qtbot):
     music, index, _paths = root
     g = make(root)
     try:
+        assert (g.property("title"), g.property("about"), g.property("options")) == ("", "", {})
         g.mergeInto("Electronica")  # its counts not read yet: nothing offered
         opened(g, qtbot)
+        assert g.property("title") == "Merge Electronica into…"
+        assert g.property("about") == "Every song with Electronica gets the genre chosen instead."
         assert g.property("problem") == "There's no other genre to merge it into"
         assert g.property("saveLater") == "Nothing to save"
     finally:

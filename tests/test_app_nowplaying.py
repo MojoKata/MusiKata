@@ -458,6 +458,7 @@ def test_a_next_song_failing_as_the_device_reaches_it_is_shown_with_why(made, qt
 
 def test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there(made, qtbot):
     p, engine, songs = made
+    p.seekTo(0.5)  # nothing to seek: nothing moves
     p.cue([songs.queue_from(0)[0][0]], "Songs")
     p.seek(10.0)  # a cued song doesn't move
     assert engine.seeks() == [] and p.property("seekable") is False

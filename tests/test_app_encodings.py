@@ -7,6 +7,7 @@ Why: the dialog is how the user turns gibberish back into their tags; a reading 
 a save that writes the wrong songs, or an Undo that writes Unicode where the file held other bytes,
 would lose what the tags said."""
 
+import dataclasses
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -199,6 +200,10 @@ def test_fix_encoding_reads_the_song_and_its_album_and_saves_the_reading_chosen(
         e = model.entry_of_kind(attention.ENCODING, "Маяк")
         assert e is not None and e.about == "SV/TG/08.wav"
         assert f.property("opened") is False and f.property("readings") == []
+        f.close()  # nothing open: nothing to close
+        f.open_songs([])  # no songs, or an entry of another kind: nothing opens
+        f.open(dataclasses.replace(e, kind=attention.UNREADABLE))
+        assert f.property("opened") is False
         opened(f, qtbot, lambda: f.open(e))
         assert f.property("title") == "Fix encoding · 08.wav"
         assert f.property("about").startswith("These tags were saved as Latin-1")
@@ -214,6 +219,7 @@ def test_fix_encoding_reads_the_song_and_its_album_and_saves_the_reading_chosen(
         )
         assert f.property("saveLabel") == "Save 3 files" and f.property("saveLater") == ""
         f.choose(len(rows) - 1)  # Greek can't read it: nothing changes
+        f.choose(len(rows))  # no such reading: nothing either
         assert f.property("readings")[0]["chosen"]
         f.toggleWhole()
         assert f.property("saveLabel") == "Save 1 file" and not f.property("whole")

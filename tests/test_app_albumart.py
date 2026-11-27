@@ -301,6 +301,10 @@ def test_the_dialog_shows_the_current_cover_and_the_covers_found_and_says_no_cha
     """R5.2, T02: the current cover with its size, kind, file size and where it is; the covers
     found, the current one chosen; "No change" when it is already everywhere, and Done."""
     music, _, album_id = root
+    dialog.close()  # not open: nothing to close, save or retry
+    dialog.save()
+    dialog.retry()
+    assert not dialog.property("opened") and not dialog.property("saving")
     opened(dialog, qtbot, album_id)
     assert dialog.property("title") == "Album art · Glass Harbor"
     current = dialog.property("current")
@@ -424,6 +428,13 @@ def test_pasting_takes_the_clipboards_own_bytes_else_its_image_else_says_none(ro
     picture.fill(QColor("#123456"))
     dialog.paste_from(QMimeData(), picture)
     qtbot.waitUntil(lambda: titles(dialog)[0][1] == "400 × 400", timeout=WAIT)
+    copied = os.path.join(music, "copied.png")  # a file copied in the file manager
+    with open(copied, "wb") as f:
+        f.write(image(500, 500, "#33aa66"))
+    files = QMimeData()
+    files.setUrls([QUrl.fromLocalFile(copied)])
+    dialog.paste_from(files, QImage())
+    qtbot.waitUntil(lambda: titles(dialog)[0][0] == "Chosen: copied.png", timeout=WAIT)
     dialog.paste_from(None, QImage())
     assert dialog.property("message") == "There's no image on the clipboard to paste"
     bad = QImage(4000, 1, QImage.Format.Format_RGB32)

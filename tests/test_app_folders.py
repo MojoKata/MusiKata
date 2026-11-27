@@ -343,6 +343,7 @@ def test_a_rows_songs_are_what_its_menu_queues_and_the_roots_name_is_its_title(v
         "Lumen Drift/Tide Tables/03 - Slack Water.flac",
     ]
     assert [paths[i] for i in m.songs_at(3)] == ["Lumen Drift/ebb & flow.mp3"]
+    assert paths[m.song_at(3)] == "Lumen Drift/ebb & flow.mp3" and m.song_at(2) is None  # R10.2
     assert m.songs_at(99) == []
     queued, source = m.queue_from(3)
     assert [paths[i] for i in queued][0] == "Lumen Drift/ebb & flow.mp3" and source == "Lumen Drift"

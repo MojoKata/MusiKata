@@ -174,6 +174,24 @@ def test_rating_several_songs_is_one_save_shown_at_once_and_kept_beside_the_file
     assert rating.shown() == {} and rating.shown_[-1] == {}
 
 
+def test_a_song_rated_again_before_its_first_save_is_done_shows_the_last(root, rating, qtbot):
+    """R10.2: a song's stars changed twice in quick succession show the second rating through
+    the first save's end, and it is the one kept."""
+    music, index, _paths = root
+    song = ids_of(index)[0]
+    h = rating.history_
+    messages = []
+    h.messageChanged.connect(lambda: messages.append(h.property("message").get("text")))
+    rating.rate([song], 4)
+    rating.rate([song], 2)
+    qtbot.waitUntil(lambda: len(messages) == 2, timeout=WAIT)
+    assert messages == ["1 song rated 4 stars", "1 song rated 2 stars"]
+    assert all(shown == {song: 2} for shown in rating.shown_[1:])  # never back to 4, or none
+    assert stars_of(index)[0] == 2
+    rating.reloaded()
+    assert rating.shown() == {}
+
+
 def test_a_rating_that_cant_be_kept_goes_back_and_the_message_says_why(root, rating, qtbot):
     """R10.2: the list goes back if the write fails, saying why."""
     music, index, _paths = root

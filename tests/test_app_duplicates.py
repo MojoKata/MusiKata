@@ -498,6 +498,8 @@ def test_the_tour_opens_a_groups_review_and_its_question(root, tmp_path, qtbot):
     music, index, paths, rel, ids = root
     d = make(music, index, tmp_path, qtbot)
     try:
+        d.go({"view": "attention", "review": "Signal Fires"})  # the group, not its question
+        assert d.property("opened") and d.property("question") == {}
         d.go({"view": "attention", "review": "Signal Fires", "ask": True})
         assert d.property("opened") and d.property("question")["title"]
         d.go({"view": "albums"})
@@ -509,6 +511,66 @@ def test_the_tour_opens_a_groups_review_and_its_question(root, tmp_path, qtbot):
         d.shut()
         d.history_.close()
     assert not d._available()
+
+
+class Held:
+    """An executor that keeps the jobs it is given until `run` runs them, here."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def submit(self, fn):
+        self.jobs.append(fn)
+
+    def run(self):
+        while self.jobs:
+            self.jobs.pop(0)()
+
+    def shutdown(self, wait=True):
+        pass
+
+
+def test_while_a_move_goes_on_the_dialog_says_so_and_one_that_moved_nothing_stays_open(
+    root, tmp_path, qtbot
+):
+    """R2.12: the dialog says a move is going on and asks no other until it ends; a move that
+    moved nothing leaves the dialog open on its copies; one that ends after the window closed
+    changes nothing."""
+    music, index, paths, rel, ids = root
+    held = Held()
+    w = ratings.Writing(music, index, write_file, True, FakeClock(NOW))
+    h = history_of(music, index, w)
+    model = AttentionModel(index.read)
+    model.refresh()
+    trash = Trash(str(tmp_path / "Trash"), refuse={"Signal Fires.wav"})
+    d = Duplicates(music, model, w, copies_app.remover(music, index), h, plays=plays_of(index),
+                   trash=trash, executor=held)  # fmt: skip
+    try:
+        d.keep(ids[rel["rip"]])  # no group open: nothing kept, checked or asked
+        d.toggle(ids[rel["rip"]])
+        d.move()
+        assert d.property("question") == {} and model.checked() == 1
+        d.open(model.entry_titled("Signal Fires"))
+        d.move()
+        d.answer(True)
+        assert d.property("moving") and d.property("footer") == "Moving to the trash…"
+        assert d.property("moveLater") == "A move is going on"
+        d.move()  # another while it goes on: not asked
+        assert d.property("question") == {}
+        with qtbot.waitSignal(h.messageChanged, timeout=WAIT):
+            held.run()
+        assert d.property("opened") and not d.property("moving") and os.path.exists(paths["rip"])
+        assert h.property("message")["text"] == (
+            "Moved 0 of 1 song to the trash: Signal Fires.wav couldn't be moved to the trash"
+        )
+        d.move()
+        d.answer(True)
+        d.shut()  # the window closes before the move ends
+        held.run()
+        assert not d.property("moving") and d.property("opened")
+    finally:
+        d.shut()
+        h.close()
 
 
 def test_a_move_whose_rows_cant_be_taken_out_says_the_files_went_and_gives_the_rest(
