@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MojoKata/MusiKata/schemas/smart-rule.v1.schema.json",
+  "title": "A smart playlist's rule (R8.9): the JSON after #MUSIKATA-RULE: in its playlist file, on one line",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "rating": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Rating at least this many stars"
+    },
+    "genre": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Genre is this one, case aside"
+    },
+    "artist": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Artist (the song's or its album's) is this one, case aside"
+    },
+    "years": {
+      "type": "array",
+      "prefixItems": [
+        {"type": ["integer", "null"]},
+        {"type": ["integer", "null"]}
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "Year between these two, both included; null leaves that end open"
+    },
+    "added": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Added in the last this many days"
+    },
+    "plays": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Played at least this many times, every computer's plays added up"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The first this many songs in its order; none: every song"
+    },
+    "order": {
+      "enum": ["artist", "title", "rating", "plays", "played", "added", "year"]
+    }
+  },
+  "required": ["format", "order"]
+}

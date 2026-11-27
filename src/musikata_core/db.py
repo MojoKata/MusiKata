@@ -284,8 +284,20 @@ def _v12(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX playlist_entry_path ON playlist_entry (path)")
 
 
+def _v13(c: sqlite3.Connection) -> None:
+    """When each song came into the library (`song.added`, seconds since the epoch, UTC), for a
+    smart playlist's "added in the last N days" (R8.9), indexed. A song the index has already
+    gets its file's modification time, the nearest the index knows; one marked to be read again
+    (its modification time unknown) gets it when it is (scanner.write_batch). From then on a song
+    a scan finds new is added at the scan's time, or at its file's modification time on the
+    library's first scan, so a new library doesn't hold every song as added today."""
+    c.execute("ALTER TABLE song ADD COLUMN added REAL")
+    c.execute("UPDATE song SET added = mtime_ns / 1e9 WHERE mtime_ns > 0")
+    c.execute("CREATE INDEX song_added ON song (added)")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13,
 ]  # fmt: skip
 
 

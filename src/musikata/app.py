@@ -41,6 +41,7 @@ from .albumart import AlbumArt, ArtImages
 from .attention import Attention, NameMerge
 from .bridges import Library, Player
 from .covers import Covers, trim_cache
+from .dragging import Dragging
 from .duplicates import Duplicates, plays_back, remover
 from .edittags import EditTags
 from .encodings import FixEncoding
@@ -52,6 +53,7 @@ from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .playlists import Playlists
 from .plays import PlayCounts
 from .ratings import Ratings, file_writer
+from .smart import SmartPlaylists
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
 FIRST_QML = os.path.join(os.path.dirname(QML), "FirstRun.qml")
@@ -164,6 +166,8 @@ class Shell:
     encodings: FixEncoding | None = None
     infer: InferFromPath | None = None
     playlists: Playlists | None = None
+    dragging: Dragging | None = None
+    smart: SmartPlaylists | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -173,7 +177,7 @@ class Shell:
         close_bridges(
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
-            self.copies, self.encodings, self.infer, self.playlists,
+            self.copies, self.encodings, self.infer, self.playlists, self.dragging, self.smart,
         )  # fmt: skip
 
 
@@ -194,11 +198,13 @@ def close_bridges(
     encodings: FixEncoding | None = None,
     infer: InferFromPath | None = None,
     playlists: Playlists | None = None,
+    dragging: Dragging | None = None,
+    smart: SmartPlaylists | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's, Album art's, the merges', Fix encoding…'s and Infer
     from path's saves (stopped before their next file) and threads, the playlists' changes (an
-    export stopped), Needs attention's dismissals
+    export stopped) and the smart playlists' checks, Needs attention's dismissals
     and watching, the ratings' save and watching, the play counts (their file written), the change
     history's thread, the watcher, the scan's thread and the worker processes, and the index; then
     deletes them (`release`)."""
@@ -221,6 +227,10 @@ def close_bridges(
         infer.shut()
     if playlists is not None:
         playlists.shut()
+    if smart is not None:
+        smart.shut()
+    if dragging is not None:
+        dragging.close()
     if attention is not None:
         attention.close()
     if ratings is not None:
@@ -232,8 +242,8 @@ def close_bridges(
     library.close()
     index.close()
     release(
-        controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, attention,
-        ratings, changes, player, library,
+        controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, dragging,
+        smart, attention, ratings, changes, player, library,
     )  # fmt: skip
 
 
@@ -343,9 +353,20 @@ def load(
         root, index, settings.root_playlists(root) if not missing else index_playlists.FOLDER
     )
     lists = Playlists(
-        store, library, index.read, say=changes.say,
+        store, library, index.read, say=changes.say, offer=changes.offer,
         available=lambda: bool(library.property("available")), home=home_of(env),
     )  # fmt: skip
+    # smart playlists (R8.9): made and edited through the store, and kept current after a scan,
+    # a save or a rating (the library read again) and after plays
+    smart = SmartPlaylists(
+        store, library, index.read, clock, say=changes.say, rename=lists.startRename,
+        available=lambda: bool(library.property("available")),
+    )  # fmt: skip
+    library.reloaded.connect(smart.poke)
+    if counts is not None:
+        counts.changed.connect(smart.pokePlays)
+    # drag and drop (R6.10, R8.5): onto playlists through `lists`, onto the queue through `player`
+    dragging = Dragging(root, index.read, library, lists, player, say=changes.say)
     needs, names, copies = attend(
         library, root, index, clock, edit, album_art, genre_tools, writing, changes, tags_settings,
         missing, counts, fix, infer, lists, store,
@@ -365,6 +386,8 @@ def load(
             "encodings": fix,
             "infer": infer,
             "playlists": lists,
+            "dragging": dragging,
+            "smart": smart,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -374,7 +397,8 @@ def load(
         # none left for a collection (A1.3)
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
                       art=album_art, genres=genre_tools, attention=needs, names=names,
-                      copies=copies, encodings=fix, infer=infer, playlists=lists)  # fmt: skip
+                      copies=copies, encodings=fix, infer=infer, playlists=lists,
+                      dragging=dragging, smart=smart)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -382,6 +406,7 @@ def load(
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
         changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
+        dragging, smart,
     )  # fmt: skip
 
 
@@ -803,10 +828,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         copies = session.shell.copies if session.shell is not None else None
         fix = session.shell.encodings if session.shell is not None else None
         infer = session.shell.infer if session.shell is not None else None
+        dragging = session.shell.dragging if session.shell is not None else None
+        smart = session.shell.smart if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
-            copies=copies, encodings=fix, infer=infer,
+            copies=copies, encodings=fix, infer=infer, dragging=dragging, smart=smart,
         ).start()  # fmt: skip
     else:
         session.window.show()

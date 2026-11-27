@@ -136,7 +136,8 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.genres` | tags | Genres (R9): a genre's tile, the names that look like one genre (case, accents, spacing and punctuation aside, and the user's own), renaming and merging as plans the preview shows, the built-in genre list |
 | `musikata_core.lyrics` | tags | LRC, and lyrics in files and tags (R17, A7.6) |
 | `musikata_core.patterns` | files | Path patterns, both ways (A3.3, R3, R12.1) |
-| `musikata_core.playlists` | files | M3U and M3U8 (R8): read in every shape R8.1.2 names and written as R8.1 says, where an entry is, the index's playlists kept by the scan, Find's matching, Export's plan and its copies, the store that makes MusiKata's changes and points playlists at files moved; smart playlists (R8.9) |
+| `musikata_core.playlists` | files | M3U and M3U8 (R8): read in every shape R8.1.2 names and written as R8.1 says, where an entry is, the index's playlists kept by the scan, Find's matching, Export's plan and its copies, the store that makes MusiKata's changes (a smart playlist's made, its rule edited and its songs refilled, changes by hand refused) and points playlists at files moved |
+| `musikata_core.smart` | files | Smart playlists (R8.9): the rule, its `#MUSIKATA-RULE:` text read in every shape and written (A2.10), its songs' query over the index, whether its file must be written again and the pace of it, and the keeper that keeps every one current |
 | `musikata_core.organize` | files | Moving and renaming files, removing songs to the trash (R12, R2.11) |
 | `musikata_core.history` | files | The change history and Undo (A3.5, R4.9) |
 | `musikata_core.audio` | playback | `decode`, `join`, `seam`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream`, `played` (when a song counts as played, R7.9) (A4, R7, R19) |
@@ -150,7 +151,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.selection` | app | A song list's selection, by song id, with its anchor and current row: clicks and keys as the lists take them, without Qt (R2.6, R7.1) |
 | `musikata.firstrun` | app | The first start: the root dropped, chosen or the platform's music folder (R2.1, X01-first-run) |
 | `musikata.folders` | app | The Folders view: its model, the open folder, the selection (R2.9, A2.7) |
-| `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7) |
+| `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7), and how an image is decoded off the GUI thread (`decoded`, which the Album art dialog uses too) |
 | `musikata.player` | app | The playback thread and the sound device (A4.1, A4.6) |
 | `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
 | `musikata.edittags` | app | The Edit tags panel in the running app: what it edits and follows, its fields, suggestions, saving through the batch with progress, Cancel and Retry, and one song's file (R4.2 to R4.4, R4.6 to R4.8) |
@@ -164,7 +165,9 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.preview` | app | The preview of a change to many files' tags before it is saved: each file's old and new values, its checkbox, the footer and Save (R3.7, R3.8; the bulk tools', and Infer from path's) |
 | `musikata.history` | app | The change history in the running app: the entries read and watched, the Change history panel, Ctrl+Z, R4.9.1's question and the message that follows a save, with Undo (R4.9, R6.7) |
 | `musikata.ratings` | app | Ratings in the running app: a star clicked in a list or the now-playing bar, and Ctrl+0 to Ctrl+5 on the selection, saved through the batch and the change history, shown at once and put back when the save fails; the root's `ratings.json` watched and read again (R10.2, R10.3) |
-| `musikata.playlists` | app | Playlists in the running app: the sidebar's list, a playlist's page and its entries, + and New playlist from selection, Add to playlist, renaming, duplicating and deleting, removing entries, Find and Export…, each through the store off the GUI thread (R8, R6.3) |
+| `musikata.playlists` | app | Playlists in the running app: the sidebar's list, a playlist's page and its entries, + and New playlist from selection, Add to playlist with its Undo, renaming, duplicating and deleting, removing and reordering entries (by dragging and by Ctrl+Shift+↑ / ↓), a file manager's files added, Find and Export…, each through the store off the GUI thread (R8, R6.3, R18.2) |
+| `musikata.smart` | app | Smart playlists in the running app: the rule in words, New smart playlist… and Edit rule's dialog with its count of songs as the rule changes and Save through the store, and the smart playlists kept current after a scan, a save, a rating and plays, off the GUI thread (R8.9) |
+| `musikata.dragging` | app | Drag and drop in the running app: what a drag carries from every list and grid (its songs, its card, its files), where a drop lands and what it does (onto a playlist, within one, onto the queue, a file manager's files), MusiKata's own drag format, and the platform's drag with the card as its picture (R6.10, R8.5) |
 | `musikata.plays` | app | Play counts in the running app: the player's plays kept, the other computers' play files watched and read again (R7.9, A2.8) |
 | `musikata.media` | app | The system's media controls (A4.5): `MediaControls` over the Player bridge, `controls` (what the system is told and what its commands do, without Qt), and the backends `mpris`, `smtc` and `nowplaying_mac` |
 | `musikata.tour` | app | The tour (A1.6) |

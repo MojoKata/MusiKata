@@ -4,11 +4,13 @@ import "."
 
 // Albums (R2.6, L01-albums): the genre chips of the most common genres, and the albums as a grid
 // of covers or, with the header's switch (R6.4), a list; paged from the index as they scroll (A1.5).
+// An album dragged, from the grid or the list, carries its songs (R6.10, DragSource).
 Item {
     id: view
     required property var library
     required property var player
     property var art: null  // Album art (R5.4): an image dropped on a cover
+    property var dragging: null  // an album dragged (R6.10)
     readonly property bool listMode: view.library.albumsMode === "list"
 
     Flickable {  // the genre chips (R2.6)
@@ -93,6 +95,7 @@ Item {
                 onOpen: view.library.openAlbum(cell.albumId)
                 onPlay: view.player.playAlbum(cell.albumId)
                 onImageDropped: (urls) => { if (view.art) view.art.dropOnAlbum(cell.albumId, urls) }
+                DragSource { dragging: view.dragging; onCarry: view.dragging.carryAlbum(cell.albumId) }
             }
         }
         ScrollBar.vertical: ScrollBar { }
@@ -153,6 +156,7 @@ Item {
                 columns: table.columns
                 onOpen: view.library.openAlbum(albumId)
                 onImageDropped: (urls) => { if (view.art) view.art.dropOnAlbum(albumId, urls) }
+                DragSource { dragging: view.dragging; onCarry: view.dragging.carryAlbum(albumId) }
             }
             ScrollBar.vertical: ScrollBar { }
         }

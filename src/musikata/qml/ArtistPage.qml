@@ -7,6 +7,7 @@ import "."
 // by year; then their songs on others' albums and on none, selected as the Songs list's are (R2.6),
 // clicks and keys forwarded to the model: Enter plays the selection from its first song, the rest of
 // the list after it (R7.1), and the right-click menu acts on the selection when the row is in it.
+// An album dragged carries its songs; a song, it or the selection it is in (R6.10).
 Item {
     id: page
     required property var library
@@ -15,6 +16,7 @@ Item {
     property var edit: null
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // Album art (R5.4): an image dropped on an album's cover
+    property var dragging: null  // an album or a song dragged (R6.10)
     readonly property var artist: library.artist
     readonly property var others: artist.others
     focus: true
@@ -127,6 +129,7 @@ Item {
                         onOpen: page.library.openAlbum(albumId)
                         onPlay: page.player.playAlbum(albumId)
                         onImageDropped: (urls) => { if (page.art) page.art.dropOnAlbum(albumId, urls) }
+                        DragSource { dragging: page.dragging; onCarry: page.dragging.carryAlbum(albumId) }
                     }
                 }
             }
@@ -165,6 +168,7 @@ Item {
             onActivated: page.player.playFrom(page.others, index)
             onMenu: songMenu.openFor(page.others, index)
             onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.others, index, star) }
+            DragSource { dragging: page.dragging; onCarry: page.dragging.carry(page.others, index) }
         }
         ScrollBar.vertical: ScrollBar { }
     }

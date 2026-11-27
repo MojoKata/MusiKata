@@ -4,9 +4,11 @@ import "."
 
 // Artists (R2.6): every artist by their sort name (R2.13), each with a mosaic of their covers,
 // paged from the index as they scroll (A1.5).
+// An artist dragged carries their songs (R6.10, DragSource).
 Item {
     id: view
     required property var library
+    property var dragging: null  // an artist dragged: their songs (R6.10)
 
     GridView {
         id: grid
@@ -38,6 +40,7 @@ Item {
                 line: cell.line
                 tiles: cell.tiles
                 onOpen: view.library.openArtist(cell.artistId)
+                DragSource { dragging: view.dragging; onCarry: view.dragging.carryArtist(cell.artistId) }
             }
         }
         ScrollBar.vertical: ScrollBar { }

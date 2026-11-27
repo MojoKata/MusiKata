@@ -1839,6 +1839,11 @@ class Player(QObject):
         list's order, right after the current one."""
         self._added(self.queue.play_next(songs.selected_songs()))
 
+    def play_next(self, songs: Sequence[int]) -> None:
+        """Songs dropped onto Up next or the queue button (R6.10, R7.2): right after the current
+        one, as Play next puts them."""
+        self._added(self.queue.play_next(songs))
+
     def _added(self, entries: list[Entry]) -> None:
         """Songs went into the queue: shown at once when nothing was there (cued, not started)."""
         if entries and self.queue.current is entries[0]:

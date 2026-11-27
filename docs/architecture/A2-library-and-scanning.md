@@ -6,7 +6,7 @@ SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's 
 
 | Table | Holds |
 |---|---|
-| `song` | One row per file: path under the root (unique), size, modification time, kind, length, bit rate, sample rate, every R4.1 field, an `audio_hash` (R12.5), the path-match state (R3.9) |
+| `song` | One row per file: path under the root (unique), size, modification time, kind, length, bit rate, sample rate, every R4.1 field, an `audio_hash` (R12.5), the path-match state (R3.9), when it was added (R8.9: the scan's time for a song it finds new; its file's modification time on a library's first scan, and for a song indexed before the index kept it) |
 | `song_genre` | Song and genre, one row per genre (R9.2) |
 | `album` | Album artist and title (R2.5.2), its cover's source and thumbnail, cached counts |
 | `artist` | Each artist, names that differ only in case as one (R2.5.4): the name shown, its sort key (R2.13), cached counts |
@@ -129,6 +129,11 @@ apart instead:
   own files when its scan finds a move.
 - `ignored.json` and `ratings.json` change seldom and are merged entry by entry: before writing,
   MusiKata reads the file again, and the newest entry wins.
+- A smart playlist's file (R8.9), under the root with the other playlists, is written again by
+  whichever computer finds its songs no longer its rule's, never when they are, and at most once
+  a minute after a scan, a save or a rating, and once every ten minutes for plays alone; so a
+  root kept in sync uploads it seldom, and two computers working out the same songs from the same
+  files write the same file.
 - The change history is one file per entry (A3.5), never rewritten, so there is nothing to merge.
 - When `.musikata` can't be written (R1.5.2), the same data is kept in the index only, and the
   root's settings are read and never written; `now-playing.json` is kept as a file beside the
@@ -152,7 +157,7 @@ At start, the index and caches of every root not opened for 180 days are removed
 names each. A root that comes back after that is scanned again, which loses only time (R1.5.1).
 
 A2.10. **The formats.** The files another computer, or another version of MusiKata, reads: the
-root's own files (A2.8) and the shared settings (R13.9). Each is JSON in UTF-8, and each has a JSON
+root's own files (A2.8), the shared settings (R13.9) and a smart playlist's rule (R8.9). Each is JSON in UTF-8, and each has a JSON
 Schema in `src/musikata_core/schemas/`, which the tests hold every example below to.
 
 - **A version in each file.** Each carries `"format": 1`. Within a version a change only adds
@@ -167,7 +172,9 @@ Schema in `src/musikata_core/schemas/`, which the tests hold every example below
   ISO 8601. **Hashes** are the audio hash of A2.3, as 64 hexadecimal digits.
 - **Who writes it:** `<id>/plays.json` and `<id>/now-playing.json` only its computer; `ratings.json` and `ignored.json` any
   computer, merged entry by entry with the newest `changed` winning (A2.8); a history entry is
-  written once and never changed (A3.5); `root.json` once, when the root is first opened (A2.9).
+  written once and never changed (A3.5); `root.json` once, when the root is first opened (A2.9); a
+  smart playlist's rule any computer, when Edit rule saves it, and its songs any computer that
+  finds them changed (A2.8).
 
 `root.json` (`root.v1.schema.json`):
 
@@ -301,6 +308,26 @@ its songs'), so a change to the file brings the entry back:
      "modified": 1795600000.0, "changed": "2026-11-21T10:00:00Z"}
   ]
 }
+```
+
+A smart playlist's rule (`smart-rule.v1.schema.json`) is the JSON after `#MUSIKATA-RULE:`, on one
+line of its playlist file (R8.9), which other players pass by as a comment. A condition is there
+only when set, and every one there must hold: `rating` at least that many stars; `genre` and
+`artist` (the song's, or its album's) that one, case aside; `years` from and to, both included,
+`null` leaving an end open; `added` in the last that many days; `plays` at least that many, every
+computer's added up (R7.9). `limit` keeps the first that many songs (none: every one) in its
+`order`: `artist`, `title`, `rating`, `plays`, `played`, `added` or `year`, ties in the library's
+artist order and then by path. Its shapes are read without failing: a number as text (`"4"`) or as
+a whole fraction (`4.0`), `null` or empty text for none, years the other way round or a year
+alone, an order in another case, `format` missing (read as 1); text that isn't JSON or an object,
+or a condition, limit or order it can't use (a rating of 0 or 9, a bool, a fraction, another type,
+an order it doesn't know), make the rule broken, and the playlist a plain list, kept as its file
+has it until Edit rule saves a rule; a newer `format` is read for what it can and never written.
+The fields it doesn't know are kept when it is written again:
+
+```json
+{"format": 1, "rating": 4, "genre": "Electronic", "years": [2015, null], "limit": 100,
+ "order": "rating"}
 ```
 
 A history entry, `history/<time>-<computer id>.json` (`history-entry.v1.schema.json`), the time

@@ -20,7 +20,6 @@ thumbnails handed to QML through `ArtImages` (`image://albumart/<key>`)."""
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import sqlite3
@@ -32,7 +31,18 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from PySide6.QtCore import Property as QtProperty
-from PySide6.QtCore import QBuffer, QIODevice, QMimeData, QObject, QSize, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    QByteArray,
+    QDataStream,
+    QIODevice,
+    QMimeData,
+    QObject,
+    QSize,
+    Qt,
+    QUrl,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter
 from PySide6.QtQuick import QQuickImageProvider
 
@@ -42,6 +52,7 @@ from musikata_core.tags import Batch, Failed, Job, Outcome, TagReadError, Writte
 from musikata_core.tags import pictures as read_pictures
 from musikata_core.tags.read import EXTENSIONS
 
+from . import covers
 from .edittags import FEW, failed_rows
 from .history import ChangeHistory
 from .models import Searcher
@@ -73,13 +84,12 @@ class ArtError(Exception):
 # ---------- an image, decoded and written (Qt's) ----------
 
 
-def decode(data: bytes) -> QImage:
-    """`data` decoded; ArtError when Qt can't, the bytes damaged or cut short. From the bytes
-    with QImage.fromData, never a QImageReader on a QBuffer made here: Qt's reader holds a mutex
-    while it finds the handler, and calls on a Python-made device take the GIL, which a cover
-    decoding on QML's pixmap reader (covers.thumbnail) holds while it waits on that mutex: a
-    deadlock (coding.md, "Threads and processes")."""
-    image = QImage.fromData(data)
+def decode(data: bytes, scaled: QSize | None = None) -> QImage:
+    """`data` decoded (at `scaled` when given); ArtError when Qt can't, the bytes damaged or cut
+    short. Through covers.decoded, the only way an image is decoded off the GUI thread: Qt does it
+    with the GIL released and nothing in it calls into Python (coding.md, "Threads and
+    processes")."""
+    image = covers.decoded(data, scaled)
     if image.isNull():
         raise ArtError("it can't be decoded: the file is damaged")
     return image
@@ -87,7 +97,8 @@ def decode(data: bytes) -> QImage:
 
 def encoded(image: QImage, kind: str, quality: int = art.QUALITY) -> bytes:
     """`image` saved as a JPEG ("JPEG", at `quality`, transparency laid on white, CMYK made RGB)
-    or a PNG ("PNG")."""
+    or a PNG ("PNG"). Into a buffer Qt made (QDataStream's): QImage.save runs with the GIL
+    released, and a QBuffer made here would call into Python on each write."""
     if kind == "JPEG":
         flat = QImage(image.size(), QImage.Format.Format_RGB32)
         flat.fill(WHITE)
@@ -95,12 +106,12 @@ def encoded(image: QImage, kind: str, quality: int = art.QUALITY) -> bytes:
         painter.drawImage(0, 0, image.convertToFormat(QImage.Format.Format_ARGB32))
         painter.end()
         image = flat
-    buffer = QBuffer()
-    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    out = QByteArray()
+    stream = QDataStream(out, QIODevice.OpenModeFlag.WriteOnly)
     # PySide6 takes the format as str, though its stubs say bytes (bytes raise ValueError)
-    if not image.save(buffer, kind, quality):  # type: ignore[call-overload]
+    if not image.save(stream.device(), kind, quality):  # type: ignore[call-overload]
         raise ArtError(f"it couldn't be made a {kind}")
-    return bytes(buffer.data().data())
+    return bytes(out.data())
 
 
 def forms_of(data: bytes, info: ImageInfo, image: QImage, side: int = art.SHRINK) -> Forms:
@@ -112,25 +123,12 @@ def forms_of(data: bytes, info: ImageInfo, image: QImage, side: int = art.SHRINK
         embed = encoded(image, "PNG" if info.alpha else "JPEG")
     shrunk = None
     if art.needs_shrinking(info, side):
-        small = image.scaled(
-            side,
-            side,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        fitted = QSize(info.width, info.height).scaled(
+            side, side, Qt.AspectRatioMode.KeepAspectRatio
         )
-        shrunk = encoded(small, "JPEG")
+        shrunk = encoded(decode(data, fitted), "JPEG")
     folder = encoded(image, "JPEG") if art.needs_converting(info, jpeg=True) else data
     return Forms(embed, shrunk, folder)
-
-
-def thumbnail(image: QImage, side: int) -> QImage:
-    """`image` scaled so its shorter side is `side` (never up), for the dialog to show."""
-    if min(image.width(), image.height()) <= side:
-        return image
-    return image.scaled(
-        side, side, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-        Qt.TransformationMode.SmoothTransformation,
-    )  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -150,7 +148,7 @@ def prepare(data: bytes, side: int = art.SHRINK, thumb: int = THUMB) -> Prepared
         return Prepared(None, QImage(), why)
     try:
         image = decode(data)
-        return Prepared(forms_of(data, info, image, side), thumbnail(image, thumb))
+        return Prepared(forms_of(data, info, image, side), covers.thumbnail(data, thumb))
     except ArtError as e:
         return Prepared(None, QImage(), e.why)
 
@@ -291,10 +289,9 @@ def load(root: str, target: Target, side: int = art.SHRINK) -> Loaded:
     images = read_images(root, target.folders)
     album = art.gather(songs, images, folders=target.folders)
     ready = {c.key: prepare(c.data, side) for c in album.candidates if not c.problem}
-    large = QImage()
+    large = QImage()  # empty when it can't be decoded: the current cover then shows as none
     if album.current.data is not None:
-        with contextlib.suppress(ArtError):  # the current cover then shows as none
-            large = thumbnail(decode(album.current.data), LARGE)
+        large = covers.thumbnail(album.current.data, LARGE)
     return Loaded(target, album, ready, large)
 
 

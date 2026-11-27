@@ -110,13 +110,23 @@ and mutation testing finds them only slowly.
   nothing they hold or that holds them is left in a reference cycle: a bound method or callback
   stored on what outlives the close is let go at it, and an exception kept is kept without its
   traceback, whose frames would hold everything they referred to.
-- An image is decoded from its bytes with `QImage.fromData`, never through a Python-made
-  `QIODevice` (a `QBuffer` made in Python) handed to a `QImageReader`. Qt's reader holds a mutex
-  of its own while it finds the image's handler, and each call it makes on a Python-made device
-  takes the GIL; `QImage.fromData` holds the GIL while it decodes and waits on that same mutex. So
-  a decode through a `QBuffer` on one thread and `fromData` on another (QML's pixmap reader in
-  `covers.Covers`) deadlock, and the app freezes. Writing an image to a `QBuffer` (`QImage.save`)
-  takes no such mutex and is safe.
+- Off the GUI thread, an image is decoded with `covers.decoded`, scaled as it is decoded when a
+  smaller one is wanted (`covers.thumbnail`), read from a file with `QImage(path)`, and written with
+  `QImage.save` to a path or to a `QDataStream`'s buffer; never with `QImage.fromData` or
+  `loadFromData`, a `QImageReader`'s `size`, `canRead` or `format`, or a `QIODevice` made in Python
+  (a `QBuffer`). Finding an image's handler takes Qt's locks: its image loader's mutex, and the
+  connection locks of the `QTextStream` the SVG plugin's probe makes. Another thread can hold one of
+  those while it waits on the GIL: QML's garbage collector, on the GUI thread, disconnects from a
+  Python-made object while Qt holds its connection lock, and PySide takes the GIL there
+  (`disconnectNotify`); a reader on a Python-made device holds the loader's mutex while its calls on
+  the device take the GIL. A decode that keeps the GIL while Qt finds the handler (`fromData`, or a
+  reader's `size`, `canRead` or `format`) then waits on the lock while the other waits on the GIL,
+  and the app freezes. `QImageReader.read`, `QImage(path)` and `QImage.save` let go of the GIL while
+  Qt works, and Qt's own file or buffer (`covers.decoded` reads the one `QDataStream` makes) never
+  calls into Python. `QImage.scaled`, `convertToFormat` and `QPainter` keep the GIL while Qt works,
+  a few milliseconds for a cover, but take no lock such a thread holds: the threads they share the
+  work with come from Qt's GUI thread pool, which the GUI thread makes as the window loads. A wait
+  there is the app's stutter, not a freeze.
 - The sound device's callback only copies samples out of the ring buffer, at the volume (A4.4).
 
 ## QML

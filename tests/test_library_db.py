@@ -275,7 +275,7 @@ def test_an_index_of_slice_7_1_gains_the_playlists_and_reads_nothing_again(tmp_p
         step(c)
     c.execute("PRAGMA user_version = 11")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
-    assert db.migrate(c) == len(db.MIGRATIONS) == 12
+    assert db.migrate(c) == len(db.MIGRATIONS)
     assert c.execute("SELECT mtime_ns FROM song").fetchall() == [(5,)]
     c.execute(
         "INSERT INTO playlist (path, name, name_key, kind, size, mtime_ns, encoding)"
@@ -295,4 +295,33 @@ def test_an_index_of_slice_7_1_gains_the_playlists_and_reads_nothing_again(tmp_p
         assert any(index in str(row) for row in plan), (sql, plan)
     c.execute("DELETE FROM playlist")
     assert c.execute("SELECT COUNT(*) FROM playlist_entry").fetchone() == (0,)
+    c.close()
+
+
+def test_an_index_of_slice_7_3_gains_when_each_song_was_added_from_its_files_time(tmp_path):
+    """Version 13 (R8.9, A2.1): `song.added`, a song there already given its file's modification
+    time, the nearest the index knows; one whose time isn't known yet (to be read again) gets its
+    file's when it is read (scanner.write_batch), so no song is read again for it; a smart
+    playlist's "added in the last N days" found through its index."""
+    from musikata_core import scanner
+    from musikata_core.tags import AudioInfo, Tags
+
+    c = db.connect(str(tmp_path / "musikata.db"))
+    for step in db.MIGRATIONS[:12]:
+        step(c)
+    c.execute("PRAGMA user_version = 12")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 1, 1700000000000000000)")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('b.flac', 1, -1)")
+    assert db.migrate(c) == len(db.MIGRATIONS)
+    assert c.execute("SELECT path, mtime_ns, added FROM song ORDER BY path").fetchall() == [
+        ("a.flac", 1700000000000000000, 1_700_000_000.0), ("b.flac", -1, None)
+    ]  # fmt: skip
+    info = AudioInfo("flac", 1.0, 900, 44100, 2)
+    read = scanner.Read(scanner.Seen("b.flac", 1, 1_600_000_000 * 10**9), Tags(), info, "h")
+    c.execute("BEGIN")
+    scanner.write_batch(c, [read], {}, added=1_800_000_000.0)
+    c.execute("COMMIT")
+    assert c.execute("SELECT added FROM song WHERE path = 'b.flac'").fetchone() == (1.6e9,)
+    plan = c.execute("EXPLAIN QUERY PLAN SELECT id FROM song WHERE added >= 5").fetchall()
+    assert any("song_added" in str(row) for row in plan), plan
     c.close()

@@ -9,6 +9,7 @@ import "."
 // selection from its first song, the rest of the list after it (R7.1), and the right-click menu acts
 // on the selection when the row is in it. Select its songs selects them all, for Ctrl+E (R4.2) or a
 // rating (R10.2) to act on.
+// An album dragged carries its songs; a song, it or the selection it is in (R6.10).
 Item {
     id: page
     required property var library
@@ -17,6 +18,7 @@ Item {
     property var edit: null
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var art: null  // Album art (R5.4): an image dropped on an album's cover
+    property var dragging: null  // an album or a song dragged (R6.10)
     required property var genres
     readonly property var genre: library.genrePage
     readonly property var songs: genre.songs
@@ -154,6 +156,7 @@ Item {
                         onOpen: page.library.openAlbum(albumId)
                         onPlay: page.player.playAlbum(albumId)
                         onImageDropped: (urls) => { if (page.art) page.art.dropOnAlbum(albumId, urls) }
+                        DragSource { dragging: page.dragging; onCarry: page.dragging.carryAlbum(albumId) }
                     }
                 }
             }
@@ -192,6 +195,7 @@ Item {
             onActivated: page.player.playFrom(page.songs, index)
             onMenu: songMenu.openFor(page.songs, index)
             onRated: (star) => { if (page.ratings) page.ratings.rateRow(page.songs, index, star) }
+            DragSource { dragging: page.dragging; onCarry: page.dragging.carry(page.songs, index) }
         }
         ScrollBar.vertical: ScrollBar { }
     }

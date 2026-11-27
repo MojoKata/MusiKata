@@ -688,3 +688,31 @@ def test_a_paths_place_under_the_root_or_none_outside_it(tmp_path):
     assert scanner.path_under(root, os.path.join(root, "..Odd", "1.flac")) == "..Odd/1.flac"
     for outside in (root, str(tmp_path / "Other" / "1.flac"), str(tmp_path)):
         assert scanner.path_under(root, outside) is None
+
+
+def test_a_song_a_scan_finds_new_is_added_now_and_on_a_first_scan_when_its_file_was(tmp_path):
+    """R8.9's "added in the last N days" (A2.1's `song.added`): a song a scan finds new was added
+    at the scan's time, but on the library's first scan at its file's modification time, so a new
+    library doesn't hold every song as added today; a song moved keeps its time."""
+    from datetime import timedelta
+
+    now = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
+
+    music = tmp_path / "Music"
+    wav(music / "A" / "a.wav", 1)
+    os.utime(music / "A" / "a.wav", (1_600_000_000, 1_600_000_000))
+    index = db.Index(str(tmp_path / "m.db"))
+    clock = FakeClock(now)
+    with ThreadPoolExecutor(2) as pool:
+        scanner.scan(str(music), index, pool, clock=clock)
+        wav(music / "B" / "b.wav", 2)
+        os.utime(music / "B" / "b.wav", (1_600_000_000, 1_600_000_000))
+        clock.advance(days=1)
+        scanner.scan(str(music), index, pool, clock=clock)
+        os.makedirs(music / "C")
+        os.rename(music / "B" / "b.wav", music / "C" / "b.wav")  # a move keeps its time
+        clock.advance(days=1)
+        scanner.scan(str(music), index, pool, clock=clock)
+    added = dict(index.read().execute("SELECT path, added FROM song"))
+    index.close()
+    assert added == {"A/a.wav": 1_600_000_000.0, "C/b.wav": (now + timedelta(days=1)).timestamp()}

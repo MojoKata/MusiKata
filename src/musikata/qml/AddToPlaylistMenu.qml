@@ -5,7 +5,8 @@ import "."
 // Add to playlist (R2.9.6, L03, L07): a menu of the playlists, by name, and New playlist…; each adds
 // the songs the list's selection stands for (`row` -1), or the row right-clicked (its own row, or
 // the selection when the row is in it), at the playlist's end; New playlist… makes one holding them,
-// its name selected for editing in the sidebar (R8.3). Its own menu, or a submenu of SongMenu.
+// its name selected for editing in the sidebar (R8.3). A smart playlist is listed faded: its rule
+// chooses its songs (R8.9). Its own menu, or a submenu of SongMenu.
 Menu {
     id: menu
     required property var playlists   // the bridge that changes them (musikata.playlists)
@@ -25,8 +26,10 @@ Menu {
         delegate: MenuItem {
             required property int playlistId
             required property string name
+            required property bool smart
             objectName: "addTo-" + name
             text: name
+            enabled: !smart
             onTriggered: menu.playlists.addTo(playlistId, menu.songs, menu.row)
         }
         onObjectAdded: (index, object) => menu.insertItem(index, object)

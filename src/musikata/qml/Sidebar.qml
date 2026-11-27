@@ -3,14 +3,18 @@ import QtQuick.Controls.Basic
 import "."
 
 // The sidebar (R6.3): the app's icon and name, the library's views (Albums, Artists, Songs,
-// Genres, Folders, and Needs attention with its count, R2.8), Playlists with + (R8.3) and each
-// playlist with its count, its right-click menu Rename, Duplicate and Delete playlist… (R8.4), and
+// Genres, Folders, and Needs attention with its count, R2.8), Playlists with New smart playlist…
+// (R8.9) and + (R8.3) and each playlist with its count, its right-click menu Rename, Duplicate and
+// Delete playlist… (R8.4), taking songs and files dropped on it, highlighted and named while a drag
+// is over it (R8.5; a smart playlist refuses them, saying why, R8.9), and
 // the music root's card at the bottom (R2.1.1): its path, its line, and its dot, red with the card
 // when the root isn't there (R2.10).
 Rectangle {
     id: side
     required property var library
     property var playlists: null      // what changes them (musikata.playlists)
+    property var dragging: null       // drag and drop (musikata.dragging): songs dropped on one
+    property var smart: null          // New smart playlist… (musikata.smart, R8.9)
     width: 232
     color: Theme.side
 
@@ -99,6 +103,23 @@ Rectangle {
         Rectangle { anchors.fill: parent; radius: 6; color: Theme.hover; visible: plusHover.hovered }
         Icon { anchors.centerIn: parent; name: "plus"; size: 15; color: Theme.muted }
     }
+    Item {  // New smart playlist… (R8.9): its dialog, the rule chosen there
+        id: newSmart
+        objectName: "newSmartPlaylist"
+        x: side.width - 22 - width + 6 - 28
+        anchors.verticalCenter: playlistsTitle.verticalCenter
+        width: 24
+        height: 24
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("New smart playlist…")
+        HoverHandler { id: smartHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: if (side.smart) side.smart.openNew() }
+        Rectangle { anchors.fill: parent; radius: 6; color: Theme.hover; visible: smartHover.hovered }
+        Icon { anchors.centerIn: parent; name: "wand"; size: 15; color: Theme.muted }
+        ToolTip.visible: smartHover.hovered
+        ToolTip.text: qsTr("New smart playlist…")
+        ToolTip.delay: 400
+    }
     ListView {
         id: playlistsList
         objectName: "sidePlaylists"
@@ -110,15 +131,29 @@ Rectangle {
         boundsBehavior: Flickable.StopAtBounds
         model: side.library.playlists
         delegate: PlaylistItem {
+            id: entry
             required property int playlistId
             objectName: "side-playlist"
             width: playlistsList.width
+            z: entry.targeted ? 2 : 0  // its card and label over the playlists after it
             active: side.library.view === "playlist" && side.library.playlistPage.id === playlistId
             editing: side.playlists !== null && side.playlists.editing === playlistId
+            targeted: side.dragging !== null && side.dragging.target === "playlist:" + playlistId
+            refused: entry.targeted && side.dragging.refused
+            dropText: entry.targeted ? side.dragging.targetText : ""
+            card: entry.targeted && side.dragging.held ? side.dragging.card : null
             onClicked: side.library.openPlaylist(playlistId)
             onMenu: playlistMenu.openFor(playlistId, this)
             onRenamed: (text) => side.playlists.rename(playlistId, text)
             onCancelled: side.playlists.cancelRename()
+            DropArea {  // songs dragged onto it are added at its end; a file manager's files too (R8.5)
+                objectName: "playlistDrop"
+                anchors.fill: parent
+                enabled: side.dragging !== null
+                onEntered: (drag) => drag.accepted = side.dragging.enter("playlist", entry.playlistId, drag.getDataAsString(side.dragging.mime), drag.urls)
+                onExited: side.dragging.leave("playlist", entry.playlistId)
+                onDropped: (drop) => { if (side.dragging.drop("playlist", entry.playlistId, drop.getDataAsString(side.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
+            }
         }
         ScrollBar.vertical: ScrollBar { }
     }
