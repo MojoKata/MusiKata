@@ -317,11 +317,16 @@ def apply(c: sqlite3.Connection, songs: Collection[int] | None) -> None:
     row = c.execute("SELECT everything FROM rating_rule").fetchone()
     everything = int(bool(row and row[0]))
     unrated = ", ".join(f"'{k}'" for k in compose.UNRATED)
+    # The outer song is named only in WHERE clauses: Windows' SQLite (PyInstaller's Python) has
+    # no outer column in a subquery's ORDER BY ("no such column: song.path").
     sql = (
         "UPDATE song SET rating = CASE WHEN (? OR kind IN (" + unrated + "))"
         " AND EXISTS (SELECT 1 FROM rating WHERE song_id = song.id)"
-        " THEN (SELECT stars FROM rating WHERE song_id = song.id"
-        " ORDER BY path = song.path DESC, changed DESC LIMIT 1) ELSE file_rating END"
+        " THEN COALESCE("
+        "(SELECT stars FROM rating WHERE song_id = song.id AND rating.path = song.path"
+        " ORDER BY changed DESC LIMIT 1),"
+        " (SELECT stars FROM rating WHERE song_id = song.id ORDER BY changed DESC LIMIT 1))"
+        " ELSE file_rating END"
     )
     if songs is None:
         c.execute(sql, (everything,))
