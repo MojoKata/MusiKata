@@ -7,7 +7,10 @@ every field it doesn't know kept (A2.10); this computer's id (A2.8), made when i
 Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them;
 shuffle and repeat (R7.3), written when the user changes them; and Now Playing's visualization
 (R11.4.5), written when the picker changes it, and the 3D analyzer's bands and speed (R11.3.1),
-written when its gear changes them. Of the root's own `settings.json`,
+written when its gear changes them; whether opening the mini player minimizes the main window
+(R13.8, R15.1), read only until Settings writes it; and the mini player's layout, Stay on top and
+each layout's place and size (R15.2, R15.3), written when they change. Of the root's own
+`settings.json`,
 the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
 are read (`root_tags`), with the genre list and the genres the user has said are the same (R9.5,
 R9.6). The rest of both files comes with Settings.
@@ -80,12 +83,29 @@ class Appearance:
     """R13.8's Appearance as read, as far as it is built: Now Playing's visualization, one of
     VISUALIZATIONS, chosen in its picker and kept (R11.4.5); and the 3D analyzer's bands, one of
     ANALYZER_BANDS, and the seconds its landscape holds (its speed), set from its gear and kept
-    (R11.3.1); and its Lyrics switch, on or off (R17.3)."""
+    (R11.3.1); and its Lyrics switch, on or off (R17.3); and whether opening the mini player
+    minimizes the main window (R13.8, R15.1), on by default."""
 
     visualization: str = "waveform"
     analyzer_bands: int = 96
     analyzer_seconds: float = 3.0
     lyrics: bool = False
+    minimize_for_mini: bool = True
+
+
+MINI_LAYOUTS = ("strip", "cover", "card", "analyzer", "disc", "details", "remote")  # R15.3's order
+MINI_LAYOUT = "card"  # the mini player's layout until one is chosen (A2.10's example)
+Place = tuple[int, int, int, int]  # a mini player layout's place and size: x, y, width, height
+
+
+@dataclass(frozen=True)
+class MiniPlayer:
+    """The mini player as kept (R15.2, R15.3): its layout, one of MINI_LAYOUTS; Stay on top, on
+    by default; and each layout's place and size, by layout, as it was last left (`Place`)."""
+
+    layout: str = MINI_LAYOUT
+    stay_on_top: bool = True
+    places: Mapping[str, Place] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -93,7 +113,8 @@ class Shared:
     """The shared settings as read: the configured root (None: none yet, the first start, R2.1),
     Watch for changes (R13.2), this computer's id and name (A2.8); `data`, the file as read, which
     a rewrite keeps; `newer`, a newer MusiKata's format, never written; and what couldn't be used,
-    for the log. `playback` is R13.7's (`Playback`), `appearance` R13.8's (`Appearance`)."""
+    for the log. `playback` is R13.7's (`Playback`), `appearance` R13.8's (`Appearance`),
+    `mini_player` the mini player's (`MiniPlayer`, R15)."""
 
     root: str | None = None
     watch: bool = True
@@ -101,6 +122,7 @@ class Shared:
     computer_name: str | None = None
     playback: Playback = field(default_factory=Playback)
     appearance: Appearance = field(default_factory=Appearance)
+    mini_player: MiniPlayer = field(default_factory=MiniPlayer)
     data: Mapping[str, object] = field(default_factory=dict)
     newer: bool = False
     problems: tuple[str, ...] = ()
@@ -183,7 +205,60 @@ def _appearance(value: object, problems: list[str]) -> Appearance:
     if not isinstance(lyrics, bool):
         problems.append(f"appearance.lyrics isn't true or false: {lyrics!r}; off")
         lyrics = default.lyrics
-    return Appearance(shown, int(bands), float(seconds), lyrics)
+    minimize = value.get("minimize_for_mini", default.minimize_for_mini)
+    if not isinstance(minimize, bool):
+        problems.append(f"appearance.minimize_for_mini isn't true or false: {minimize!r}; on")
+        minimize = default.minimize_for_mini
+    return Appearance(shown, int(bands), float(seconds), lyrics, minimize)
+
+
+def _mini_player(value: object, problems: list[str]) -> MiniPlayer:
+    """mini_player: what of it can be used, the rest its defaults (R13.9). A place of a layout
+    this version doesn't have (a newer one's) is left in the file and not read."""
+    if not isinstance(value, dict):
+        problems.append(f"mini_player isn't a group: {value!r}")
+        return MiniPlayer()
+    default = MiniPlayer()
+    layout = value.get("layout", default.layout)
+    if isinstance(layout, str) and layout.strip().lower() in MINI_LAYOUTS:
+        layout = layout.strip().lower()  # "Card", as a person writes it
+    else:
+        problems.append(
+            f"mini_player.layout isn't one of {', '.join(MINI_LAYOUTS)}: {layout!r}; card"
+        )
+        layout = default.layout
+    on_top = value.get("stay_on_top", default.stay_on_top)
+    if not isinstance(on_top, bool):
+        problems.append(f"mini_player.stay_on_top isn't true or false: {on_top!r}; on")
+        on_top = default.stay_on_top
+    found = value.get("places", {})
+    if not isinstance(found, dict):
+        problems.append(f"mini_player.places isn't a group: {found!r}")
+        found = {}
+    places: dict[str, Place] = {}
+    for name, place in found.items():
+        key = name.strip().lower() if isinstance(name, str) else ""
+        if key not in MINI_LAYOUTS:
+            continue
+        read = _place(place)
+        if read is None:
+            problems.append(f"mini_player.places.{name} isn't a place and size: {place!r}")
+        else:
+            places[key] = read
+    return MiniPlayer(layout, on_top, places)
+
+
+def _place(value: object) -> Place | None:
+    """A place and size, {"x", "y", "w", "h"} in whole pixels (a number written as text, or a
+    whole fraction, as a hand edit leaves it); None when one is missing or not a number, or the
+    size isn't at least a pixel."""
+    if not isinstance(value, dict):
+        return None
+    numbers = [_number(value.get(k)) for k in ("x", "y", "w", "h")]
+    if any(n is None or n != int(n) for n in numbers):
+        return None
+    x, y, w, h = (int(n) for n in numbers if n is not None)
+    return (x, y, w, h) if w >= 1 and h >= 1 else None
 
 
 def _number(value: object) -> float | None:
@@ -255,6 +330,7 @@ def parse(text: str, home: str) -> Shared:
         problems.append(f"computer.id isn't an id: {cid!r}; a new one is made")
     playback = _playback(data.get("playback", {}), problems)
     appearance = _appearance(data.get("appearance", {}), problems)
+    mini_player = _mini_player(data.get("mini_player", {}), problems)
     return Shared(
         root=root,
         watch=watch,
@@ -262,6 +338,7 @@ def parse(text: str, home: str) -> Shared:
         computer_name=name if isinstance(name, str) else None,
         playback=playback,
         appearance=appearance,
+        mini_player=mini_player,
         data=data,
         newer=newer,
         problems=tuple(problems),
@@ -323,6 +400,24 @@ def with_appearance(
     was read, fields it doesn't know included (A2.10), and this computer's id made when it has none
     (A2.8)."""
     return _with_group(shared, computer_name, "appearance", fields, new_id)
+
+
+def with_mini_player(
+    shared: Shared,
+    computer_name: str,
+    fields: Mapping[str, object],
+    new_id: Callable[[], str] = _new_id,
+) -> dict[str, object]:
+    """The file's content with `fields` set in its `mini_player` group (the layout, Stay on top,
+    R15.2; `places`, layouts' places and sizes, set beside the others kept, R15.3): the rest as it
+    was read, fields it doesn't know included (A2.10), and this computer's id made when it has
+    none (A2.8)."""
+    group = shared.data.get("mini_player")
+    places = group.get("places") if isinstance(group, dict) else None
+    given = fields.get("places")
+    if isinstance(given, dict):
+        fields = {**fields, "places": {**(places if isinstance(places, dict) else {}), **given}}
+    return _with_group(shared, computer_name, "mini_player", fields, new_id)
 
 
 def _with_group(
@@ -401,6 +496,15 @@ def set_appearance(path: str, home: str, computer_name: str, **fields: object) -
     what = ", ".join(f"{k} {v}" for k, v in fields.items())
     shared = _writable(path, home, what)
     return shared is not None and save(path, with_appearance(shared, computer_name, fields))
+
+
+def set_mini_player(path: str, home: str, computer_name: str, **fields: object) -> bool:
+    """Keeps `fields` (the layout, Stay on top, `places`: R15.2, R15.3) in the mini_player group
+    of the shared settings at `path`, the rest as it was; False, logged, when they can't be
+    written (`_writable`)."""
+    what = "the mini player's " + ", ".join(fields)
+    shared = _writable(path, home, what)
+    return shared is not None and save(path, with_mini_player(shared, computer_name, fields))
 
 
 def computer_id(path: str, home: str, computer_name: str) -> str | None:

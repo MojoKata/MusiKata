@@ -161,6 +161,29 @@ def test_a_folder_image_is_made_a_thumbnail_once_and_read_from_the_cache_after(
     )
 
 
+def test_the_mini_player_asks_for_a_cover_with_its_corners_rounded_and_it_isnt_kept(
+    qapp, tmp_path, index
+):
+    """R15.2: a frameless window's corners have nothing behind them to hide a square cover's."""
+    root, cache = tmp_path / "Music", tmp_path / "cache"
+    with_cover(index, str(root), "file", "A/cover.jpg", encoded(1000, 1000))
+    p = provider(root, index, cache)
+    rounded = p.requestImage("T?round=0.1", QSize(), QSize(200, 200))
+    assert (rounded.width(), rounded.height()) == (256, 256)
+    assert rounded.pixelColor(0, 0).alpha() == 0  # its corner: transparent
+    square = p.image("T", 256)
+    assert rounded.pixelColor(128, 128).name() == square.pixelColor(128, 128).name()
+    assert rounded.pixelColor(30, 0).alpha() == 255  # past the corner's radius
+    disc = p.requestImage("T?round=0.5", QSize(), QSize(200, 200))
+    assert disc.pixelColor(30, 30).alpha() == 0 and disc.pixelColor(128, 2).alpha() == 255
+    assert sorted(os.listdir(cache)) == ["T-256.jpg"]  # the square one alone kept
+    unrounded = p.requestImage("T?round=nonsense", QSize(), QSize(200, 200))
+    assert unrounded.pixelColor(0, 0).alpha() == 255
+    assert covers.share_of("round=0") is None and covers.share_of("size=3") is None
+    assert covers.share_of("round=inf") is None and covers.share_of("round=0.25") == 0.25
+    assert covers.rounded(QImage(), 0.5).isNull()
+
+
 def test_an_embedded_front_cover_is_read_from_its_song_and_a_transparent_one_kept_as_png(
     qapp, tmp_path, index
 ):

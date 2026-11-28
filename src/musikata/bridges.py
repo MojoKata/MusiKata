@@ -1887,6 +1887,12 @@ class Player(QObject):
         if self._keeping is not None:
             self._keeping.appearance(**fields)
 
+    def remember_mini(self, **fields: object) -> None:
+        """The mini player's layout, Stay on top or a layout's place (R15.2, R15.3): kept in the
+        shared settings on the same thread, for the same reason."""
+        if self._keeping is not None:
+            self._keeping.mini_player(**fields)
+
     def go(self, step: dict[str, Any]) -> None:
         """A tour's step (A1.6): {"queue": "Glass Harbor"} cues that album at its first song,
         paused, nothing playing; with "at": 3, at its fourth, the three before it played; "added":

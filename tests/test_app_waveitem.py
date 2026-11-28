@@ -153,7 +153,7 @@ def test_the_bars_are_drawn_anew_when_the_waveform_or_the_size_changes(view, qtb
     item.setWidth(100)
     assert item.property("bars") == waveitem.slots(100, 2, 1.3)[0]
     view.grabWindow()
-    assert len(item._software) == item.property("bars")  # the extra rectangles let go
+    assert len(item._software) == item.property("bars")  # first drawn at this width
     item.setProperty("barWidth", 3.0)
     item.setProperty("gap", 2.0)
     item.setProperty("playedFrom", QColor("red"))
@@ -178,6 +178,23 @@ def test_bars_more_than_the_first_render_had_are_drawn_in_the_items_place(view, 
     assert lit[0] >= 10 and lit[-1] > 300  # the bars across the item, from its left edge
     above = [x for x in range(340) if QColor(image.pixel(x, 5)).lightness() > 40]
     assert above == []  # none drawn at the window's top, as if the item were there
+
+
+def test_a_narrowed_waveform_empties_its_extra_rectangles_and_draws_none_past_itself(view, qtbot):
+    """Qt Quick's software renderer leaves a replaced node's rectangles drawn: narrowed (the mini
+    player's Card resized, R15.2), the rectangles past the bars are emptied, none drawn past the
+    item's edge."""
+    source = Source(np.zeros((0, 2), np.float32))
+    item = shown(view, qtbot, source, 0.0)  # at x 10, 320 wide
+    view.grabWindow()  # drawn with every bar 320 pixels hold
+    item.setWidth(100)
+    image = view.grabWindow()
+    bars, made = item.property("bars"), len(item._software)
+    assert made > bars  # (the nodes themselves aren't printed: Qt may have deleted them)
+    emptied = all(node.rect().isEmpty() for node in item._software[bars:])
+    assert emptied
+    past = [x for x in range(115, 340) if QColor(image.pixel(x, 20)).lightness() > 40]
+    assert past == []
 
 
 # ---------- the bar's seek bar in the app ----------

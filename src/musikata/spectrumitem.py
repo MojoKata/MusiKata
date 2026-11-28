@@ -1,6 +1,9 @@
 """The cover's spectrum (R11.4.3, A5.6): over the lower part of Now Playing's cover, with No
 visualization, the spectrum of what is heard (A5.2, musikata_core.analysis.spectrum) as 32
-translucent white bars, rising and falling with the music, 30 frames a second.
+translucent white bars, rising and falling with the music, 30 frames a second. The mini player
+(R15.3) draws it smaller: over its Cover layout's art as it is, and as the Strip's and the
+Remote's ten bars (`bars`, `pad`, `gap`, `least`), each in its colour along the gradient of the
+design tokens (`colours`), a quiet one a dot.
 
 It builds its geometry for the scene graph (`updatePaintNode`) rather than painting: one geometry
 node, each bar two triangles whose vertices fade from a faint white at the top to a stronger one at
@@ -48,7 +51,7 @@ from shiboken6 import Shiboken
 from musikata_core.analysis import spectrum
 from musikata_core.audio.stream import Recent
 
-from .waveitem import VERTEX, attributes, fill, premultiplied
+from .waveitem import VERTEX, attributes, fill, gradient, premultiplied
 
 FPS = 30  # A5.6: plenty for bars this size
 FRAME = 1 / FPS
@@ -70,27 +73,46 @@ def wanting(shown: bool, minimized: bool, playing: bool) -> bool:
     return shown and not minimized and playing
 
 
-def bar_rects(levels: NDArray[np.float32], width: float, height: float) -> NDArray[np.float32]:
+def bar_rects(
+    levels: NDArray[np.float32],
+    width: float,
+    height: float,
+    pad: float = PAD,
+    gap: float = GAP,
+    least: float = 0.0,
+) -> NDArray[np.float32]:
     """Each bar's rectangle (x, y, width, height) over an item `width` × `height`: the bars side
-    by side, PAD in from either side and GAP apart, standing on its foot, each `levels` (0 to 1)
-    of its height tall."""
+    by side, `pad` in from either side and `gap` apart, standing on its foot, each `levels` (0 to
+    1) of its height tall, and `least` tall at least (the mini player's dots, R15.3)."""
     count = len(levels)
-    if not count or width <= 2 * PAD:
+    if not count or width <= 2 * pad:
         return np.zeros((0, 4), np.float32)
-    bar = max(1.0, (width - 2 * PAD - (count - 1) * GAP) / count)
+    bar = max(1.0, (width - 2 * pad - (count - 1) * gap) / count)
     out = np.empty((count, 4), np.float32)
-    out[:, 0] = PAD + np.arange(count) * (bar + GAP)
-    out[:, 3] = np.clip(np.asarray(levels, np.float32), 0.0, 1.0) * height
+    out[:, 0] = pad + np.arange(count) * (bar + gap)
+    out[:, 3] = np.maximum(np.clip(np.asarray(levels, np.float32), 0.0, 1.0) * height, least)
     out[:, 1] = height - out[:, 3]
     out[:, 2] = bar
     return out
 
 
-def bar_vertices(rects: NDArray[np.float32], height: float) -> NDArray[np.void]:
+def bar_colours(count: int, colours: list[QColor]) -> NDArray[np.uint8]:
+    """Each of `count` bars' colour (RGBA bytes), from low to high along the gradient of
+    `colours`, evenly spaced (the design tokens' cyan, violet and pink, R6.2)."""
+    if not colours or not count:
+        return np.zeros((count, 4), np.uint8)
+    stops = [(i / max(1, len(colours) - 1), QColor(c)) for i, c in enumerate(colours)]
+    return gradient(np.linspace(0.0, 1.0, count, dtype=np.float32), stops)
+
+
+def bar_vertices(
+    rects: NDArray[np.float32], height: float, colours: NDArray[np.uint8] | None = None
+) -> NDArray[np.void]:
     """The bars as triangles, six vertices a bar, coloured white at TOP_ALPHA at the item's top
-    to FOOT_ALPHA at its foot (premultiplied, as the scene graph takes vertex colours); a bar of
-    no height has none."""
-    rects = rects[rects[:, 3] > 0]
+    to FOOT_ALPHA at its foot, or each its own of `colours` (RGBA rows, a bar each), premultiplied
+    as the scene graph takes vertex colours; a bar of no height has none."""
+    shown = rects[:, 3] > 0
+    rects = rects[shown]
     count = len(rects)
     vertices = np.zeros(count * 6, VERTEX)
     if not count:
@@ -100,6 +122,9 @@ def bar_vertices(rects: NDArray[np.float32], height: float) -> NDArray[np.void]:
     xs = np.stack([x0, x1, x0, x1, x1, x0], axis=1).reshape(-1)
     ys = np.stack([y0, y0, y1, y0, y1, y1], axis=1).reshape(-1)
     vertices["x"], vertices["y"] = xs, ys
+    if colours is not None:
+        vertices["rgba"] = premultiplied(np.repeat(colours[shown], 6, axis=0))
+        return vertices
     share = np.clip(ys / max(height, 1e-6), 0.0, 1.0)
     alpha = np.round((TOP_ALPHA + (FOOT_ALPHA - TOP_ALPHA) * share) * 255).astype(np.uint8)
     rgba = np.empty((len(xs), 4), np.uint8)
@@ -112,12 +137,17 @@ class CoverSpectrum(QQuickItem):
     """The cover's spectrum as QML places it (`CoverSpectrum` of `import MusiKata`): the spectrum
     of what `player` (the Player bridge, whose `analyzer` is the analyzer's ring) plays, drawn
     while `playing` and shown; `levels` are the bars' heights now (0 to 1), `running` whether it
-    draws frames."""
+    draws frames. `bars` (32), `pad`, `gap` and `least` shape the bars, set before it is first
+    drawn; with `colours` each bar is its colour along their gradient, without them translucent
+    white."""
 
     playerChanged = Signal()
     playingChanged = Signal()
     framed = Signal()  # a frame was drawn: `levels` moved
     runningChanged = Signal()
+    shapeChanged = Signal()  # bars, pad, gap, least, colours
+
+    BARS = spectrum.COVER_BARS  # the bars until `bars` sets them
 
     def __init__(self, parent: QQuickItem | None = None) -> None:
         super().__init__(parent)
@@ -128,9 +158,12 @@ class CoverSpectrum(QQuickItem):
         self._playing = False
         self._running = False
         self._wanted = False
-        self._spectrum = spectrum.Spectrum(spectrum.BANDS, bars=spectrum.COVER_BARS)
+        self._spectrum = spectrum.Spectrum(spectrum.BANDS, bars=self.BARS)
+        self._pad, self._gap, self._least = float(PAD), float(GAP), 0.0
+        self._colours: list[QColor] = []
         self._vertices = np.zeros(0, VERTEX)
-        self._rects = [QRectF() for _ in range(spectrum.COVER_BARS)]
+        self._rects = [QRectF() for _ in range(self.BARS)]
+        self._bar_colours: list[QColor] = []
         self._software: list[QSGRectangleNode] = []
         self._window_ref: Callable[[], QQuickWindow | None] = _none
         self._timer = QTimer(self)
@@ -166,10 +199,50 @@ class CoverSpectrum(QQuickItem):
     def _get_running(self) -> bool:
         return self._running
 
+    def _get_bars(self) -> int:
+        return len(self._rects)
+
+    def _set_bars(self, bars: int) -> None:
+        """The bars' count: the spectrum's bands gathered into that many (R15.3's ten)."""
+        if bars > 0 and bars != len(self._rects):
+            self._spectrum = spectrum.Spectrum(spectrum.BANDS, self._spectrum.rate, bars=bars)
+            self._rects = [QRectF() for _ in range(bars)]
+            self._shaped()
+
+    def _set_pad(self, pad: float) -> None:
+        if pad != self._pad:
+            self._pad = pad
+            self._shaped()
+
+    def _set_gap(self, gap: float) -> None:
+        if gap != self._gap:
+            self._gap = gap
+            self._shaped()
+
+    def _set_least(self, least: float) -> None:
+        if least != self._least:
+            self._least = least
+            self._shaped()
+
+    def _set_colours(self, colours: list[object]) -> None:
+        found = [QColor(c) for c in colours or []]
+        if [c.rgba() for c in found] != [c.rgba() for c in self._colours]:
+            self._colours = found
+            self._shaped()
+
+    def _shaped(self) -> None:
+        self.shapeChanged.emit()
+        self._reshape()
+
     player = QtProperty(QObject, _get_player, _set_player, notify=playerChanged)
     playing = QtProperty(bool, _get_playing, _set_playing, notify=playingChanged)
     levels = QtProperty(list, _get_levels, notify=framed)
     running = QtProperty(bool, _get_running, notify=runningChanged)
+    bars = QtProperty(int, _get_bars, _set_bars, notify=shapeChanged)
+    pad = QtProperty(float, lambda self: self._pad, _set_pad, notify=shapeChanged)
+    gap = QtProperty(float, lambda self: self._gap, _set_gap, notify=shapeChanged)
+    least = QtProperty(float, lambda self: self._least, _set_least, notify=shapeChanged)
+    colours = QtProperty(list, lambda self: self._colours, _set_colours, notify=shapeChanged)
 
     # ---------- when it draws (R11.3.2, A5.5) ----------
 
@@ -237,11 +310,18 @@ class CoverSpectrum(QQuickItem):
             self._reshape()
 
     def _reshape(self) -> None:
-        rects = bar_rects(self._spectrum.levels, self.width(), self.height())
-        self._vertices = bar_vertices(rects, self.height())
+        levels = self._spectrum.levels
+        rects = bar_rects(levels, self.width(), self.height(), self._pad, self._gap, self._least)
+        colours = bar_colours(len(rects), self._colours) if self._colours else None
+        self._vertices = bar_vertices(rects, self.height(), colours)
         # every bar a rectangle, those of no height too: the software renderer places the nodes
         # added to a node it has drawn already without the item's place, so none is added later
-        self._rects = [QRectF(*(float(v) for v in r)) for r in rects]
+        self._rects = [QRectF(*(float(v) for v in r)) for r in rects] or [QRectF() for _ in levels]
+        self._bar_colours = (
+            [QColor(int(r), int(g), int(b), int(a)) for r, g, b, a in colours]
+            if colours is not None
+            else []
+        )
         self.update()
 
     # ---------- the scene graph's sync (the render thread, the GUI thread waiting) ----------
@@ -276,7 +356,8 @@ class CoverSpectrum(QQuickItem):
         if root is None:
             root = QSGNode()
             self._software = []
-        colour = QColor(255, 255, 255, round(SOFTWARE_ALPHA * 255))
+        white = QColor(255, 255, 255, round(SOFTWARE_ALPHA * 255))
+        tints = self._bar_colours if len(self._bar_colours) == len(self._rects) else []
         while len(self._software) < len(self._rects):
             rect = window.createRectangleNode()
             root.appendChildNode(rect)
@@ -285,9 +366,9 @@ class CoverSpectrum(QQuickItem):
             rect = self._software.pop()
             root.removeChildNode(rect)
             Shiboken.delete(rect)
-        for node, shape in zip(self._software, self._rects, strict=True):
+        for i, (node, shape) in enumerate(zip(self._software, self._rects, strict=True)):
             node.setRect(shape)
-            node.setColor(colour)
+            node.setColor(tints[i] if tints else white)
         return root
 
     def releaseResources(self) -> None:  # noqa: N802

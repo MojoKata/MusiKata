@@ -684,3 +684,144 @@ def test_the_roots_lyrics_setting_is_read_from_its_settings_json(tmp_path, caplo
     path.unlink()
     path.mkdir()  # can't be read
     assert settings.root_lyrics(str(root)) == "lrc"
+
+
+# ---------- the mini player (R15.2, R15.3) and Minimize MusiKata when it opens (R13.8) ----------
+
+
+@pytest.mark.parametrize(
+    "appearance, on, problem",
+    [
+        ({}, True, ""),
+        ({"minimize_for_mini": False}, False, ""),
+        ({"minimize_for_mini": "false"}, True, "appearance.minimize_for_mini isn't true or false"),
+        ({"minimize_for_mini": 0}, True, "appearance.minimize_for_mini isn't true or false"),
+        ({"minimize_for_mini": None}, True, "appearance.minimize_for_mini isn't true or false"),
+    ],
+)
+def test_minimizing_for_the_mini_player_is_read_from_appearance_on_by_default(
+    appearance, on, problem
+):
+    got = parse({"format": 1, "appearance": appearance})
+    assert got.appearance.minimize_for_mini is on
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_mini_player_is_read_from_its_group_card_and_on_top_by_default():
+    got = parse({
+        "format": 1,
+        "mini_player": {"layout": "remote", "stay_on_top": False, "later": 1,
+                        "places": {"remote": {"x": 1650, "y": 980, "w": 246, "h": 76},
+                                   "card": {"x": -40, "y": 80, "w": 300, "h": 582}}},
+    })  # fmt: skip
+    assert got.problems == ()
+    assert got.mini_player == settings.MiniPlayer(
+        "remote", False, {"remote": (1650, 980, 246, 76), "card": (-40, 80, 300, 582)}
+    )
+    assert parse({"format": 1}).mini_player == settings.MiniPlayer("card", True, {})
+
+
+@pytest.mark.parametrize(
+    "group, layout, on_top, places, problem",
+    [
+        ({"layout": " Disc "}, "disc", True, {}, ""),  # as a person writes it
+        ({"layout": "mini"}, "card", True, {}, "mini_player.layout isn't one of"),
+        ({"layout": 3}, "card", True, {}, "mini_player.layout isn't one of"),
+        ({"layout": None}, "card", True, {}, "mini_player.layout isn't one of"),
+        ({"stay_on_top": "yes"}, "card", True, {}, "mini_player.stay_on_top isn't true or false"),
+        ({"stay_on_top": 0}, "card", True, {}, "mini_player.stay_on_top isn't true or false"),
+        ([], "card", True, {}, "mini_player isn't a group"),
+        ({"places": []}, "card", True, {}, "mini_player.places isn't a group"),
+        # a hand edit's numbers as text and whole fractions, a layout's name in another case
+        (
+            {"places": {"Cover": {"x": "10", "y": 20.0, "w": " 300 ", "h": 300}}},
+            "card",
+            True,
+            {"cover": (10, 20, 300, 300)},
+            "",
+        ),
+        # a newer MusiKata's layout: left in the file, not read
+        ({"places": {"wall": {"x": 1, "y": 1, "w": 1, "h": 1}, "7": {}}}, "card", True, {}, ""),
+        (
+            {"places": {"card": {"x": 1, "y": 1, "w": 300}}},
+            "card",
+            True,
+            {},
+            "mini_player.places.card isn't a place and size",
+        ),
+        (
+            {"places": {"card": {"x": 1, "y": 1, "w": 0, "h": 5}}},
+            "card",
+            True,
+            {},
+            "mini_player.places.card isn't a place and size",
+        ),
+        (
+            {"places": {"card": {"x": 1.5, "y": 1, "w": 300, "h": 5}}},
+            "card",
+            True,
+            {},
+            "mini_player.places.card isn't a place and size",
+        ),
+        (
+            {"places": {"card": {"x": True, "y": 1, "w": 300, "h": 5}}},
+            "card",
+            True,
+            {},
+            "mini_player.places.card isn't a place and size",
+        ),
+        (
+            {"places": {"card": {"x": float("nan"), "y": 1, "w": 300, "h": 5}}},
+            "card",
+            True,
+            {},
+            "mini_player.places.card isn't a place and size",
+        ),
+        (
+            {"places": {"card": "1600,80"}},
+            "card",
+            True,
+            {},
+            "mini_player.places.card isn't a place and size",
+        ),
+    ],
+)
+def test_the_mini_player_broken_in_another_case_type_or_shape(
+    group, layout, on_top, places, problem
+):
+    got = parse({"format": 1, "mini_player": group})
+    assert got.mini_player == settings.MiniPlayer(layout, on_top, places)
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_mini_player_set_keeps_its_other_places_and_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({
+        "format": 1,
+        "mini_player": {"layout": "card", "later": 1,
+                        "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582},
+                                   "wall": {"x": 0, "y": 0, "w": 9, "h": 9}}},
+    }))  # fmt: skip
+    assert settings.set_mini_player(str(path), HOME, "PC", layout="remote")
+    assert settings.set_mini_player(str(path), HOME, "PC", stay_on_top=False)
+    assert settings.set_mini_player(
+        str(path), HOME, "PC", places={"remote": {"x": 1650, "y": 980, "w": 246, "h": 76}}
+    )
+    doc = json.loads(path.read_text())
+    assert doc["mini_player"] == {
+        "layout": "remote", "later": 1, "stay_on_top": False,
+        "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582},
+                   "wall": {"x": 0, "y": 0, "w": 9, "h": 9},
+                   "remote": {"x": 1650, "y": 980, "w": 246, "h": 76}},
+    }  # fmt: skip
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    kept = settings.load(str(path), HOME).mini_player
+    assert kept.layout == "remote" and not kept.stay_on_top and kept.places["card"][0] == 1600
+    broken = tmp_path / "broken.json"
+    broken.write_text(json.dumps({"format": 1, "mini_player": {"places": "none"}}))
+    assert settings.set_mini_player(str(broken), HOME, "PC", places={"card": {"x": 1}})
+    assert json.loads(broken.read_text())["mini_player"]["places"] == {"card": {"x": 1}}
+    newer = tmp_path / "newer.json"
+    newer.write_text(json.dumps({"format": 2}))
+    assert not settings.set_mini_player(str(newer), HOME, "PC", layout="disc")

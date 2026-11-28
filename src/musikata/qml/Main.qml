@@ -40,7 +40,8 @@ import "."
 // Now Playing (R11.4) opens from the bar's Now Playing button or its cover over everything above the
 // bar, the sidebar and the header included; while it is open, the shortcuts of the view under it
 // (`/`, Ctrl+E) don't act on it, and Esc closes it (R11.4.4). An album's page and Folders' Cards are
-// tinted with their covers' colours (R6.2.2, `tints`).
+// tinted with their covers' colours (R6.2.2, `tints`). The mini player (R15) is a window of its
+// own (MiniPlayer.qml), opened from the bar's pop-out button, ⋮ › Mini player and Ctrl+Shift+M.
 Window {
     id: win
     required property var library
@@ -64,6 +65,7 @@ Window {
     required property var nowPlaying
     required property var tints
     required property var lyrics
+    required property var mini
     width: 1280
     height: 800
     minimumWidth: 960
@@ -129,6 +131,7 @@ Window {
         history: win.history
         organize: win.organize
         removing: win.removing
+        mini: win.mini
     }
     Item {  // the panel docked on the right: Change history over Edit tags
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -281,6 +284,7 @@ Window {
         dragging: win.dragging
         waveforms: win.waveforms
         now: win.nowPlaying
+        mini: win.mini
     }
     ToolDialog {
         objectName: "toolOverlay"
@@ -393,5 +397,18 @@ Window {
         sequence: "Right"
         enabled: !win.modal
         onActivated: win.player.seekAhead()
+    }
+    Shortcut {  // the mini player (R15.1, R6.9): ⇧⌘M on macOS
+        sequence: "Ctrl+Shift+M"
+        onActivated: win.mini.toggle()
+    }
+    MiniPlayer {  // a window of its own (R15, A1.8)
+        mini: win.mini
+        player: win.player
+        waveforms: win.waveforms
+        tints: win.tints
+        ratings: win.ratings
+        dragging: win.dragging
+        now: win.nowPlaying
     }
 }

@@ -325,18 +325,21 @@ class Waveform(QQuickItem):
     def _software_node(self, old: QSGNode | None) -> QSGNode:
         """A node holding a rectangle node per bar (the software renderer's), all made with it:
         the software renderer places a node added under one it has drawn already without the
-        item's place, so when the bars' number changes a new node is made with all of them, and
-        Qt deletes the old one with its rectangles."""
+        item's place, so when the bars outnumber the rectangles a new node is made with all of
+        them, and Qt deletes the old one with its rectangles; fewer bars leave the rest empty."""
         window = self.window()
         root = old
-        if root is None or len(self._software) != len(self._rects):
+        if root is None or len(self._software) < len(self._rects):
             root = QSGNode()
             self._software = []  # what was made before goes with the old node
             for _ in self._rects:
                 rect = window.createRectangleNode()
                 root.appendChildNode(rect)
                 self._software.append(rect)
-        for node, (shape, colour) in zip(self._software, self._rects, strict=True):
+        # fewer bars than rectangles (the item narrowed): the rest emptied, none taken out
+        empty = (QRectF(), QColor(0, 0, 0, 0))
+        shapes = self._rects + [empty] * (len(self._software) - len(self._rects))
+        for node, (shape, colour) in zip(self._software, shapes, strict=True):
             node.setRect(shape)
             node.setColor(colour)
         return root

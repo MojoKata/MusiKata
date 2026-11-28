@@ -10,9 +10,9 @@ import "."
 // clicking or dragging seeks there, R7.4, and it never takes the focus, so ← and → seek whatever
 // has it but a list or a box that uses them); on the right the queue button, which opens Up next (R7.2), and the volume;
 // and at the far end the Now Playing button (R11.4), which opens Now Playing over the window, is
-// lit while it is open, and closes it again (R6.5). A click on the cover opens Now Playing too. The
-// sleep timer's moon (R7.10) and the mini player's button (R15) take their places on the right
-// with their slices. What each says is the player's.
+// lit while it is open, and closes it again (R6.5). A click on the cover opens Now Playing too. Just
+// left of it, the pop-out button opens the mini player (R15.1). The sleep timer's moon (R7.10) takes
+// its place on the right with its slice. What each says is the player's.
 Rectangle {
     id: bar
     required property var player
@@ -20,6 +20,7 @@ Rectangle {
     property var dragging: null  // songs dropped on the queue button play next (R6.10, R7.2)
     property var waveforms: null  // the song's waveform (R11.1.1, waveforms.Waveforms)
     property var now: null  // Now Playing (R11.4, nowplayingview.NowPlayingView)
+    property var mini: null  // the mini player (R15.1, miniplayer.MiniPlayer)
     readonly property bool hasSong: player.path !== ""
     height: 88
     color: Theme.bar
@@ -355,6 +356,20 @@ Rectangle {
                 color: Theme.text
             }
         }
+    }
+
+    // the mini player (R15.1): just left of Now Playing
+    BarButton {
+        objectName: "miniPlayerButton"
+        anchors.right: parent.right
+        anchors.rightMargin: 64
+        y: 28
+        visible: bar.mini !== null
+        icon: "popout"
+        iconSize: 17
+        name: qsTr("Mini player")
+        tint: Theme.muted
+        onClicked: bar.mini.open()
     }
 
     // Now Playing (R11.4, R6.5): at the far end, lit while it is open; again, it closes
