@@ -564,6 +564,7 @@ class Library(QObject):
         self._root, self._index, self._home, self._pool = root, index, home, pool
         self._trim = trim
         self._workers: Executor | None = None  # the worker processes, once a scan needs them
+        self._workers_lock = threading.Lock()  # made from the scan's thread or a waveform's
         self._clock = clock if clock is not None else SystemClock()
         self._watching = watching
         self._watcher: watch.Watcher | None = None
@@ -911,12 +912,10 @@ class Library(QObject):
     ) -> None:
         result: scanner.Result | BaseException
         try:
-            if self._workers is None:  # started when first needed, kept for the run (A1.3)
-                self._workers = self._pool()
             result = scanner.scan(
                 self._root,
                 self._index,
-                self._workers,
+                self.workers(),
                 progress=self._progress.emit if scope is None else None,
                 scope=scope,
                 expected=expected,
@@ -927,10 +926,8 @@ class Library(QObject):
             )
         except Exception as e:  # noqa: BLE001  (the scan's failure is shown, and MusiKata goes on)
             log.exception("the scan of %s failed", self._root)
-            if isinstance(e, BrokenExecutor) and self._workers is not None:
-                # a worker process died: the next scan starts them anew
-                self._workers.shutdown(wait=False)
-                self._workers = None
+            if isinstance(e, BrokenExecutor):  # a worker process died: made anew when next asked
+                self.workers_broken()
             result = without_traceback(e)
         if isinstance(result, scanner.Result) and not result.missing and self._trim is not None:
             try:  # the cache's thumbnails no row points at any more (A2.7)
@@ -939,6 +936,23 @@ class Library(QObject):
                 log.exception("trimming the cover cache of %s failed", self._root)
         self.last = result
         self._finished.emit((scope is None, result))
+
+    def workers(self) -> Executor:
+        """The worker processes (A1.3), made when first asked for (by a scan, or a waveform's
+        decoding, A5.1) and kept for the run; on any thread but the GUI thread, which their
+        making would hold up."""
+        with self._workers_lock:
+            if self._workers is None:
+                self._workers = self._pool()
+            return self._workers
+
+    def workers_broken(self, broken: Executor | None = None) -> None:
+        """A worker process of `broken` (None: of the pool now) died: the pool is let go, and made
+        anew when next asked for."""
+        with self._workers_lock:
+            if self._workers is not None and broken in (None, self._workers):
+                self._workers.shutdown(wait=False)
+                self._workers = None
 
     @Slot(int, int)
     def _on_progress(self, done: int, of: int) -> None:
@@ -1282,9 +1296,10 @@ class Library(QObject):
         if self._watcher is not None:
             self._watcher.close()
         self.wait()
-        if self._workers is not None:
-            self._workers.shutdown()
-            self._workers = None
+        with self._workers_lock:
+            if self._workers is not None:
+                self._workers.shutdown()
+                self._workers = None
 
     # ---------- what QML reads ----------
 
@@ -1602,13 +1617,18 @@ class Player(QObject):
 
     What the engine reports of the song playing is heard (`played.Listening`, on `clock`): once
     enough of a song of the queue is heard, its play is counted (R7.9) by `count`'s PlayCounts. A
-    file played outside the queue (`play_file`) isn't counted (R1.7)."""
+    file played outside the queue (`play_file`) isn't counted (R1.7).
+
+    It says which song the bar shows (`nowPlaying`) and which comes after it (`nextSong`), whose
+    waveforms are worked out (waveforms.py, R11.1.1), and the time at a place on the seek bar
+    (`timeAt`, R11.2)."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
     queueChanged = Signal()  # shuffle, repeat, Up next open
     volumeChanged = Signal()
     nowPlaying = Signal(str)  # the path of the song playing or cued now, "" when none
+    nextSong = Signal(str)  # the path of the song after it, "" when none or it can't play now
     _play = Signal(str, int, float, float)
     _follow = Signal(int, int, str, float)
     _seek = Signal(int, float)
@@ -1657,6 +1677,7 @@ class Player(QObject):
         # follow it (0 and None: nothing); None when nothing was told yet
         self._told_path = ""  # and its path ("": nothing, or a song that can't play now)
         self._next_note = ""  # why the song after this one can't play now (R2.10); "" if it can
+        self._next_path = ""  # the path of the song after this one, as nextSong last said
         self._level = 1.0  # the ReplayGain of the song playing (R7.5)
         self._told_level = 1.0  # and of the song last told to follow it
         self._follows: set[int] = set()  # every ticket told to follow it
@@ -2033,6 +2054,14 @@ class Player(QObject):
         if self._length:
             self.seek(min(1.0, max(0.0, fraction)) * self._length)
 
+    @Slot(float, result=str)
+    def timeAt(self, fraction: float) -> str:  # noqa: N802
+        """The time at `fraction` of the song's length, as the seek bar shows it under the pointer
+        (R11.2); "" when the length isn't known."""
+        if not self._length:
+            return ""
+        return time_text(min(1.0, max(0.0, fraction)) * self._length)
+
     @Slot()
     def seekBack(self) -> None:  # noqa: N802
         """←: five seconds back (R7.4, R6.9)."""
@@ -2230,18 +2259,22 @@ class Player(QObject):
         self._queue_changed()
 
     def _queue_changed(self) -> None:
-        self._next_note = self._why_next()
+        entry = self.queue.following()
+        info = self._song(entry.song) if entry is not None else None
+        self._next_note = self._why_next(info)
+        following = info.path if info is not None and not self._next_note else ""
+        if following != self._next_path:  # its waveform is worked out ahead (R11.1.1)
+            self._next_path = following
+            self.nextSong.emit(following)
         self._up_next.set_note(self._next_note)
         self._up_next.refresh()
         self.queueChanged.emit()
         self._tell_following()
         self._keep(nowplaying.QUEUE)
 
-    def _why_next(self) -> str:
-        """Why the song after the current one can't play now: its root, or its linked folder,
-        isn't there (R2.10); "" when it can, or when none follows."""
-        entry = self.queue.following()
-        info = self._song(entry.song) if entry is not None else None
+    def _why_next(self, info: SongInfo | None) -> str:
+        """Why the song after the current one (`info`) can't play now: its root, or its linked
+        folder, isn't there (R2.10); "" when it can, or when none follows."""
         if info is None or self._refuse is None:
             return ""
         return self._refuse(info.path)

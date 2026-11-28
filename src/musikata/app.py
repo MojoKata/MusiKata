@@ -51,7 +51,7 @@ from musikata_core.ratings import Writing, set_everything
 from musikata_core.tags import Job, Written
 from musikata_core.tags import save as save_tags
 
-from . import garbage, media
+from . import garbage, media, waveitem
 from .albumart import AlbumArt, ArtImages
 from .attention import Attention, NameMerge
 from .bridges import Library, Player
@@ -71,6 +71,7 @@ from .plays import PlayCounts
 from .ratings import Ratings, file_writer
 from .removing import Removing
 from .smart import SmartPlaylists
+from .waveforms import Waveforms
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
 FIRST_QML = os.path.join(os.path.dirname(QML), "FirstRun.qml")
@@ -187,6 +188,7 @@ class Shell:
     smart: SmartPlaylists | None = None
     organize: OrganizeFiles | None = None
     removing: Removing | None = None
+    waveforms: Waveforms | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -197,7 +199,7 @@ class Shell:
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
             self.copies, self.encodings, self.infer, self.playlists, self.dragging, self.smart,
-            self.organize, self.removing,
+            self.organize, self.removing, self.waveforms,
         )  # fmt: skip
 
 
@@ -222,18 +224,20 @@ def close_bridges(
     smart: SmartPlaylists | None = None,
     organize: OrganizeFiles | None = None,
     removing: Removing | None = None,
+    waveforms: Waveforms | None = None,
 ) -> None:
-    """Closes what a window bound to, once it has gone: the system's media controls, the
-    playback thread, the Edit tags panel's, Album art's, the merges', Fix encoding…'s and Infer
-    from path's saves and Organize files' moves (stopped before their next file) and threads, the
-    playlists' changes (an
-    export stopped) and the smart playlists' checks, Needs attention's dismissals
-    and watching, the ratings' save and watching, the play counts (their file written), the change
-    history's thread, the watcher, the scan's thread and the worker processes, and the index; then
-    deletes them (`release`)."""
+    """Closes what a window bound to, once it has gone: the system's media controls, the playback
+    thread, the waveforms' thread (before the worker processes end), the Edit tags panel's, Album
+    art's, the merges', Fix encoding…'s and Infer from path's saves and Organize files' moves
+    (stopped before their next file) and threads, the playlists' changes (an export stopped) and the
+    smart playlists' checks, Needs attention's dismissals and watching, the ratings' save and
+    watching, the play counts (their file written), the change history's thread, the watcher, the
+    scan's thread and the worker processes, and the index; then deletes them (`release`)."""
     if controls is not None:
         controls.close()
     player.close()
+    if waveforms is not None:
+        waveforms.close()
     if edit is not None:
         edit.close()
     if art is not None:
@@ -270,7 +274,7 @@ def close_bridges(
     index.close()
     release(
         controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, dragging,
-        smart, organize, removing, attention, ratings, changes, player, library,
+        smart, organize, removing, attention, ratings, changes, player, waveforms, library,
     )  # fmt: skip
 
 
@@ -323,6 +327,10 @@ def load(
         clock=clock,
     )
     player.nowPlaying.connect(library.show_playing)
+    # the waveforms of the song shown and the next, on the worker processes (R11.1.1, A5.1)
+    waveforms = Waveforms(root, index, library.workers, broken=library.workers_broken)
+    player.nowPlaying.connect(waveforms.show)
+    player.nextSong.connect(waveforms.ahead)
     library.reachChanged.connect(
         player.reach_changed
     )  # the song playing ends, nothing after (R2.10)
@@ -422,8 +430,10 @@ def load(
             "smart": smart,
             "organize": files,
             "removing": removing,
+            "waveforms": waveforms,
         }  # fmt: skip
     )
+    waveitem.register()
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
@@ -433,7 +443,7 @@ def load(
                       art=album_art, genres=genre_tools, attention=needs, names=names,
                       copies=copies, encodings=fix, infer=infer, playlists=lists,
                       dragging=dragging, smart=smart, organize=files,
-                      removing=removing)  # fmt: skip
+                      removing=removing, waveforms=waveforms)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -441,7 +451,7 @@ def load(
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
         changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
-        dragging, smart, files, removing,
+        dragging, smart, files, removing, waveforms,
     )  # fmt: skip
 
 

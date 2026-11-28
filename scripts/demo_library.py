@@ -492,9 +492,23 @@ LONG_RATE = 8000  # a long song's rate, mono at LONG_BITS, so an hour is a few m
 LONG_BITS = 8000
 
 
+def loudness(n: int, tone: int):
+    """A song's loudness over its `n` samples, rising and falling as music does, with a quiet
+    bridge in its middle, so its waveform (R11.1) looks like a song's, as the mockups draw it."""
+    import numpy as np
+
+    u = np.arange(n) / max(1, n)
+    env = 0.35 + 0.45 * np.sin(np.pi * u) ** 0.6 + 0.15 * np.sin(23 * u) * np.sin(7 * u)
+    env[(u > 0.47) & (u < 0.53)] *= 0.45
+    beats = np.random.default_rng(tone + 1).random(200)  # a step of its own every 200th
+    env *= 0.55 + 0.45 * beats[np.minimum((u * 200).astype(int), 199)]
+    return np.clip(env, 0.06, 1.0)
+
+
 def encode(path: str, kind: str, seconds: float, tone: int) -> None:
-    """A tone with a little noise, `seconds` long, as `kind` (PyAV's FFmpeg); an MP3 longer than
-    a minute (an album in one file) at a low rate, so it stays small."""
+    """A tone with a little noise, `seconds` long, its loudness rising and falling (`loudness`),
+    as `kind` (PyAV's FFmpeg); an MP3 longer than a minute (an album in one file) at a low rate,
+    so it stays small."""
     import av
     import numpy as np
 
@@ -504,7 +518,7 @@ def encode(path: str, kind: str, seconds: float, tone: int) -> None:
     n = int(rate * seconds)
     t = np.arange(n) / rate
     noise = np.random.default_rng(tone).standard_normal(n)
-    x = (0.3 * np.sin(2 * np.pi * tone * t) + 0.02 * noise).astype(np.float32)
+    x = (0.3 * loudness(n, tone) * np.sin(2 * np.pi * tone * t) + 0.02 * noise).astype(np.float32)
     layout = "mono" if long else "stereo"
     both = np.stack([x]) if long else np.stack([x, x])
     with av.open(path, "w", format=fmt) as out:
