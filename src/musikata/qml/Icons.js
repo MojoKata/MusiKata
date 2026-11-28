@@ -13,6 +13,15 @@ function starPoints(r) {
     }
     return d + "Z"
 }
+function spokes(cx, cy, r0, r1, n) {
+    let d = ""
+    for (let i = 0; i < n; i++) {
+        const a = i * 2 * Math.PI / n
+        d += `M${(cx + r0 * Math.cos(a)).toFixed(2)} ${(cy + r0 * Math.sin(a)).toFixed(2)}`
+            + `L${(cx + r1 * Math.cos(a)).toFixed(2)} ${(cy + r1 * Math.sin(a)).toFixed(2)}`
+    }
+    return d
+}
 const STROKE = {
     song: "M8 14.5V3.5L15 2.5V12.5",
     album: ellipse(10, 10, 7, 7) + ellipse(10, 10, 2, 2),
@@ -59,6 +68,14 @@ const STROKE = {
     popout: "M9 4H4V16H16V11 M10 10L16.5 3.5 M11.5 3.5H16.5V8.5",
     expand: "M3.5 8V3.5H8 M16.5 8V3.5H12 M3.5 12V16.5H8 M16.5 12V16.5H12",
     undo: "M5 8H12.5C17.5 8 17.5 16 12.5 16H8 M8 4.8L4.8 8L8 11.2",
+    // Now Playing's (R11.4): the picker's 3D analyzer and No visualization, Lyrics, Equalizer
+    cube: "M10 2.5L17 6.3V13.7L10 17.5L3 13.7V6.3Z M3 6.3L10 10L17 6.3 M10 10V17.5",
+    nowave: "M3 8V12M5.8 5.5V14.5M8.6 3.5V16.5M11.4 6.5V13.5M14.2 4.5V15.5M17 7.5V12.5 M3 17L17 3",
+    lyrics: "M4.5 3H15.5Q17.5 3 17.5 5V11.5Q17.5 13.5 15.5 13.5H8L4.5 17V13.5Q2.5 13.5 2.5 11.5V5"
+        + "Q2.5 3 4.5 3Z M6 6.8H14 M6 9.8H11.5",
+    eq: "M5 3V17M10 3V17M15 3V17",
+    // the 3D analyzer's gear (R11.3.1)
+    gear: ellipse(10, 10, 2.6, 2.6) + ellipse(10, 10, 5.2, 5.2) + spokes(10, 10, 5, 7.2, 8),
 }
 const FILL = {
     song: ellipse(5.8, 14.8, 2.4, 2) + ellipse(12.8, 12.8, 2.4, 2),
@@ -71,6 +88,7 @@ const FILL = {
         + "Q13.5 16 13.5 15Z",
     prev: "M16 4L7 10L16 16Z M6.5 5Q6.5 4 5.5 4H4.9Q3.9 4 3.9 5V15Q3.9 16 4.9 16H5.5Q6.5 16 6.5 15Z",
     queue: "M13 11.5L17.5 14.5L13 17.5Z",
+    eq: ellipse(5, 7, 2, 2) + ellipse(10, 12.5, 2, 2) + ellipse(15, 5.5, 2, 2),
     drag: ellipse(7.5, 5, 1.3, 1.3) + ellipse(7.5, 10, 1.3, 1.3) + ellipse(7.5, 15, 1.3, 1.3)
         + ellipse(12.5, 5, 1.3, 1.3) + ellipse(12.5, 10, 1.3, 1.3) + ellipse(12.5, 15, 1.3, 1.3),
 }

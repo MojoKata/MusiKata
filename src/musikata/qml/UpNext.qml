@@ -13,22 +13,33 @@ import "."
 // selection, or with none closes it, as the × at the top does. Songs dragged onto it from the views,
 // or files from a file manager, play next (R6.10), the panel outlined and saying so while they are
 // over it; its own rows are still moved by their handles, within it.
+// `full`: the same queue at full size, as Now Playing shows it with No visualization (R11.4.3,
+// N03-now-playing-queue): headed Queue, the song played last above the one playing, and Save as
+// playlist… (a playlist of the queue's songs, its name then edited in the sidebar) and Clear (every
+// song out but the one playing) in place of the ×; Esc there closes Now Playing (`escaped`).
 Rectangle {
     id: panel
     required property var player
-    readonly property var model: player.upNext
+    property var model: player.upNext  // the queue's list: Up next's, or Now Playing's (queueList)
+    property bool full: false
+    property var playlists: null       // Save as playlist… (R8.3), when full
+    property int dropIndex: 1          // its place as a drop target: 1 Up next, 2 Now Playing's
+    signal escaped()
+    signal savedAsPlaylist()
     property int dropRow: -1           // where a dragged row would land, while one is dragged
     property var dragging: null        // songs dragged from the views onto it (musikata.dragging)
-    radius: 14
-    color: Theme.surface
-    border.color: Theme.borderStrong
+    radius: full ? 16 : 14
+    color: full ? Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.72) : Theme.surface
+    border.color: full ? Theme.border : Theme.borderStrong
     focus: visible
-    Keys.onReturnPressed: panel.player.playSelected()
-    Keys.onEnterPressed: panel.player.playSelected()
-    Keys.onDeletePressed: panel.player.removeSelected()
+    Keys.onReturnPressed: panel.player.playSelectedOf(panel.model)
+    Keys.onEnterPressed: panel.player.playSelectedOf(panel.model)
+    Keys.onDeletePressed: panel.player.removeSelectedOf(panel.model)
     Keys.onPressed: (event) => {
         const row = panel.model.press(event.key, event.modifiers, Math.max(1, Math.floor(rows.height / 48)))
-        if (row === -2 && event.key === Qt.Key_Escape)
+        if (row === -2 && event.key === Qt.Key_Escape && panel.full)
+            panel.escaped()
+        else if (row === -2 && event.key === Qt.Key_Escape)
             panel.player.closeUpNext()
         else
             event.accepted = row !== -2
@@ -40,27 +51,54 @@ Rectangle {
 
     Text {
         id: heading
-        x: 20
-        y: 16
-        width: parent.width - 76
+        x: panel.full ? 24 : 20
+        y: panel.full ? 18 : 16
+        width: (panel.full ? actions.x : parent.width - 56) - x - 20
         elide: Text.ElideRight
-        text: qsTr("Up next")
+        text: panel.full ? qsTr("Queue") : qsTr("Up next")
         color: Theme.text
         font { family: Theme.sans; pixelSize: 18; weight: Font.Bold }
     }
     Text {
-        objectName: "upNextLine"
-        x: 20
+        objectName: panel.full ? "queueLine" : "upNextLine"
+        x: heading.x
         anchors.top: heading.bottom
         anchors.topMargin: 2
-        width: parent.width - 40
+        width: (panel.full ? actions.x : parent.width - 20) - x - 20
         elide: Text.ElideRight
         text: panel.model.note || panel.model.line  // why the songs up next can't play (R2.10)
         color: panel.model.note ? Theme.err : Theme.muted
         font { family: Theme.sans; pixelSize: 12 }
     }
+    Row {  // Now Playing's queue: Save as playlist… and Clear (R11.4.3)
+        id: actions
+        objectName: "queueActions"
+        visible: panel.full
+        x: parent.width - width - 24
+        y: 22
+        spacing: 8
+        Btn {
+            objectName: "saveQueue"
+            label: qsTr("Save as playlist…")
+            icon: "playlist"
+            height: 32
+            later: panel.playlists === null ? qsTr("Playlists aren't open") : ""
+            onClicked: {
+                panel.playlists.saveQueue(panel.player)
+                panel.savedAsPlaylist()
+            }
+        }
+        Btn {
+            objectName: "clearQueue"
+            label: qsTr("Clear")
+            quiet: true
+            height: 32
+            onClicked: panel.player.clearQueue()
+        }
+    }
     Item {
-        objectName: "closeUpNext"
+        objectName: panel.full ? "" : "closeUpNext"
+        visible: !panel.full
         x: parent.width - 44
         y: 14
         width: 28
@@ -75,10 +113,10 @@ Rectangle {
 
     ListView {
         id: rows
-        objectName: "upNextRows"
-        x: 10
-        y: 72
-        width: parent.width - 20
+        objectName: panel.full ? "queueRows" : "upNextRows"
+        x: panel.full ? 14 : 10
+        y: panel.full ? 82 : 72
+        width: parent.width - 2 * x
         height: parent.height - y - 10
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -131,7 +169,7 @@ Rectangle {
                         panel.forceActiveFocus()
                         panel.model.click(row.index, (tap.point.modifiers & Qt.ControlModifier) !== 0, (tap.point.modifiers & Qt.ShiftModifier) !== 0)
                     }
-                    onDoubleTapped: panel.player.playRow(row.index)
+                    onDoubleTapped: panel.player.playRowOf(panel.model, row.index)
                 }
 
                 Item {  // the drag handle: a song to come is dropped where the line shows
@@ -158,7 +196,7 @@ Rectangle {
                         }
                         onActiveChanged: {
                             if (!active && panel.dropRow >= 0) {
-                                panel.player.moveRow(row.index, panel.dropRow)
+                                panel.player.moveRowOf(panel.model, row.index, panel.dropRow)
                                 panel.dropRow = -1
                             }
                         }
@@ -219,7 +257,7 @@ Rectangle {
                     Accessible.role: Accessible.Button
                     Accessible.name: qsTr("Remove %1 from the queue").arg(row.title)
                     Icon { anchors.centerIn: parent; name: "close"; size: 13; color: Theme.muted }
-                    TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: panel.player.removeRow(row.index) }
+                    TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: panel.player.removeRowOf(panel.model, row.index) }
                 }
             }
         }
@@ -235,12 +273,12 @@ Rectangle {
         y: target ? rows.y + target.y - rows.contentY + (panel.dropRow >= rows.count ? target.height : target.headed) : 0
     }
     DropArea {  // songs dragged from a view, or files from a file manager: played next (R6.10)
-        objectName: "upNextDrop"
+        objectName: panel.full ? "queueDropArea" : "upNextDrop"
         anchors.fill: parent
         enabled: panel.dragging !== null
-        onEntered: (drag) => drag.accepted = panel.dragging.enter("queue", 1, drag.getDataAsString(panel.dragging.mime), drag.urls)
-        onExited: panel.dragging.leave("queue", 1)
-        onDropped: (drop) => { if (panel.dragging.drop("queue", 1, drop.getDataAsString(panel.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
+        onEntered: (drag) => drag.accepted = panel.dragging.enter("queue", panel.dropIndex, drag.getDataAsString(panel.dragging.mime), drag.urls)
+        onExited: panel.dragging.leave("queue", panel.dropIndex)
+        onDropped: (drop) => { if (panel.dragging.drop("queue", panel.dropIndex, drop.getDataAsString(panel.dragging.mime), drop.urls)) drop.accept(Qt.CopyAction) }
     }
     Rectangle {  // a drag over it: outlined, and named
         anchors.fill: parent
@@ -248,9 +286,9 @@ Rectangle {
         color: "transparent"
         border.color: Theme.accent
         border.width: 2
-        visible: panel.dragging !== null && panel.dragging.target === "queue:1"
+        visible: panel.dragging !== null && panel.dragging.target === "queue:" + panel.dropIndex
         Rectangle {
-            objectName: "upNextDropLabel"
+            objectName: panel.full ? "queueDropLabel" : "upNextDropLabel"
             anchors.horizontalCenter: parent.horizontalCenter
             y: 76
             width: Math.min(dropLabel.implicitWidth + 24, parent.width - 40)

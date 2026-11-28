@@ -311,12 +311,15 @@ def test_a_closed_windows_objects_are_deleted_at_its_close_and_gone_without_a_co
     assert [r() for r in gone] == [None] * 4
     qtbot.waitUntil(lambda: not s.library.scanning, timeout=10_000)
     shell = s.shell
-    gone = [weakref.ref(o) for o in (shell.library, shell.player, shell.counts, shell.controls)]
+    kept = (shell.library, shell.player, shell.counts, shell.controls, shell.waveforms, shell.now,
+            shell.tints)  # fmt: skip
+    gone = [weakref.ref(o) for o in kept]
+    del kept
     s.close()
     assert not Shiboken.isValid(shell.library) and len(collected) == 2
     s.shell = None
     del shell
-    assert [r() for r in gone] == [None] * 4
+    assert [r() for r in gone] == [None] * 7
 
 
 def test_the_first_starts_window_that_doesnt_load_says_so(tmp_path, monkeypatch):

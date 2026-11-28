@@ -14,7 +14,7 @@ into the node as it syncs; the render thread runs no more Python than that copy.
 
 Qt Quick's software renderer (offscreen, as the tests and the tour draw, and where there is no
 GPU) draws no custom geometry, so there each bar is a rectangle node (`createRectangleNode`) in
-its colour: the same bars, square-ended.
+its colour: the same bars, square-ended, all made with the node that holds them.
 
 The arithmetic (`slots`, `capsules`, `gradient`) is plain NumPy, tested without a window."""
 
@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import ctypes
 import math
+import weakref
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -150,7 +152,9 @@ class Waveform(QQuickItem):
     def __init__(self, parent: QQuickItem | None = None) -> None:
         super().__init__(parent)
         self.setFlag(QQuickItem.Flag.ItemHasContents, True)
-        self._source: QObject | None = None
+        # weakly: a QML item of a Python type outlives its window as a husk (PySide keeps its
+        # wrapper), which must hold nothing of the window's bridges (A1.3)
+        self._source_ref: Callable[[], QObject | None] = _none
         self._progress = 0.0
         self._bar, self._gap = 2.0, 1.3
         self._colours = {
@@ -170,14 +174,15 @@ class Waveform(QQuickItem):
     # ---------- what QML sets ----------
 
     def _get_source(self) -> QObject | None:
-        return self._source
+        return self._source_ref()
 
     def _set_source(self, source: QObject | None) -> None:
-        if source is self._source:
+        old = self._source_ref()
+        if source is old:
             return
-        if self._source is not None and Shiboken.isValid(self._source):
-            self._source.changed.disconnect(self._reshape)  # type: ignore[attr-defined]
-        self._source = source
+        if old is not None and Shiboken.isValid(old):
+            old.changed.disconnect(self._reshape)  # type: ignore[attr-defined]
+        self._source_ref = weakref.ref(source) if source is not None else _none
         if source is not None:
             source.changed.connect(self._reshape)  # type: ignore[attr-defined]
         self._reshape()
@@ -238,7 +243,7 @@ class Waveform(QQuickItem):
     def _reshape(self) -> None:
         """The bars anew: how many fit, and each one's height."""
         count, first = slots(self.width(), self._bar, self._gap)
-        waveform = getattr(self._source, "peaks", None)
+        waveform = getattr(self._source_ref(), "peaks", None)
         if waveform is None:
             waveform = np.zeros((0, 2), np.float32)
         self._heights = peak_pairs.bars(waveform, count) * float(self.height())
@@ -318,20 +323,19 @@ class Waveform(QQuickItem):
         return node
 
     def _software_node(self, old: QSGNode | None) -> QSGNode:
-        """A node holding a rectangle node per bar (the software renderer's)."""
+        """A node holding a rectangle node per bar (the software renderer's), all made with it:
+        the software renderer places a node added under one it has drawn already without the
+        item's place, so when the bars' number changes a new node is made with all of them, and
+        Qt deletes the old one with its rectangles."""
         window = self.window()
         root = old
-        if root is None:
+        if root is None or len(self._software) != len(self._rects):
             root = QSGNode()
-            self._software = []  # what was made before went with the old node
-        while len(self._software) < len(self._rects):
-            rect = window.createRectangleNode()
-            root.appendChildNode(rect)
-            self._software.append(rect)
-        while len(self._software) > len(self._rects):
-            rect = self._software.pop()
-            root.removeChildNode(rect)
-            Shiboken.delete(rect)
+            self._software = []  # what was made before goes with the old node
+            for _ in self._rects:
+                rect = window.createRectangleNode()
+                root.appendChildNode(rect)
+                self._software.append(rect)
         for node, (shape, colour) in zip(self._software, self._rects, strict=True):
             node.setRect(shape)
             node.setColor(colour)
@@ -349,6 +353,10 @@ def fill(node: QSGGeometryNode, vertices: NDArray[np.void]) -> None:
         data = np.ascontiguousarray(vertices)
         ctypes.memmove(int(geometry.vertexData()), data.ctypes.data, data.nbytes)
     node.markDirty(QSGNode.DirtyStateBit.DirtyGeometry)
+
+
+def _none() -> None:
+    return None
 
 
 _registered: list[bool] = []

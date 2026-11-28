@@ -163,6 +163,23 @@ def test_the_bars_are_drawn_anew_when_the_waveform_or_the_size_changes(view, qtb
     assert not item._heights.any()
 
 
+def test_bars_more_than_the_first_render_had_are_drawn_in_the_items_place(view, qtbot):
+    """Qt Quick's software renderer places a node added under one it has drawn already without
+    the item's place: the wider waveform's bars all made anew, in a new node, land where the item
+    is, none above it or left of it."""
+    source = Source(np.zeros((0, 2), np.float32))
+    item = shown(view, qtbot, source, 0.0)  # at x 10, y 10, 320 wide
+    item.setWidth(100)
+    view.grabWindow()  # drawn with the few bars 100 pixels hold
+    item.setWidth(320)
+    image = view.grabWindow()
+    assert len(item._software) == item.property("bars")
+    lit = [x for x in range(340) if QColor(image.pixel(x, 20)).lightness() > 40]
+    assert lit[0] >= 10 and lit[-1] > 300  # the bars across the item, from its left edge
+    above = [x for x in range(340) if QColor(image.pixel(x, 5)).lightness() > 40]
+    assert above == []  # none drawn at the window's top, as if the item were there
+
+
 # ---------- the bar's seek bar in the app ----------
 
 SONGS = [{"path": "LD/GH/01.flac", "title": "Tidewater", "album": "Glass Harbor", "length": 200.0}]

@@ -13,6 +13,8 @@ import sys
 import jsonschema
 import pytest
 
+from musikata_core import lyrics
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import demo_library as demo  # noqa: E402
@@ -67,6 +69,20 @@ def test_live_at_the_lantern_is_an_album_in_one_file_with_its_cue_sheet():
     sheet = lib.cues[f"{folder}/Live at the Lantern.cue"]
     assert 'FILE "Live at the Lantern.mp3" MP3' in sheet and sheet.count("TRACK ") == 8
     assert sheet.endswith("\r\n")
+
+
+def test_signal_fires_has_its_timed_lyrics_beside_it_as_n04_shows_them():
+    """R17.1, N04-now-playing-lyrics: an .lrc named as the song, LRC's own tags, pauses between
+    verses, a chorus with two times on its lines and enhanced word times; written with a BOM and
+    CRLF, as a Windows lyrics editor writes one."""
+    lib = demo.plan()
+    text = lib.lyrics["Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.lrc"]
+    found = lyrics.parse(text)
+    assert found.timed and dict(found.meta)["ti"] == "Signal Fires"
+    at = lyrics.current(found.times(), 98.0)  # the tour's place (tour.py's N04)
+    assert found.lines[at].text == "We were signal fires, burning on the shore"
+    assert "and the tide came in to take the words away" in [line.text for line in found.lines]
+    assert any(not line.text for line in found.lines) and "<" in text
 
 
 def test_glass_harbor_has_t02s_art_its_cover_embedded_and_in_the_folder_and_back_covers():

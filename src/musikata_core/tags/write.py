@@ -107,6 +107,15 @@ def _id3(
             _musikata_popm(tags, stars)
         else:
             _popm(tags, stars)
+    if "lyrics" in change:  # R17.5: USLT, and SYLT for timed lyrics (A7.6); every other one goes
+        text, lines = compose.id3_lyrics(change)
+        tags.delall("USLT")
+        tags.delall("SYLT")
+        if text is not None:
+            tags.add(mutagen.id3.USLT(encoding=3, lang="eng", desc="", text=text))
+        if lines:
+            tags.add(mutagen.id3.SYLT(encoding=3, lang="eng", format=2, type=1, desc="",
+                                      text=lines))  # fmt: skip
     if any(name in change for name in compose.PICTURES):
         _apic(tags, change)
     _versions(tags, version)

@@ -755,6 +755,28 @@ class Playlists(QObject):
 
         self._run(lambda: store.create(songs), then)
 
+    @Slot(QObject)
+    def saveQueue(self, player: QObject) -> None:  # noqa: N802
+        """Now Playing's Save as playlist… (R11.4.3, R8.3): a playlist of the queue's songs in the
+        order they play (the Player bridge's `queue_songs`), named for where the queue comes from
+        ("New playlist" when it has no name), opened, its name selected for editing."""
+        songs: list[int] = getattr(player, "queue_songs", list)()
+        if not songs or not self._can():
+            return
+        source = getattr(getattr(player, "queue", None), "source", "")
+        name = source if isinstance(source, str) and source.strip() else core.NEW_NAME
+        store = self._store
+
+        def then(made: core.Changed) -> None:
+            self._reload()
+            self._say(made_text(made.name, made.count))
+            if made.playlist is not None:
+                if self._library is not None:
+                    self._library.openPlaylist(made.playlist)
+                self._edit(made.playlist)
+
+        self._run(lambda: store.create(songs, name), then)
+
     @Slot(int, QObject, int)
     def addTo(self, playlist: int, model: QObject, row: int = -1) -> None:  # noqa: N802
         """Add to playlist (R2.9.6, L03): the songs of the selection (row -1), or of the row

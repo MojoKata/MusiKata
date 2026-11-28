@@ -457,13 +457,15 @@ class Keeper:
 
 
 class Keeping:
-    """Keeps what's playing in the root's file (`Places`) and the shuffle and repeat in the
-    shared settings (R7.3), each write a job on a thread of its own, in the order asked: the GUI
+    """Keeps what's playing in the root's file (`Places`), and the shuffle and repeat (R7.3) and
+    Now Playing's visualization (R11.4.5) in the shared settings, each write a job on one thread
+    of its own, in the order asked, so no two writes of the shared settings overlap: the GUI
     thread never waits on a file. `read` gives that thread its connection to the index, where a
     song's id becomes its path and hash; `computer` gives this computer's id, made and kept in the
-    shared settings the first time it is needed (`settings.computer_id`); `set_playback` writes
-    the shared settings' playback fields. `kept` is the file as read at start: a newer format is
-    never written, and the fields it doesn't know are kept."""
+    shared settings the first time it is needed (`settings.computer_id`); `set_playback` and
+    `set_appearance` write the shared settings' playback and appearance fields. `kept` is the
+    file as read at start: a newer format is never written, and the fields it doesn't know are
+    kept."""
 
     def __init__(
         self,
@@ -474,11 +476,12 @@ class Keeping:
         computer: Callable[[], str | None] | None = None,
         set_playback: Callable[..., bool] | None = None,
         executor: Executor | None = None,
+        set_appearance: Callable[..., bool] | None = None,
     ) -> None:
         self._where, self._read, self._clock = where, read, clock
         self._kept = kept
         self._computer, self._made_computer = where.computer, computer
-        self._set_playback = set_playback
+        self._set_playback, self._set_appearance = set_playback, set_appearance
         self._executor = executor
         self.keeper = Keeper(clock)
         self._newer = kept is not None and kept.newer
@@ -527,6 +530,14 @@ class Keeping:
             return None
         set_playback = self._set_playback
         return self._submit(lambda: set_playback(**fields))
+
+    def appearance(self, **fields: object) -> Future[object] | None:
+        """Keeps `fields` (the visualization, R11.4.5) in the shared settings, off this thread;
+        None when there is nowhere to."""
+        if self._set_appearance is None:
+            return None
+        set_appearance = self._set_appearance
+        return self._submit(lambda: set_appearance(**fields))
 
     def close(self) -> None:
         """Waits for the writes asked for, then ends the thread: for quitting."""

@@ -155,15 +155,23 @@ class UpNextModel(QAbstractListModel):
     Its rows are selected as every song list's are (R2.6, selection.Selection), by their entries'
     keys, so the selection stays with its songs as the queue changes: Enter plays the first song
     selected, Delete takes them out of the queue (the Player bridge's `playSelected` and
-    `removeSelected`)."""
+    `removeSelected`).
+
+    Now Playing's queue at full size (R11.4.3, `played_shown`) puts the songs played last, that
+    many of them, above the song playing, in the order they played, and leaves the rest out."""
 
     changed = Signal()  # the line over the list
 
     def __init__(
-        self, read: Callable[[], sqlite3.Connection] | None, queue: Queue, parent: QObject | None
+        self,
+        read: Callable[[], sqlite3.Connection] | None,
+        queue: Queue,
+        parent: QObject | None,
+        played_shown: int = 0,
     ) -> None:
         super().__init__(parent)
         self._read, self._queue = read, queue
+        self._played_shown = played_shown
         self._rows: list[tuple[Entry, str]] = []
         self._info: dict[int, SongInfo] = {}
         self._lengths: dict[int, float] = {}  # every queued song's length, for the line
@@ -181,11 +189,13 @@ class UpNextModel(QAbstractListModel):
         q = self._queue
         current = q.current
         self.beginResetModel()
-        self._rows = (
-            ([(current, "now")] if current is not None else [])
-            + [(e, "next") for e in q.upcoming]
-            + [(e, "played") for e in reversed(q.played)]
-        )
+        now = [(current, "now")] if current is not None else []
+        coming = [(e, "next") for e in q.upcoming]
+        if self._played_shown:
+            last = q.played[-self._played_shown :]
+            self._rows = [(e, "played") for e in last] + now + coming
+        else:
+            self._rows = now + coming + [(e, "played") for e in reversed(q.played)]
         self._info.clear()
         self._selection.keep(self._keys())
         self.endResetModel()
@@ -197,6 +207,12 @@ class UpNextModel(QAbstractListModel):
         seconds = sum(self._lengths.get(e.song, 0.0) for e in upcoming)
         self._line = queue_line(q.source, len(upcoming), seconds) if current is not None else ""
         self.changed.emit()
+
+    def first_next(self) -> int:
+        """The row of the first song to come; the rows' count when none is to come."""
+        return next(
+            (i for i, (_, kind) in enumerate(self._rows) if kind == "next"), len(self._rows)
+        )
 
     def entry(self, row: int) -> tuple[Entry, str] | None:
         """Row `row`'s entry and kind; None past the rows."""

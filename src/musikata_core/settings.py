@@ -4,8 +4,10 @@ belongs to this computer and this person, the configured root (R2.1) among it.
 This much is what the configured root and playing need: where the file is, reading it in whatever
 shape a person, a sync tool or another version of MusiKata left it, and writing the root back,
 every field it doesn't know kept (A2.10); this computer's id (A2.8), made when it has none;
-Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them; and
-shuffle and repeat (R7.3), written when the user changes them. Of the root's own `settings.json`,
+Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them;
+shuffle and repeat (R7.3), written when the user changes them; and Now Playing's visualization
+(R11.4.5), written when the picker changes it, and the 3D analyzer's bands and speed (R11.3.1),
+written when its gear changes them. Of the root's own `settings.json`,
 the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
 are read (`root_tags`), with the genre list and the genres the user has said are the same (R9.5,
 R9.6). The rest of both files comes with Settings.
@@ -67,18 +69,38 @@ class Playback:
     repeat: str = "off"
 
 
+VISUALIZATIONS = ("waveform", "analyzer", "none")  # R11.4.5: Waveform the default
+ANALYZER_BANDS = (48, 96, 128)  # R11.3.1's band counts
+ANALYZER_SPEEDS = (6.0, 3.0, 1.5)  # the gear's speeds (R11.3.1): the seconds each holds
+ANALYZER_SECONDS = (1.0, 12.0)  # the seconds a hand-edited file may give, at least and at most
+
+
+@dataclass(frozen=True)
+class Appearance:
+    """R13.8's Appearance as read, as far as it is built: Now Playing's visualization, one of
+    VISUALIZATIONS, chosen in its picker and kept (R11.4.5); and the 3D analyzer's bands, one of
+    ANALYZER_BANDS, and the seconds its landscape holds (its speed), set from its gear and kept
+    (R11.3.1); and its Lyrics switch, on or off (R17.3)."""
+
+    visualization: str = "waveform"
+    analyzer_bands: int = 96
+    analyzer_seconds: float = 3.0
+    lyrics: bool = False
+
+
 @dataclass(frozen=True)
 class Shared:
     """The shared settings as read: the configured root (None: none yet, the first start, R2.1),
     Watch for changes (R13.2), this computer's id and name (A2.8); `data`, the file as read, which
     a rewrite keeps; `newer`, a newer MusiKata's format, never written; and what couldn't be used,
-    for the log. `playback` is R13.7's (`Playback`)."""
+    for the log. `playback` is R13.7's (`Playback`), `appearance` R13.8's (`Appearance`)."""
 
     root: str | None = None
     watch: bool = True
     computer_id: str | None = None
     computer_name: str | None = None
     playback: Playback = field(default_factory=Playback)
+    appearance: Appearance = field(default_factory=Appearance)
     data: Mapping[str, object] = field(default_factory=dict)
     newer: bool = False
     problems: tuple[str, ...] = ()
@@ -127,6 +149,54 @@ def _playback(value: object, problems: list[str]) -> Playback:
         problems.append(f"playback.repeat isn't off, all or one: {repeat!r}; off")
         repeat = default.repeat
     return Playback(device, mode, _decibels(value, "replaygain_default", problems), shuffle, repeat)
+
+
+def _appearance(value: object, problems: list[str]) -> Appearance:
+    """appearance: what of it can be used, the rest its defaults (R13.9)."""
+    if not isinstance(value, dict):
+        problems.append(f"appearance isn't a group: {value!r}")
+        return Appearance()
+    default = Appearance()
+    shown = value.get("visualization", default.visualization)
+    if isinstance(shown, str) and shown.strip().lower() in VISUALIZATIONS:
+        shown = shown.strip().lower()  # "Waveform", as a person writes it
+    else:
+        problems.append(
+            f"appearance.visualization isn't waveform, analyzer or none: {shown!r}; waveform"
+        )
+        shown = default.visualization
+    bands = _number(value.get("analyzer_bands", default.analyzer_bands))
+    if bands is None or bands not in ANALYZER_BANDS:
+        problems.append(
+            f"appearance.analyzer_bands isn't 48, 96 or 128: {value.get('analyzer_bands')!r}; 96"
+        )
+        bands = default.analyzer_bands
+    seconds = _number(value.get("analyzer_seconds", default.analyzer_seconds))
+    least, most = ANALYZER_SECONDS
+    if seconds is None or not least <= seconds <= most:
+        problems.append(
+            f"appearance.analyzer_seconds isn't {least:g} to {most:g} seconds:"
+            f" {value.get('analyzer_seconds')!r}; {default.analyzer_seconds:g}"
+        )
+        seconds = default.analyzer_seconds
+    lyrics = value.get("lyrics", default.lyrics)
+    if not isinstance(lyrics, bool):
+        problems.append(f"appearance.lyrics isn't true or false: {lyrics!r}; off")
+        lyrics = default.lyrics
+    return Appearance(shown, int(bands), float(seconds), lyrics)
+
+
+def _number(value: object) -> float | None:
+    """A number, or one written as text ("96", " 3 "); None when it is neither, or not finite."""
+    number: float | None = None
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            number = None
+    return number if number is not None and math.isfinite(number) else None
 
 
 def _decibels(group: Mapping[str, object], key: str, problems: list[str]) -> float:
@@ -184,12 +254,14 @@ def parse(text: str, home: str) -> Shared:
     if cid is not None and not (isinstance(cid, str) and cid):
         problems.append(f"computer.id isn't an id: {cid!r}; a new one is made")
     playback = _playback(data.get("playback", {}), problems)
+    appearance = _appearance(data.get("appearance", {}), problems)
     return Shared(
         root=root,
         watch=watch,
         computer_id=cid if isinstance(cid, str) and cid else None,
         computer_name=name if isinstance(name, str) else None,
         playback=playback,
+        appearance=appearance,
         data=data,
         newer=newer,
         problems=tuple(problems),
@@ -237,9 +309,32 @@ def with_playback(
     """The file's content with `fields` set in its `playback` group (shuffle and repeat, R7.3):
     the rest as it was read, fields it doesn't know included (A2.10), and this computer's id made
     when it has none (A2.8)."""
+    return _with_group(shared, computer_name, "playback", fields, new_id)
+
+
+def with_appearance(
+    shared: Shared,
+    computer_name: str,
+    fields: Mapping[str, object],
+    new_id: Callable[[], str] = _new_id,
+) -> dict[str, object]:
+    """The file's content with `fields` set in its `appearance` group (the visualization,
+    R11.4.5; the analyzer's bands and seconds, R11.3.1; the Lyrics switch, R17.3): the rest as it
+    was read, fields it doesn't know included (A2.10), and this computer's id made when it has none
+    (A2.8)."""
+    return _with_group(shared, computer_name, "appearance", fields, new_id)
+
+
+def _with_group(
+    shared: Shared,
+    computer_name: str,
+    name: str,
+    fields: Mapping[str, object],
+    new_id: Callable[[], str],
+) -> dict[str, object]:
     data = _with_computer(shared, computer_name, new_id)
-    playback = data.get("playback")
-    data["playback"] = {**(playback if isinstance(playback, dict) else {}), **fields}
+    group = data.get(name)
+    data[name] = {**(group if isinstance(group, dict) else {}), **fields}
     return data
 
 
@@ -296,6 +391,16 @@ def set_playback(path: str, home: str, computer_name: str, **fields: object) -> 
     what = ", ".join(f"{k} {v}" for k, v in fields.items())
     shared = _writable(path, home, what)
     return shared is not None and save(path, with_playback(shared, computer_name, fields))
+
+
+def set_appearance(path: str, home: str, computer_name: str, **fields: object) -> bool:
+    """Keeps `fields` (the visualization, R11.4.5; the analyzer's bands and seconds, R11.3.1; the
+    Lyrics switch, R17.3) in
+    the appearance group of the shared settings at `path`, the rest as it was; False, logged, when
+    they can't be written (`_writable`)."""
+    what = ", ".join(f"{k} {v}" for k, v in fields.items())
+    shared = _writable(path, home, what)
+    return shared is not None and save(path, with_appearance(shared, computer_name, fields))
 
 
 def computer_id(path: str, home: str, computer_name: str) -> str | None:
@@ -583,3 +688,45 @@ def root_playlists(root: str) -> str:
     for problem in problems:
         log.warning("%s: %s", path, problem)
     return folder
+
+
+# ---------- the root's own settings.json: where saved lyrics go (R13.11) ----------
+
+LYRICS_SAVE = ("lrc", "tags", "both")  # R13.11: beside the song as .lrc (the default), its tags
+
+
+def parse_root_lyrics(text: str) -> tuple[str, tuple[str, ...]]:
+    """The `lyrics` group's `save` in the root's settings.json, `text` (R13.11, A2.10): where saved
+    lyrics go, one of LYRICS_SAVE, read in any case and with spaces around it; what can't be one is
+    named in the problems and takes the default, `lrc`. (save, problems)."""
+    try:
+        data = json.loads(text.removeprefix("\ufeff"))
+    except ValueError:
+        return LYRICS_SAVE[0], ("it isn't JSON: saved lyrics go beside the songs as .lrc",)
+    if not isinstance(data, dict):
+        return LYRICS_SAVE[0], ("it isn't a JSON object: saved lyrics go beside the songs",)
+    group = data.get("lyrics", {})
+    if not isinstance(group, dict):
+        return LYRICS_SAVE[0], (f"lyrics isn't a group: {group!r}",)
+    value = group.get("save", LYRICS_SAVE[0])
+    if isinstance(value, str) and value.strip().lower() in LYRICS_SAVE:
+        return value.strip().lower(), ()
+    return LYRICS_SAVE[0], (f"lyrics.save isn't lrc, tags or both: {value!r}; lrc",)
+
+
+def root_lyrics(root: str) -> str:
+    """Where the root's saved lyrics go (`parse_root_lyrics`) from its settings.json; `lrc` when it
+    has none or it can't be read, each problem logged."""
+    path = root_path(root)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return LYRICS_SAVE[0]
+    except OSError as e:
+        log.warning("couldn't read %s: %s; saved lyrics go beside the songs", path, e)
+        return LYRICS_SAVE[0]
+    save, problems = parse_root_lyrics(text)
+    for problem in problems:
+        log.warning("%s: %s", path, problem)
+    return save

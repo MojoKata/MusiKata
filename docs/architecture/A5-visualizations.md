@@ -28,7 +28,12 @@ frames a second costs the CPU little more than the arithmetic of A5.2.
   into a perspective landscape: depth scales a slice's width and height towards a vanishing
   point and moves it up towards the horizon. Slices are drawn back to front, each as a filled
   strip in the background colour (which hides what is behind it) under a line strip in its
-  colour, the colour stepping from cyan at the front to violet at the back.
+  colour, the colour stepping from cyan at the front to violet at the back. It too is one node: a
+  triangle strip of every slice, each line a thin band of triangles about its points (the scene
+  graph draws lines one pixel wide at most). Where Qt Quick renders in software, the same slices
+  are painted into an image (`QPainter`) shown by one image node, made at the first render: the
+  software renderer places a node added under one it has drawn already without the item's place,
+  so no node is added later, there or in the waveform's rectangles.
 
 A5.4. **Why not Qt Quick 3D or Qt Graphs.** Both could draw a 3D surface, but they add large
 modules to every download (A6.3), their look would need much undoing to match R6.2, and the

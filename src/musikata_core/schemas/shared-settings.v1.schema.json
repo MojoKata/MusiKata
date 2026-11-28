@@ -249,16 +249,31 @@
             "light"
           ]
         },
+        "visualization": {
+          "enum": [
+            "waveform",
+            "analyzer",
+            "none"
+          ],
+          "description": "Now Playing's visualization (R11.4.5)"
+        },
         "analyzer_bands": {
           "enum": [
             48,
             96,
             128
-          ]
+          ],
+          "description": "The 3D analyzer's bands (R11.3.1)"
         },
         "analyzer_seconds": {
           "type": "number",
-          "exclusiveMinimum": 0
+          "minimum": 1,
+          "maximum": 12,
+          "description": "The seconds the 3D analyzer's landscape holds, its speed (R11.3.1): the gear's 6, 3 and 1.5 are 0.5x, 1x and 2x"
+        },
+        "lyrics": {
+          "type": "boolean",
+          "description": "Now Playing's Lyrics switch, on or off (R17.3)"
         },
         "tint": {
           "type": "boolean"

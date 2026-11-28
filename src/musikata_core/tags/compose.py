@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import cast
 
+from .. import lyrics as lrc
 from . import parse
 from .fields import Picture, Tags
 
@@ -21,7 +22,7 @@ from .fields import Picture, Tags
 TEXT = ("title", "artist", "album", "albumartist", "composer", "comment", "artistsort",
         "albumartistsort", "albumsort")  # fmt: skip
 NUMBERS = ("track", "tracktotal", "disc", "disctotal")
-FIELDS = (*TEXT, *NUMBERS, "year", "genres", "compilation", "rating", "cover", "others")
+FIELDS = (*TEXT, *NUMBERS, "year", "genres", "compilation", "rating", "lyrics", "cover", "others")
 PICTURES = ("cover", "others")  # the fields that are pictures, which Tags doesn't hold
 LATIN1 = "latin1"  # not a field: the text fields a change writes as Latin-1 (A3.6; Undo's)
 ID3_KINDS = ("mp3", "wav", "aiff")  # the kinds whose tags are ID3, where text has an encoding
@@ -43,7 +44,8 @@ def normalize(changes: Mapping[str, object]) -> dict[str, object]:
     a pair (year, full date or None); genres each once, as parse.genres reads them; the rating
     0 to 5, 0 cleared; the cover a Picture, or None to remove it; `others`, the pictures a song
     has but its front cover (R5.3: none, to remove them; an undo's, to put them back), a tuple of
-    Pictures; `latin1` (LATIN1), not a field, the text fields an ID3 tag is to hold as Latin-1, as
+    Pictures; the lyrics (R17.5) text as lyrics.tag_text makes it, None to remove them; `latin1`
+    (LATIN1), not a field, the text fields an ID3 tag is to hold as Latin-1, as
     it did before a save Undo puts back (A3.6), in TEXT's order. Raises ValueError for a field
     that isn't one, or a value of the wrong kind: a caller's mistake, not the file's."""
     out: dict[str, object] = {}
@@ -77,6 +79,10 @@ def normalize(changes: Mapping[str, object]) -> dict[str, object]:
             if stars > 5:
                 raise ValueError(f"a rating is 0 to 5 stars, not {value!r}")
             out[name] = stars
+        elif name == "lyrics":
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"lyrics are text, not {value!r}")
+            out[name] = lrc.tag_text(value)
         elif name == "cover":
             if value is not None and not isinstance(value, Picture):
                 raise ValueError(f"a cover is a Picture, not {value!r}")
@@ -255,6 +261,9 @@ def vorbis(change: Change, before: Tags) -> dict[str, list[str]]:
         stars = int(change["rating"])  # type: ignore[call-overload]
         out["RATING"] = [str(stars * 20)] if stars else []
         out["FMPS_RATING"] = [f"{stars / 5:.1f}"] if stars else []
+    if "lyrics" in change:  # LYRICS, timed lyrics as LRC text (A7.6); the other spellings go
+        out["LYRICS"] = _values(change["lyrics"])
+        out.update(SYNCEDLYRICS=[], UNSYNCEDLYRICS=[])
     return out
 
 
@@ -266,7 +275,8 @@ def id3(change: Change, before: Tags) -> dict[str, list[str]]:
     it. Track and disc are TRCK and TPOS as "4/10" ("4" without a total, "0/10" without a number);
     the year is TDRC, a full date when there is one, and Mutagen writes it as TYER and TDAT in
     ID3v2.3; the older TYER, TDAT and TIME go when it changes. The comment (COMM), the rating
-    (POPM) and the cover (APIC) are write.py's, as frames of their own kind."""
+    (POPM), the lyrics (USLT, SYLT: `id3_lyrics`) and the cover (APIC) are write.py's, as frames of
+    their own kind."""
     out: dict[str, list[str]] = {}
     for name, frame in parse.ID3.items():
         if name in change:
@@ -283,6 +293,15 @@ def id3(change: Change, before: Tags) -> dict[str, list[str]]:
     if "compilation" in change:
         out["TCMP"] = ["1"] if change["compilation"] else []
     return out
+
+
+def id3_lyrics(change: Change) -> tuple[str | None, list[tuple[str, int]] | None]:
+    """The lyrics a change writes into an ID3 tag (A7.6): USLT's text (the lyrics as written, LRC
+    text when timed, which reads back timed, R17.1) and, for timed lyrics, SYLT's lines (text,
+    milliseconds) for players that read only SYLT; (None, None) removes both."""
+    text = change.get("lyrics")
+    words = text if isinstance(text, str) else None
+    return words, lrc.sylt_of(words)
 
 
 def popm(stars: int) -> int:
@@ -343,7 +362,7 @@ def mp4(change: Change, before: Tags) -> dict[str, object]:
     """The MP4 atoms a change rewrites, each with its new value as Mutagen takes it, None to
     remove it: text atoms a list of strings, trkn and disk a list of one (number, total) pair, 0
     for either missing, cpil True, ©gen one value per genre, the rating the freeform atom
-    `MP4_RATING` as a list of bytes (20 to 100, R10.4)."""
+    `MP4_RATING` as a list of bytes (20 to 100, R10.4), the lyrics ©lyr (A7.6)."""
     out: dict[str, object] = {}
     for name, atom in parse.MP4.items():
         if name in change:
@@ -361,6 +380,8 @@ def mp4(change: Change, before: Tags) -> dict[str, object]:
     if "rating" in change:
         stars = int(change["rating"])  # type: ignore[call-overload]
         out[MP4_RATING] = [str(stars * 20).encode()] if stars else None
+    if "lyrics" in change:
+        out["\xa9lyr"] = _values(change["lyrics"]) or None
     return out
 
 

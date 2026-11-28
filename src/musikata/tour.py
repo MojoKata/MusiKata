@@ -25,6 +25,7 @@ from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
 from .albumart import AlbumArt
+from .analyzeritem import Analyzer
 from .attention import Attention
 from .bridges import Library, Player
 from .dragging import Dragging
@@ -34,9 +35,12 @@ from .encodings import FixEncoding
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .lyrics import Lyrics
+from .nowplayingview import NowPlayingView
 from .organize import OrganizeFiles
 from .removing import Removing
 from .smart import SmartPlaylists
+from .tints import Tints
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
 # MusiKata maximized on a 1920 x 1080 screen (R6.2.1), less what a panel or taskbar takes
@@ -50,9 +54,16 @@ SIZES = (SHOT, DESIGN)
 # is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08). L03 and L07 show the Edit tags
 # panel (R4.2) as their mockups do, open on the songs selected with fields typed into it ("edit");
 # an album's page and an artist's show a search typed into the header over them, as their mockups do
-# (L02, L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the tint by a cover's
-# colour). T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03
-# is Organize files (R12) over Your music folders, on the whole library, as its mockup draws it. The
+# (L02, L11, R2.7); an album's page and Folders' Cards are tinted by their covers' colours (R6.2.2),
+# which are waited for as the covers are. N01, N02 and N03 are Now Playing (R11.4) over Glass
+# Harbor's page, cued at Signal Fires with two songs added, with Waveform (R11.4.1), 3D analyzer
+# (R11.4.2) and No visualization (R11.4.3): paused, as every screen is, so the cover's spectrum has
+# settled to nothing, and the analyzer shows a still landscape of generated spectra, as the mockup
+# draws one (analyzeritem.generated: with nothing heard it would be flat). N04 is N03 with the
+# Lyrics switch on (R17.3): Signal Fires' timed lyrics from the demo library's .lrc, followed as at
+# 1:38 into the song, the place N04 draws (Lyrics.go: the demo library's songs last a second).
+# T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03 is
+# Organize files (R12) over Your music folders, on the whole library, as its mockup draws it. The
 # first queues Glass Harbor, paused at its first song, so every screen after it shows the
 # now-playing bar (R6.5) and the playing album and song marked, with no sound to wait on
 # (Player.go). X03 has no mockup: the Change history panel (R4.9) over Songs, listing the demo
@@ -145,6 +156,52 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "upNext": True,
         },
     ),
+    (
+        "N01-now-playing-waveform",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "waveform",
+        },
+    ),
+    (
+        "N02-now-playing-3d-analyzer",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "analyzer",
+            "landscape": True,
+        },
+    ),
+    (
+        "N03-now-playing-queue",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "none",
+        },
+    ),
+    (
+        "N04-now-playing-lyrics",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "none",
+            "lyrics": {"at": 98},
+        },
+    ),
     ("T02-album-art", {"view": "album", "album": "Glass Harbor", "art": True}),
     ("G01-genres", {"view": "genres", "genreMenu": "Electronic"}),
     ("L09-needs-attention", {"view": "attention", "attention": "copies"}),
@@ -193,6 +250,14 @@ def loading(item: QQuickItem) -> bool:
     return any(loading(child) for child in item.childItems())
 
 
+def analyzers(item: QQuickItem) -> list[Analyzer]:
+    """The 3D analyzers under `item`, shown or not."""
+    found = [item] if isinstance(item, Analyzer) else []
+    for child in item.childItems():
+        found.extend(analyzers(child))
+    return found
+
+
 def _quit(code: int) -> None:
     QGuiApplication.exit(code)
 
@@ -218,6 +283,9 @@ class Tour(QObject):
         smart: SmartPlaylists | None = None,
         organize: OrganizeFiles | None = None,
         removing: Removing | None = None,
+        now: NowPlayingView | None = None,
+        tints: Tints | None = None,
+        lyrics: Lyrics | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -231,6 +299,7 @@ class Tour(QObject):
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
         self.smart, self.organize, self.removing = smart, organize, removing
+        self.now, self.tints, self.lyrics = now, tints, lyrics
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -286,6 +355,12 @@ class Tour(QObject):
             self.organize.go(step)
         if self.removing is not None and "view" in step:
             self.removing.go(step)
+        if self.lyrics is not None and "view" in step:
+            self.lyrics.go(step)
+        if self.now is not None and "view" in step:
+            self.now.go(step)
+            for analyzer in analyzers(self.win.contentItem()):
+                analyzer.go(step)
         self._size = 0
         self._at_size()
 
@@ -318,7 +393,7 @@ class Tour(QObject):
 
     def _settle(self) -> None:
         name = self.steps[self._i][0]
-        if loading(self.win.contentItem()):
+        if loading(self.win.contentItem()) or (self.tints is not None and self.tints.busy):
             if self._waited < PATIENCE:
                 self._waited += POLL
                 QTimer.singleShot(POLL, self._settle)
