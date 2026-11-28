@@ -68,20 +68,29 @@ A4.4. **Gain and the equalizer.**
   EQ Cookbook's formulas), a graphic preset's ten sliders being ten one-octave bells. The bands'
   responses are added on a fine frequency grid, and the sum is turned into one minimum-phase
   filter (by its cepstrum, so it adds no delay), long enough that the lowest and narrowest band
-  is still right: 16,384 samples at 44.1 and 48 kHz, more at higher rates. It is rebuilt when a
-  band changes, crossfaded over 50 ms, and applied block by block with NumPy's FFT: cut into
-  sixteen parts, each block's spectrum kept for the parts after it (uniformly partitioned
-  overlap-save), so a block of 20 ms costs two FFTs of 2,048. No SciPy is needed, and it costs
-  about 1 % of one core. The filter is built and applied on the playback thread, where the
-  samples are made. A change is heard at once, not two seconds on: the ring is taken back to what
-  the device has taken, and what the equalizer was given from there, which it keeps, is filtered
-  again with the new filter crossfaded in.
+  is still right, within 0.5 dB of its curve from 20 Hz to 20 kHz: four time constants of its
+  slowest band's biquad (its pole, or a zero as near the unit circle), rounded up to a power of
+  two. That is 16,384 samples at 44.1 and 48 kHz for every built-in preset and most others, at
+  least, and 65,536 for R19.1's extreme (a +12 dB bell, Q 10, at 20 Hz; 32,768 at 62 Hz); twice
+  those up to 96 kHz, four times up to 192 kHz. It is rebuilt when a band changes, crossfaded over
+  50 ms, and applied block by block with NumPy's FFT: cut into parts of 1,024 samples at 44.1 and
+  48 kHz (sixteen for 16,384, 64 for 65,536), each block's spectrum kept for the parts after it
+  (uniformly partitioned overlap-save), so a block of 20 ms costs two FFTs of 2,048 and a sum over
+  the parts. No SciPy is needed; at 44.1 kHz in stereo it costs 0.9 % of one core for 16,384
+  samples and 1.5 % for 65,536 (3 % at 96 kHz, 8 % at 192 kHz for the longest). The filter is
+  built and applied on the playback thread, where the samples are made: a build takes 3 to 8 ms
+  at 44.1 and 48 kHz (18 ms at 96 kHz, 45 ms at 192 kHz for the longest), while the device plays
+  from its own 250 ms buffer, and the ring's two seconds are taken back only once it is built. A
+  change is heard at once, not two seconds on: the ring is taken back to what the device has
+  taken, and what the equalizer was given from there, which it keeps, is filtered again with the
+  new filter crossfaded in.
 - **Parametric to graphic** (R19.6): the ten slider gains are the least-squares fit of the ten
   bells to the parametric curve, in dB, sampled every twelfth of an octave and held to ±12 dB; how
   close they come is the largest difference between the two curves.
 - **Never clipping** (R19.1): when a filter is built, its curve's largest boost is known. When the
   preamp plus that boost is above 0 dB, the level is lowered by the difference, ramped with the
-  filter's 50 ms crossfade, and the panel shows by how much. A look-ahead peak limiter of 5 ms then
+  filter's 50 ms crossfade, and the panel shows by how much: the engine says the headroom of each
+  filter it builds, at the device's rate, and the panel shows that one. A look-ahead peak limiter of 5 ms then
   catches the few peaks the filter's phase still pushes over full scale; on ordinary music it seldom
   acts. Its look-ahead is taken from what is decoded ahead: the last 5 ms given are held until what
   follows them is known, or the stream ends, so the sound and the analyzer (A4.3) are not delayed.

@@ -18,7 +18,7 @@ from fakes import FakeClock, FakeEngine, fill
 
 from musikata import bridges, player
 from musikata_core import db, nowplaying, settings
-from musikata_core.audio import presets
+from musikata_core.audio import eq, presets
 
 SONGS = [
     {"path": "a.flac", "title": "A", "genres": ("Ambient", "Classical")},
@@ -172,6 +172,30 @@ def test_bands_set_are_heard_at_once_not_kept_and_the_headroom_follows(make, ind
     qtbot.waitUntil(lambda: kept.calls == [{"preset": "Flat"}], timeout=WAIT)
 
 
+def test_the_headroom_shown_is_the_one_the_engine_applies_at_the_devices_rate(make, index, qtbot):
+    """R19.1: the number under the preamp is the filter's as built at the device's rate; before
+    any filter is built, at 48 kHz."""
+    p, engine, _ = make(on=True, preset="Flat")
+    started(p, engine, qtbot, ids(index))
+    # a high shelf near 20 kHz boosts more at 44.1 kHz than at 48 (its top is past Nyquist)
+    shelf = [{"type": "high-shelf", "freq": 19_000, "gain": 12, "q": 4}]
+    p.setBands(-12, shelf)
+    tone = told(engine, qtbot, 4)[2][1]
+    at_48, at_44 = eq.headroom(tone, 48_000), eq.headroom(tone, 44_100)
+    assert at_48 != pytest.approx(at_44, abs=0.01)
+    assert p.property("headroom") == pytest.approx(at_48)  # none built yet
+    changed = []
+    p.equalizerChanged.connect(lambda: changed.append(True))
+    engine.equalized.emit(tone, 44_100, at_44)
+    assert changed and p.property("headroom") == pytest.approx(at_44)
+    p.setBands(-12, [{**shelf[0], "gain": 11}])  # not built yet: worked out at the device's rate
+    other = told(engine, qtbot, 6)[4][1]
+    assert p.property("headroom") == pytest.approx(eq.headroom(other, 44_100))
+    engine.equalized.emit(other, 48_000, 0.5)  # another device: what was said before is let go
+    p.setBands(-12, shelf)
+    assert p.property("headroom") == pytest.approx(at_48)
+
+
 def test_a_file_outside_the_index_plays_the_preset_chosen(make, tmp_path, qtbot):
     p, engine, _ = make(on=True, preset="Loudness", by_genre=True)
     p.play_file(str(tmp_path / "loose.flac"))
@@ -232,6 +256,12 @@ def test_the_engine_plays_the_tone_told_and_a_change_while_it_plays_is_built_and
         p.choosePreset("Loudness")
         qtbot.waitUntil(lambda: playing_tone() == tone_of("Loudness"), timeout=WAIT)
         assert engine.designs.built == 2
+        # the headroom shown is the one the engine applies, at the device's rate
+        p.setBands(-12, [{"type": "high-shelf", "freq": 19_000, "gain": 12, "q": 4}])
+        tone = p.equalizer.tone([], p._requested)
+        rate = engine._feed.stream.rate
+        qtbot.waitUntil(lambda: p._applied.get(tone) is not None, timeout=WAIT)
+        assert p.property("headroom") == pytest.approx(eq.headroom(tone, rate)) and p._rate == rate
         p.setEqualizerOn(False)
         qtbot.waitUntil(lambda: engine._feed is not None and playing_tone() is None, timeout=WAIT)
     finally:

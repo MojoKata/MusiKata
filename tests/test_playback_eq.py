@@ -159,11 +159,23 @@ def test_the_level_held_down_is_the_preamp_plus_the_largest_boost_when_over_0_db
 # ---------- the filter ----------
 
 
-def test_the_filter_is_16384_taps_at_44_1_and_48_khz_and_lasts_as_long_at_higher_rates():
-    assert [eq.taps_for(r) for r in (8000, 44_100, 48_000)] == [16_384] * 3
-    assert [eq.taps_for(r) for r in (88_200, 96_000, 176_400, 192_000, 384_000)] == [
-        32_768, 32_768, 65_536, 65_536, 131_072
+def test_the_filter_is_as_long_as_its_lowest_narrowest_band_needs_from_16384_taps_up():
+    """A4.4: 16,384 taps at 44.1 and 48 kHz at least, as long as a band's ringing needs (four of
+    its time constants, a power of two), and at most what R19.1's extreme band needs."""
+    assert [eq.shortest(r) for r in (8000, 44_100, 48_000, 96_000, 192_000)] == [
+        16_384, 16_384, 16_384, 32_768, 65_536
     ]  # fmt: skip
+    assert [eq.longest(r) for r in (44_100, 48_000, 96_000, 192_000)] == [
+        65_536, 65_536, 131_072, 262_144
+    ]  # fmt: skip
+    assert all(eq.taps_for(RATE, p.bands) == 16_384 for p in presets.BUILT_IN)
+    assert eq.taps_for(RATE) == 16_384
+    lengths = [eq.taps_for(RATE, [eq.Band("bell", f, 12, 10)]) for f in (20, 31, 62, 125)]
+    assert lengths == [65_536, 65_536, 32_768, 16_384]
+    assert eq.taps_for(RATE, [eq.Band("bell", 20, -12, 10)]) == 65_536  # a narrow notch rings too
+    band = eq.Band("bell", 62, 12, 10)
+    assert eq.taps_for(RATE, [band]) >= eq.RINGING * eq.ringing(band, RATE)
+    assert eq.taps_for(RATE, [eq.Band("low-cut", 20, 0, 10)]) <= eq.longest(RATE)
 
 
 def magnitude_db(design, freqs):
@@ -186,21 +198,49 @@ def test_each_built_in_presets_filter_has_its_curve_with_its_preamp(name):
 
 @pytest.mark.parametrize(
     "band",
-    [eq.Band("bell", 62, 12, 4), eq.Band("bell", 16_000, -12, 0.1), eq.Band("low-shelf", 20, 12),
+    [eq.Band("bell", 20, 12, 10), eq.Band("bell", 31, 12, 10), eq.Band("bell", 62, 12, 10),
+     eq.Band("bell", 20, -12, 10), eq.Band("bell", 16_000, -12, 0.1), eq.Band("low-shelf", 20, 12),
      eq.Band("high-shelf", 20_000, -12, 4), eq.Band("low-cut", 200, 0, 0.5),
-     eq.Band("high-cut", 5000, 0, 3)],
+     eq.Band("low-cut", 20, 0, 10), eq.Band("high-cut", 5000, 0, 3)],
 )  # fmt: skip
-def test_a_filter_of_each_band_type_at_its_extremes_has_its_curve(band):
-    """A narrow, low band is still right at 16,384 taps (A4.4); the level held down by
-    its boost (R19.1) is in the filter, so its loudest is full scale."""
-    tone = eq.Tone((band,), 0.0)
-    design = eq.design(tone, RATE)
+@pytest.mark.parametrize("rate", [44_100, 48_000])
+def test_a_filter_of_each_band_type_even_r19_1s_extreme_is_within_half_a_db_of_its_curve(
+    band, rate
+):
+    """A4.4: long enough that the lowest and narrowest band is still right, "right" being within
+    TOLERANCE_DB (0.5 dB) from 20 Hz to 20 kHz; the level held down by its boost (R19.1) is in
+    the filter, so its loudest is full scale."""
+    design = eq.design(eq.Tone((band,), 0.0), rate)
     freqs = np.concatenate([np.geomspace(20, 20_000, 300), [min(band.freq, 20_000)]])
-    want = np.maximum(eq.curve_db([band], freqs, RATE) - design.headroom, -60)
+    want = np.maximum(eq.curve_db([band], freqs, rate) - design.headroom, -60)
     got = np.maximum(magnitude_db(design, freqs), -60)
-    assert np.abs(got - want).max() < 0.5
-    assert design.headroom == pytest.approx(max(0.0, eq.largest_boost([band], RATE)))
-    assert magnitude_db(design, freqs).max() < 0.05
+    assert np.abs(got - want).max() < eq.TOLERANCE_DB
+    assert design.headroom == eq.headroom(eq.Tone((band,), 0.0), rate)
+    assert magnitude_db(design, freqs).max() < eq.TOLERANCE_DB
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("rate", [96_000, 192_000])
+def test_r19_1s_extreme_band_is_within_half_a_db_at_higher_rates_too(rate):
+    for band in (eq.Band("bell", 20, 12, 10), eq.Band("bell", 31, 12, 10),
+                 eq.Band("bell", 20, -12, 10)):  # fmt: skip
+        design = eq.design(eq.Tone((band,), 0.0), rate)
+        freqs = np.concatenate([np.geomspace(20, 20_000, 300), [band.freq]])
+        want = eq.curve_db([band], freqs, rate) - design.headroom
+        assert np.abs(magnitude_db(design, freqs) - want).max() < eq.TOLERANCE_DB
+
+
+def test_the_longest_filter_applied_a_block_at_a_time_is_one_convolution():
+    design = eq.design(eq.Tone((eq.Band("bell", 20, 12, 10),), 0.0), RATE)
+    assert len(design.taps) == eq.longest(RATE)
+    x = noise(90_000, seed=9)
+    e = eq.Equalizer(RATE, 2)
+    e.schedule(0, design, ramped=False)
+    e.schedule(40_000, built("Rock"))  # a short one after it, crossfaded: the parts differ
+    y = through(e, x, 882)
+    want = scheduled(x, (0, design, False), (40_000, built("Rock"), True))
+    assert np.array_equal(y, want)
+    assert np.abs(y[:40_000] - filtered(design, x)[:40_000]).max() < 1e-6
 
 
 def test_the_filter_measured_with_sines_through_the_equalizer_gives_each_presets_curve():

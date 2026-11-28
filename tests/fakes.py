@@ -90,6 +90,7 @@ class FakeEngine(QObject):
     ended = Signal(int)
     stopped = Signal(int)
     failed = Signal(int, str)
+    equalized = Signal(object, int, float)  # a tone's filter built: its rate and headroom
 
     def __init__(self):
         super().__init__()

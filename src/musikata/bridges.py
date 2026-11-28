@@ -29,7 +29,7 @@ from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
 from musikata_core import albums, db, genres, nowplaying, scanner, settings, watch, workers
-from musikata_core.audio import gain, presets
+from musikata_core.audio import eq, gain, presets
 from musikata_core.audio.eq import Band, Tone
 from musikata_core.audio.played import Listening
 from musikata_core.audio.queue import Entry, Queue
@@ -1639,7 +1639,8 @@ class Player(QObject):
     (`equalizerOn`, `setEqualizerOn`), the preset playing and why (`equalizerPreset`,
     `equalizerChosenBy`), choosing one (`choosePreset`), its bands set and heard before they are
     saved (`setBands`), and how far the level is held down to keep from clipping (`headroom`,
-    R19.1). On or off and the preset chosen are kept in the shared settings."""
+    R19.1), as the engine says the filter it built at the device's rate applies it. On or off and
+    the preset chosen are kept in the shared settings."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
@@ -1678,6 +1679,8 @@ class Player(QObject):
         self._told_tone: Tone | None = None  # the tone the engine was told for the song playing
         self._follow_tone: tuple[int, int | None, Tone | None] = (0, None, None)  # and the
         # song told to follow it: its ticket, song and tone
+        self._rate = 0  # the device's rate, as the engine last said building a filter (0: none)
+        self._applied: dict[Tone, float] = {}  # the headroom of each filter it built, by tone
         self._settings = playback if playback is not None else settings.Playback()
         self._listening = Listening(clock if clock is not None else SystemClock())
         self._counts: PlayCounts | None = None
@@ -1729,6 +1732,7 @@ class Player(QObject):
         self._set_gain.connect(self._engine.set_volume)
         self._choose.connect(self._engine.choose_device)
         self._equalize.connect(self._engine.equalize)
+        self._engine.equalized.connect(self._on_equalized)
         self._choose.emit(self._settings.device or "")  # heard as the thread starts
         self._engine.began.connect(self._on_began)
         self._engine.joined.connect(self._on_joined)
@@ -2506,8 +2510,24 @@ class Player(QObject):
     def _get_equalizer_chosen_by(self) -> str:
         return self._pick().why
 
+    @Slot(object, int, float)
+    def _on_equalized(self, tone: Tone, rate: int, headroom: float) -> None:
+        """The engine built `tone`'s filter at the device's `rate`, holding the level down by
+        `headroom`: what the panel shows (R19.1)."""
+        if rate != self._rate:
+            self._rate, self._applied = rate, {}
+        self._applied[tone] = headroom
+        self.equalizerChanged.emit()
+
     def _get_headroom(self) -> float:
-        return presets.headroom_of(self.equalizer.preset(self._pick().preset))
+        """The headroom of the preset playing as the engine applies it: as it said for a filter it
+        built, else worked out at the device's rate it last said; at 48 kHz before it has built
+        any."""
+        preset = self.equalizer.preset(self._pick().preset)
+        tone = presets.tone(preset)
+        if tone in self._applied:
+            return self._applied[tone]
+        return eq.headroom(tone, self._rate) if self._rate else presets.headroom_of(preset)
 
     # ---------- what the engine says ----------
 
@@ -2731,5 +2751,6 @@ class Player(QObject):
     equalizerPreset = QtProperty(str, _get_equalizer_preset, notify=equalizerChanged)  # playing
     # why it plays (R19.4): "chosen" in the panel, by its "genre", or for this "song"
     equalizerChosenBy = QtProperty(str, _get_equalizer_chosen_by, notify=equalizerChanged)
-    # dB the level is held down to keep from clipping (R19.1): "−2.7 dB more"; 0 when it isn't
+    # dB the level is held down to keep from clipping (R19.1): "−2.7 dB more"; 0 when it isn't;
+    # as the engine applies it, at the device's rate
     headroom = QtProperty(float, _get_headroom, notify=equalizerChanged)

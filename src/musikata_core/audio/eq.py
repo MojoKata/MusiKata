@@ -7,14 +7,19 @@ presets.py's.
   (`response_db`), and a preset's curve is their sum, in dB (`curve_db`).
 - **The filter** (`design`): the curve, with the preamp and the level held down by the headroom,
   on a fine grid (four times the filter's length), made one minimum-phase FIR by its cepstrum, so
-  it adds no delay: 16,384 taps at 44.1 and 48 kHz, twice that up to 96 kHz, and so on.
+  it adds no delay. It is as long as its lowest, narrowest band needs to be within 0.5 dB of its
+  curve (`taps_for`: four of that band's time constants): 16,384 taps at 44.1 and 48 kHz for most
+  presets, up to 65,536 for R19.1's extreme (a +12 dB bell, Q 10, at 20 Hz); twice those up to
+  96 kHz, and so on.
 - **Never clipping** (R19.1): when the preamp plus the curve's largest boost is above 0 dB, the
   level is held down by the difference (`headroom`), built into the filter, so a change of it is
   crossfaded with the filter. A look-ahead peak limiter of 5 ms then catches what the filter's
   phase still pushes past full scale.
-- **Applying it** (`Equalizer`): block by block with NumPy's FFT, the filter cut into sixteen
-  parts and each block's spectrum kept for the parts after it (uniformly partitioned overlap-save,
-  the overlap-add of A4.4 done a part at a time), so a block costs two short FFTs, whatever its
+- **Applying it** (`Equalizer`): block by block with NumPy's FFT, the filter cut into parts of
+  a block each (1,024 frames at 44.1 and 48 kHz: sixteen for the shortest filter, 64 for the
+  longest) and each block's spectrum kept for the parts after it (uniformly partitioned
+  overlap-save, the overlap-add of A4.4 done a part at a time), so a block costs two short FFTs
+  and a sum over the parts, whatever its
   length. What it is given is kept for a while, so a change can be heard at once: the stream is
   taken back to where the device has got to and what was given from there is filtered again
   (`retune`), the old filter crossfaded into the new over 50 ms; a change at a song's join is
@@ -44,8 +49,12 @@ FREQS = (20.0, 20_000.0)  # R19.1's ranges: a band's frequency, in Hz
 GAINS = (-12.0, 12.0)  # a band's gain, and the preamp, in dB
 QS = (0.1, 10.0)  # a band's Q
 
-TAPS = 16_384  # the filter's length at 44.1 and 48 kHz (A4.4): the lowest, narrowest band right
-PARTS = 16  # the parts it is cut into for applying it, each a block's FFT
+TAPS = 16_384  # the filter's shortest length at 44.1 and 48 kHz (A4.4)
+PARTS = 16  # a filter of the shortest length is cut into this many parts, each a block's FFT
+RINGING = 4.0  # a filter lasts at least this many of its slowest band's time constants: then
+# R19.1's extreme band (a +12 dB bell, Q 10, at 20 Hz) is within TOLERANCE_DB of its curve
+TOLERANCE_DB = 0.5  # how near its curve a filter's magnitude is, from 20 Hz to 20 kHz
+EXTREMES = (20.0, 10.0, 12.0)  # R19.1's lowest frequency, highest Q, largest gain
 DESIGN_GRID = 4  # the curve is laid on a grid of this many times the filter's length
 FLOOR_DB = -120.0  # how far down the curve is followed (a cut's response falls without end)
 FADE = 16  # the filter's last 1/FADE is faded out, so cutting it off adds no ripple
@@ -79,12 +88,41 @@ class Tone:
     preamp: float = 0.0
 
 
-def taps_for(rate: int) -> int:
-    """The filter's length at `rate`: 16,384 up to 48 kHz, doubled for each doubling above it, so
-    it lasts as long whatever the rate (A4.4)."""
+def shortest(rate: int) -> int:
+    """The filter's shortest length at `rate`: 16,384 up to 48 kHz, doubled for each doubling
+    above it, so it lasts as long whatever the rate."""
     if rate <= 48_000:
         return TAPS
     return TAPS << math.ceil(math.log2(rate / 48_000))
+
+
+def ringing(band: Band, rate: int) -> float:
+    """How long `band`'s response rings, in samples at `rate`: the time constant of the root of its
+    biquad nearest the unit circle, -1 / ln |r|: its slowest pole, or a zero as near, which a
+    narrow cut's is and which the minimum-phase filter's cepstrum rings with. A bell boosting at
+    low frequency with a high Q rings longest, and a bell cutting there as long."""
+    b0, b1, b2, a0, a1, a2 = _coefficients(band, rate)
+    radius = float(np.abs(np.roots([a0, a1, a2])).max())
+    if band.type not in CUTS:  # a cut's zeros are on the circle, at 0 Hz or Nyquist: no ringing
+        radius = max(radius, float(np.abs(np.roots([b0, b1, b2])).max()))
+    return -1 / math.log(min(radius, 1 - 1e-12))
+
+
+def longest(rate: int) -> int:
+    """The filter's longest length at `rate`: what R19.1's extreme band of any type needs."""
+    f, q, g = EXTREMES
+    worst = max(ringing(Band(t, f, s * g, q), rate) for t in TYPES for s in (1, -1))
+    return max(shortest(rate), 1 << math.ceil(math.log2(RINGING * worst)))
+
+
+def taps_for(rate: int, bands: Sequence[Band] = ()) -> int:
+    """The filter's length for `bands` at `rate` (A4.4): long enough that the lowest and narrowest
+    band is still right (RINGING of its slowest band's time constants, a power of two), and never
+    shorter than `shortest`: 16,384 at 44.1 and 48 kHz for most presets, up to 65,536 for R19.1's
+    extreme."""
+    need = max((ringing(b, rate) for b in bands), default=0.0) * RINGING
+    length = 1 << max(0, math.ceil(math.log2(max(need, 1.0))))
+    return min(longest(rate), max(shortest(rate), length))
 
 
 def _coefficients(band: Band, rate: int) -> tuple[float, float, float, float, float, float]:
@@ -176,7 +214,8 @@ def headroom(tone: Tone, rate: int) -> float:
 @dataclass(frozen=True, eq=False)
 class Design:
     """A filter built for `tone` at `rate`: its taps (the level held down included), each part's
-    spectrum for applying it (`parts`, PARTS × the block's FFT), and the dB it is held down by
+    spectrum for applying it (`parts`, a block's FFT each, the block `shortest(rate)` / PARTS),
+    and the dB it is held down by
     (`headroom`). Told apart by identity: a song's filter is the same one as the last song's when
     its bands are."""
 
@@ -186,19 +225,14 @@ class Design:
     parts: NDArray[np.complex128]
     headroom: float
 
-    @property
-    def block(self) -> int:
-        """The frames of each part, and of each block it is applied to."""
-        return len(self.taps) // PARTS
-
 
 def design(tone: Tone, rate: int) -> Design:
     """The minimum-phase filter for `tone` at `rate` (A4.4): the curve, plus the preamp and less
     the headroom, laid on a grid four times the filter's length; its log turned into the real
     cepstrum, folded onto its causal half (the minimum-phase one, which adds no delay) and made a
-    spectrum again; that spectrum's impulse response cut to `taps_for(rate)` with its end faded.
-    Each part's spectrum is taken for applying it."""
-    taps = taps_for(rate)
+    spectrum again; that spectrum's impulse response cut to `taps_for(rate, bands)` with its end
+    faded. Each part's spectrum is taken for applying it."""
+    taps = taps_for(rate, tone.bands)
     n = taps * DESIGN_GRID
     held = headroom(tone, rate)
     level = tone.preamp - held
@@ -210,8 +244,8 @@ def design(tone: Tone, rate: int) -> Design:
     h = np.fft.irfft(np.exp(np.fft.rfft(cepstrum)), n)[:taps]
     fade = taps // FADE
     h[taps - fade :] *= 0.5 + 0.5 * np.cos(np.pi * (np.arange(fade) + 1) / fade)
-    block = taps // PARTS
-    parts = np.fft.rfft(h.reshape(PARTS, block), n=2 * block, axis=1)
+    block = shortest(rate) // PARTS
+    parts = np.fft.rfft(h.reshape(taps // block, block), n=2 * block, axis=1)
     return Design(tone, rate, h, parts, held)
 
 
@@ -303,8 +337,8 @@ class Equalizer:
 
     def __init__(self, rate: int, channels: int, place: int = 0, keep: int | None = None) -> None:
         self.rate, self.channels = rate, channels
-        taps = taps_for(rate)
-        self._block = taps // PARTS
+        taps = longest(rate)
+        self._block = shortest(rate) // PARTS
         self._ramp = frames_of(RAMP_SECONDS, rate)
         self._look = frames_of(LOOK_AHEAD, rate)
         self._hold = frames_of(HOLD, rate)
@@ -318,7 +352,11 @@ class Equalizer:
         self._redo = np.zeros((0, channels), np.float32)  # given, to be filtered again
         self._active = False  # a filter is in use: blocks are filtered, the look-ahead held
         self._grid = place  # where the block being filtered starts
-        self._spectra = np.zeros((PARTS - 1, channels, self._block + 1), np.complex128)
+        # the spectra of the blocks before the one filtered, as many as the longest filter's parts
+        # but one, in a ring: `_head` the last block's
+        self._depth = taps // self._block - 1
+        self._spectra = np.zeros((self._depth, channels, self._block + 1), np.complex128)
+        self._head = 0
         self._tails: dict[Design, NDArray[np.complex128]] = {}
         self._spectrum: NDArray[np.complex128] | None = None
 
@@ -452,11 +490,12 @@ class Equalizer:
         self._active = True
         self._grid = at
         self._tails, self._spectrum = {}, None
-        b = self._block
-        before = self._given.read(at - PARTS * b, at)
-        for k in range(PARTS - 1):  # k: the block k + 1 before the one at `at`
-            end = len(before) - k * b
-            self._spectra[k] = np.fft.rfft(before[end - 2 * b : end].T, axis=1)
+        b, depth = self._block, self._depth
+        before = self._given.read(at - (depth + 1) * b, at)
+        segments = np.stack([before[len(before) - (k + 2) * b : len(before) - k * b]
+                             for k in range(depth)])  # fmt: skip
+        self._spectra[:] = np.fft.rfft(segments.transpose(0, 2, 1), axis=2)  # k: block k + 1 back
+        self._head = 0
 
     def _back(self, at: int) -> None:
         """The filter as it was at `at`, for the stream given from there again."""
@@ -476,8 +515,8 @@ class Equalizer:
             self._wet.write(start, self._filtered(start, stop))
             if stop == self._grid + b:  # the block is whole: its spectrum goes to the parts after
                 assert self._spectrum is not None
-                self._spectra = np.roll(self._spectra, 1, axis=0)
-                self._spectra[0] = self._spectrum
+                self._head = (self._head - 1) % self._depth
+                self._spectra[self._head] = self._spectrum
                 self._grid += b
                 self._tails = {}
             start = stop
@@ -515,7 +554,9 @@ class Equalizer:
         """What the blocks before this one give through the rest of `design`'s parts."""
         tail = self._tails.get(design)
         if tail is None:
-            tail = self._tails[design] = np.einsum("kcf,kf->cf", self._spectra, design.parts[1:])
+            back = (self._head + np.arange(len(design.parts) - 1)) % self._depth
+            tail = np.einsum("kcf,kf->cf", self._spectra[back], design.parts[1:])
+            self._tails[design] = tail
         return tail
 
     def _emit(self, final: bool) -> Block:
