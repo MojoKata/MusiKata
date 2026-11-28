@@ -293,6 +293,27 @@ def _memory() -> str:
     return "MB " + ", ".join(held)
 
 
+def _watch() -> None:
+    """While the tour runs, every second its memory when it passes 1 GB, and then every thread's
+    stack: CI's tour of #95 grew until it was killed, at N01, in seconds."""
+    import faulthandler
+    import threading
+
+    def look() -> None:
+        while True:
+            time.sleep(1)
+            held = _memory()
+            if any(
+                int(v.split()[-1]) > 1024 for v in held[3:].split(", ") if v.split()[-1].isdigit()
+            ):
+                print(
+                    f"the tour grows: {time.monotonic():.1f}, {held}", file=sys.stderr, flush=True
+                )
+                faulthandler.dump_traceback(sys.stderr)
+
+    threading.Thread(target=look, daemon=True, name="tour-watch").start()
+
+
 def _quit(code: int) -> None:
     QGuiApplication.exit(code)
 
@@ -330,6 +351,7 @@ class Tour(QObject):
         mine = screens(state_of(library))
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
+        _watch()
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
