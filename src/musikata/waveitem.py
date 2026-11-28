@@ -14,7 +14,7 @@ into the node as it syncs; the render thread runs no more Python than that copy.
 
 Qt Quick's software renderer (offscreen, as the tests and the tour draw, and where there is no
 GPU) draws no custom geometry, so there each bar is a rectangle node (`createRectangleNode`) in
-its colour: the same bars, square-ended.
+its colour: the same bars, square-ended, all made with the node that holds them.
 
 The arithmetic (`slots`, `capsules`, `gradient`) is plain NumPy, tested without a window."""
 
@@ -323,20 +323,19 @@ class Waveform(QQuickItem):
         return node
 
     def _software_node(self, old: QSGNode | None) -> QSGNode:
-        """A node holding a rectangle node per bar (the software renderer's)."""
+        """A node holding a rectangle node per bar (the software renderer's), all made with it:
+        the software renderer places a node added under one it has drawn already without the
+        item's place, so when the bars' number changes a new node is made with all of them, and
+        Qt deletes the old one with its rectangles."""
         window = self.window()
         root = old
-        if root is None:
+        if root is None or len(self._software) != len(self._rects):
             root = QSGNode()
-            self._software = []  # what was made before went with the old node
-        while len(self._software) < len(self._rects):
-            rect = window.createRectangleNode()
-            root.appendChildNode(rect)
-            self._software.append(rect)
-        while len(self._software) > len(self._rects):
-            rect = self._software.pop()
-            root.removeChildNode(rect)
-            Shiboken.delete(rect)
+            self._software = []  # what was made before goes with the old node
+            for _ in self._rects:
+                rect = window.createRectangleNode()
+                root.appendChildNode(rect)
+                self._software.append(rect)
         for node, (shape, colour) in zip(self._software, self._rects, strict=True):
             node.setRect(shape)
             node.setColor(colour)

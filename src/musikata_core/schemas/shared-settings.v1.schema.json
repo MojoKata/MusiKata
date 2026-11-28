@@ -262,11 +262,14 @@
             48,
             96,
             128
-          ]
+          ],
+          "description": "The 3D analyzer's bands (R11.3.1)"
         },
         "analyzer_seconds": {
           "type": "number",
-          "exclusiveMinimum": 0
+          "minimum": 1,
+          "maximum": 12,
+          "description": "The seconds the 3D analyzer's landscape holds, its speed (R11.3.1): the gear's 6, 3 and 1.5 are 0.5x, 1x and 2x"
         },
         "tint": {
           "type": "boolean"

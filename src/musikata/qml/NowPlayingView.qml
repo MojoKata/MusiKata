@@ -21,8 +21,12 @@ import "."
 // lower part (CoverSpectrum, A5.6) and the progress line along its foot; under it the song's words,
 // rating and format; and the queue at full size on the right (UpNext, `full`).
 //
-// With 3D analyzer (R11.4.2): a later slice's; until then the cover's card in the top-left corner and
-// what says it comes later. What every text says is the bridges' (nowplayingview.py, bridges.py).
+// With 3D analyzer (R11.4.2, N02-now-playing-3d-analyzer): the analyzer fills the view (Analyzer,
+// analyzeritem.py), its octaves along the front, "now" under it and how long ago its back is at the
+// horizon; the song's card in the top-left corner, and the gear in the top-right that sets its bands
+// and speed (R11.3.1). Its background is N02's, not the cover's colour: each slice's fill must be the
+// colour behind it to hide the slices behind. What every text says is the bridges'
+// (nowplayingview.py, bridges.py).
 Rectangle {
     id: np
     required property var now          // nowplayingview.NowPlayingView
@@ -51,7 +55,7 @@ Rectangle {
         id: backdrop
         objectName: "nowPlayingTint"
         anchors.fill: parent
-        visible: np.tintName !== ""
+        visible: np.tintName !== "" && np.now.mode !== "analyzer"
         readonly property real cx: np.now.mode === "none" ? noneCover.x + noneCover.width / 2 : waveCover.x + waveCover.width / 2
         readonly property real cy: np.now.mode === "none" ? noneCover.y + noneCover.height / 2 : waveCover.y + waveCover.height / 2
         ShapePath {
@@ -66,6 +70,180 @@ Rectangle {
             PathRectangle { x: 0; y: 0; width: backdrop.width; height: backdrop.height }
         }
     }
+    // ---------- 3D analyzer (R11.4.2, N02): under the top row, which it fills the view behind ----------
+
+    Item {
+        id: analyzerMode
+        objectName: "analyzerMode"
+        anchors.fill: parent
+        visible: np.now.mode === "analyzer"
+        // N02's background, darkest at the top; the slices' fills take its middle
+        readonly property color ground: Qt.tint(Theme.bg, Qt.rgba(Theme.accentSoft.r, Theme.accentSoft.g, Theme.accentSoft.b, 0.12))
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0; color: Theme.bg }
+                GradientStop { position: 1; color: Qt.tint(Theme.bg, Qt.rgba(Theme.accentSoft.r, Theme.accentSoft.g, Theme.accentSoft.b, 0.25)) }
+            }
+        }
+        Analyzer {  // the landscape (R11.3)
+            id: analyzer
+            objectName: "analyzer"
+            x: 70 * np.k
+            y: 70 * np.k
+            width: parent.width - 2 * x
+            height: parent.height - y - 70 * np.k
+            player: np.player
+            playing: np.player.playing
+            bands: np.now.analyzerBands
+            seconds: np.now.analyzerSeconds
+            front: Theme.cyan
+            back: Theme.accent
+            background: analyzerMode.ground
+            Accessible.role: Accessible.Animation
+            Accessible.name: qsTr("3D analyzer")
+        }
+        Repeater {  // the octaves along the front (R11.3.1)
+            model: analyzer.labels
+            Text {
+                required property var modelData
+                x: analyzer.x + modelData.at * analyzer.width - width / 2
+                y: analyzer.y + analyzer.height + 10
+                width: 60
+                horizontalAlignment: Text.AlignHCenter
+                text: modelData.text
+                color: Theme.faint
+                font { family: Theme.sans; pixelSize: 11 }
+            }
+        }
+        Text {
+            objectName: "analyzerNow"
+            x: analyzer.x
+            y: analyzer.y + analyzer.height + 34
+            text: qsTr("now")
+            color: Theme.faint
+            font { family: Theme.sans; pixelSize: 11 }
+        }
+        Text {
+            objectName: "analyzerAgo"
+            x: analyzer.x + analyzer.width - width
+            y: analyzer.y + analyzer.horizon - 26
+            text: np.now.analyzerAgo
+            color: Theme.faint
+            font { family: Theme.sans; pixelSize: 11 }
+        }
+        Rectangle {  // the song's card, top left
+            objectName: "analyzerCard"
+            x: 28
+            y: 64
+            width: 300
+            height: 70
+            radius: 12
+            visible: np.player.path !== ""
+            color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.75)
+            border.color: Theme.border
+            Cover { x: 12; y: 12; width: 46; height: 46; radius: 6; matte: parent.color; source: np.cover; sourceSide: 128; emptyText: "" }
+            Text {
+                x: 70
+                y: 14
+                width: parent.width - x - 12
+                elide: Text.ElideRight
+                text: np.song.title || np.player.title
+                color: Theme.text
+                font { family: Theme.sans; pixelSize: 14; weight: Font.DemiBold }
+            }
+            Text {
+                x: 70
+                y: 36
+                width: parent.width - x - 12
+                elide: Text.ElideRight
+                text: np.player.line
+                color: Theme.muted
+                font { family: Theme.sans; pixelSize: 12 }
+            }
+        }
+        Rectangle {  // the gear: its bands and speed, and the menu that sets them (R11.3.1)
+            id: gear
+            objectName: "analyzerGear"
+            x: parent.width - width - 28
+            y: 64
+            width: Math.max(200, gearText.implicitWidth + 64)
+            height: 34
+            radius: 10
+            color: gearMenu.visible ? Theme.accentSoft : (gearHover.hovered ? Theme.hover : Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.75))
+            border.color: gearMenu.visible ? Theme.accent : Theme.border
+            Accessible.role: Accessible.ButtonMenu
+            Accessible.name: qsTr("Analyzer settings: %1").arg(np.now.analyzerText)
+            HoverHandler { id: gearHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: gearMenu.popup(gear, gear.width - gearMenu.width, gear.height + 6) }
+            Text {
+                id: gearText
+                x: 12
+                width: parent.width - 52
+                anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                text: np.now.analyzerText
+                color: Theme.muted
+                font { family: Theme.sans; pixelSize: 12 }
+            }
+            Icon { x: parent.width - 33; anchors.verticalCenter: parent.verticalCenter; name: "gear"; size: 15; color: Theme.muted }
+        }
+        Menu {
+            id: gearMenu
+            objectName: "analyzerMenu"
+            width: 200
+            topPadding: 8
+            bottomPadding: 8
+            background: Rectangle { radius: 10; color: Theme.raised; border.color: Theme.borderStrong }
+            component Heading: MenuItem {
+                id: heading
+                property string label
+                enabled: false
+                implicitHeight: 28
+                leftPadding: 18
+                contentItem: Text {
+                    text: heading.label
+                    color: Theme.faint
+                    verticalAlignment: Text.AlignVCenter
+                    font { family: Theme.sans; pixelSize: 11; weight: Font.Bold; letterSpacing: 0.4; capitalization: Font.AllUppercase }
+                }
+                background: Item { }
+            }
+            component Setting: MenuItem {
+                id: setting
+                property var choice: ({})     // a choice of nowplayingview's bandChoices or speedChoices
+                text: setting.choice.text || ""
+                implicitHeight: 34
+                leftPadding: 18
+                rightPadding: 18
+                Accessible.role: Accessible.MenuItem
+                Accessible.name: setting.choice.text || ""
+                Accessible.checked: setting.choice.checked === true
+                contentItem: Item {
+                    implicitHeight: 34
+                    Text {
+                        width: parent.width - 26
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        text: setting.choice.text || ""
+                        color: Theme.text
+                        font { family: Theme.sans; pixelSize: 13; weight: setting.choice.checked === true ? Font.DemiBold : Font.Normal }
+                    }
+                    Icon { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; visible: setting.choice.checked === true; name: "check"; size: 13; color: Theme.accentHi; lineWidth: 2 }
+                }
+                background: Rectangle { x: 6; width: setting.width - 12; radius: 7; color: setting.highlighted ? Theme.hover : "transparent" }
+            }
+            Heading { label: qsTr("Bands") }
+            Setting { objectName: "bands48"; choice: np.now.bandChoices[0]; onTriggered: np.now.setBands(choice.value) }
+            Setting { objectName: "bands96"; choice: np.now.bandChoices[1]; onTriggered: np.now.setBands(choice.value) }
+            Setting { objectName: "bands128"; choice: np.now.bandChoices[2]; onTriggered: np.now.setBands(choice.value) }
+            Heading { label: qsTr("Speed") }
+            Setting { objectName: "speedSlow"; choice: np.now.speedChoices[0]; onTriggered: np.now.setSeconds(choice.value) }
+            Setting { objectName: "speedNormal"; choice: np.now.speedChoices[1]; onTriggered: np.now.setSeconds(choice.value) }
+            Setting { objectName: "speedFast"; choice: np.now.speedChoices[2]; onTriggered: np.now.setSeconds(choice.value) }
+        }
+    }
+
     // what the cover's rounded corners are drawn in: the tint near the cover
     readonly property color matte: Qt.tint(Theme.bg, Qt.rgba(np.tint.r, np.tint.g, np.tint.b, np.tintName !== "" ? 0.7 : 0))
 
@@ -581,55 +759,6 @@ Rectangle {
             focus: noneMode.visible && np.visible
             onEscaped: np.now.close()
             onSavedAsPlaylist: np.now.close()  // its name is edited in the sidebar (R8.3)
-        }
-    }
-
-    // ---------- 3D analyzer (R11.4.2): a later slice's ----------
-
-    Item {
-        objectName: "analyzerMode"
-        anchors.fill: parent
-        visible: np.now.mode === "analyzer"
-        Rectangle {  // the song's card, top left
-            x: 28
-            y: 64
-            width: 300
-            height: 70
-            radius: 12
-            visible: np.player.path !== ""
-            color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.75)
-            border.color: Theme.border
-            Cover { x: 12; y: 12; width: 46; height: 46; radius: 6; matte: parent.color; source: np.cover; sourceSide: 128; emptyText: "" }
-            Text {
-                x: 70
-                y: 14
-                width: parent.width - x - 12
-                elide: Text.ElideRight
-                text: np.song.title || np.player.title
-                color: Theme.text
-                font { family: Theme.sans; pixelSize: 14; weight: Font.DemiBold }
-            }
-            Text {
-                x: 70
-                y: 36
-                width: parent.width - x - 12
-                elide: Text.ElideRight
-                text: np.player.line
-                color: Theme.muted
-                font { family: Theme.sans; pixelSize: 12 }
-            }
-        }
-        Column {
-            objectName: "analyzerLater"
-            anchors.centerIn: parent
-            spacing: 12
-            Icon { anchors.horizontalCenter: parent.horizontalCenter; name: "cube"; size: 40; color: Theme.faint }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: np.now.analyzerLater
-                color: Theme.muted
-                font { family: Theme.sans; pixelSize: 14 }
-            }
         }
     }
 }

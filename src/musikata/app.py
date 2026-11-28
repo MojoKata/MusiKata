@@ -51,7 +51,7 @@ from musikata_core.ratings import Writing, set_everything
 from musikata_core.tags import Job, Written
 from musikata_core.tags import save as save_tags
 
-from . import garbage, media, spectrumitem, waveitem
+from . import analyzeritem, garbage, media, spectrumitem, waveitem
 from .albumart import AlbumArt, ArtImages
 from .attention import Attention, NameMerge
 from .bridges import Library, Player
@@ -382,10 +382,12 @@ def load(
     engine.addImageProvider("covers", covers)
     # the covers' colours (R6.2.2), picked off the GUI thread and kept beside their thumbnails
     tints = Tints(covers.image, cache)
-    # Now Playing (R11.4), its visualization as the shared settings keep it (R11.4.5)
+    # Now Playing (R11.4), its visualization (R11.4.5) and the analyzer's bands and speed (R11.3.1)
+    # as the shared settings keep them
+    look = shared.appearance
     now = NowPlayingView(
-        player, index.read, shared.playback.replaygain, shared.appearance.visualization,
-        keep=lambda mode: player.remember_appearance(visualization=mode),
+        player, index.read, shared.playback.replaygain, look.visualization,
+        keep=player.remember_appearance, bands=look.analyzer_bands, seconds=look.analyzer_seconds,
     )  # fmt: skip
     thumbs = ArtImages()
     engine.addImageProvider("albumart", thumbs)
@@ -454,6 +456,7 @@ def load(
     )
     waveitem.register()
     spectrumitem.register()
+    analyzeritem.register()
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):

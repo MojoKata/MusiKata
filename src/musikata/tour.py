@@ -25,6 +25,7 @@ from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
 from .albumart import AlbumArt
+from .analyzeritem import Analyzer
 from .attention import Attention
 from .bridges import Library, Player
 from .dragging import Dragging
@@ -53,9 +54,11 @@ SIZES = (SHOT, DESIGN)
 # panel (R4.2) as their mockups do, open on the songs selected with fields typed into it ("edit");
 # an album's page and an artist's show a search typed into the header over them, as their mockups do
 # (L02, L11, R2.7); an album's page and Folders' Cards are tinted by their covers' colours (R6.2.2),
-# which are waited for as the covers are. N01 and N03 are Now Playing (R11.4) over Glass Harbor's
-# page, cued at Signal Fires with two songs added, with Waveform (R11.4.1) and No visualization
-# (R11.4.3): paused, as every screen is, so the cover's spectrum has settled to nothing. T01 is
+# which are waited for as the covers are. N01, N02 and N03 are Now Playing (R11.4) over Glass
+# Harbor's page, cued at Signal Fires with two songs added, with Waveform (R11.4.1), 3D analyzer
+# (R11.4.2) and No visualization (R11.4.3): paused, as every screen is, so the cover's spectrum has
+# settled to nothing, and the analyzer shows a still landscape of generated spectra, as the mockup
+# draws one (analyzeritem.generated: with nothing heard it would be flat). T01 is
 # Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03 is Organize
 # files (R12) over Your music folders, on the whole library, as its mockup draws it. The
 # first queues Glass Harbor, paused at its first song, so every screen after it shows the
@@ -162,6 +165,18 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         },
     ),
     (
+        "N02-now-playing-3d-analyzer",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "analyzer",
+            "landscape": True,
+        },
+    ),
+    (
         "N03-now-playing-queue",
         {
             "view": "album",
@@ -218,6 +233,14 @@ def loading(item: QQuickItem) -> bool:
     if item.property("loading") is True:
         return True
     return any(loading(child) for child in item.childItems())
+
+
+def analyzers(item: QQuickItem) -> list[Analyzer]:
+    """The 3D analyzers under `item`, shown or not."""
+    found = [item] if isinstance(item, Analyzer) else []
+    for child in item.childItems():
+        found.extend(analyzers(child))
+    return found
 
 
 def _quit(code: int) -> None:
@@ -318,6 +341,8 @@ class Tour(QObject):
             self.removing.go(step)
         if self.now is not None and "view" in step:
             self.now.go(step)
+            for analyzer in analyzers(self.win.contentItem()):
+                analyzer.go(step)
         self._size = 0
         self._at_size()
 

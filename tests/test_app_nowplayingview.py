@@ -59,6 +59,16 @@ def test_replaygains_chip_is_the_gain_its_mode_plays_at():
     assert shown("track", -6.2, -7.0) == -6.2 and shown("off", -6.2, -7.0) is None
 
 
+def test_the_analyzers_gear_says_its_bands_and_speed_and_its_back_how_long_ago():
+    assert nowplayingview.analyzer_text(96, 3.0) == "Bands: 96 · Speed: 1×"  # N02's
+    assert nowplayingview.analyzer_text(128, 1.5) == "Bands: 128 · Speed: 2×"
+    assert nowplayingview.speed_text(6.0) == "0.5×" and nowplayingview.speed_text(4) == "0.75×"
+    assert nowplayingview.speed_text(7) == "0.43×"  # a hand-edited file's
+    assert nowplayingview.ago_text(3.0) == "← 3 seconds ago"
+    assert nowplayingview.ago_text(1.5) == "← 1.5 seconds ago"
+    assert nowplayingview.ago_text(1) == "← 1 second ago"
+
+
 def test_the_minute_marks_fall_every_minute_or_every_few_on_a_long_song():
     marks = nowplayingview.minute_marks(258.0)  # 4:18
     assert [m["text"] for m in marks] == ["0:00", "1:00", "2:00", "3:00", "4:00"]
@@ -190,11 +200,11 @@ def test_the_picker_lists_its_three_choices_the_current_one_checked_and_kept(she
         ("No visualization", "nowave", True),
     ]  # fmt: skip
     kept = []
-    view = nowplayingview.NowPlayingView(shell.player, None, keep=kept.append)
+    view = nowplayingview.NowPlayingView(shell.player, None, keep=lambda **f: kept.append(f))
     view.setMode("analyzer")
     view.setMode("analyzer")  # again: nothing more
     view.setMode("3d")  # not a choice
-    assert kept == ["analyzer"] and view.property("modeName") == "3D analyzer"
+    assert kept == [{"visualization": "analyzer"}] and view.property("modeName") == "3D analyzer"
     assert view.property("modeIcon") == "cube" and view.property("mode") == "analyzer"
     assert (
         nowplayingview.NowPlayingView(shell.player, None, visualization="?").property("mode")
@@ -211,9 +221,14 @@ def test_the_choice_is_kept_in_the_shared_settings_on_the_keepers_thread(tmp_pat
     try:
         assert s.now.property("mode") == "waveform"  # nothing kept yet: the default
         s.now.setMode("none")
+        s.now.setBands(128)  # the analyzer's gear (R11.3.1)
+        s.now.setSeconds(6.0)
         path = settings.shared_path(env)
         qtbot.waitUntil(
-            lambda: settings.load(path, str(tmp_path)).appearance.visualization == "none",
+            lambda: (
+                settings.load(path, str(tmp_path)).appearance
+                == settings.Appearance("none", 128, 6.0)
+            ),
             timeout=WAIT,
         )
     finally:
@@ -283,7 +298,48 @@ def test_the_pickers_menu_chooses_a_visualization_and_the_later_ones_say_so(shel
     assert find(shell, "equalizerButton").property("later") == nowplayingview.EQUALIZER_LATER
     now.setMode("analyzer")
     settle(shell, qtbot)
-    assert find(shell, "analyzerLater").isVisible()
+    assert find(shell, "analyzer").isVisible() and not find(shell, "waveformMode").isVisible()
+
+
+@pytest.mark.slow
+def test_the_gear_lists_the_bands_and_speeds_the_current_ones_checked_and_kept(shell, qtbot):
+    now = shell.now
+    assert now.property("analyzerBands") == 96 and now.property("analyzerSeconds") == 3.0
+    assert [(c["text"], c["checked"]) for c in now.property("bandChoices")] == [
+        ("48 bands", False), ("96 bands", True), ("128 bands", False),
+    ]  # fmt: skip
+    assert [(c["text"], c["checked"]) for c in now.property("speedChoices")] == [
+        ("0.5× · 6 s", False), ("1× · 3 s", True), ("2× · 1.5 s", False),
+    ]  # fmt: skip
+    kept = []
+    view = nowplayingview.NowPlayingView(
+        shell.player, None, keep=lambda **f: kept.append(f), bands=64, seconds=0
+    )
+    assert view.property("analyzerBands") == 96 and view.property("analyzerSeconds") == 3.0
+    view.setBands(128)
+    view.setBands(128)  # again: nothing more
+    view.setBands(64)  # not a choice
+    view.setSeconds(1.5)
+    view.setSeconds(4.0)  # not the gear's
+    assert kept == [{"analyzer_bands": 128}, {"analyzer_seconds": 1.5}]
+    assert view.property("analyzerText") == "Bands: 128 · Speed: 2×"
+    assert view.property("analyzerAgo") == "← 1.5 seconds ago"
+    shell.player.go({"queue": "Glass Harbor", "at": 1})
+    now.go({"nowPlaying": "analyzer"})
+    settle(shell, qtbot)
+    analyzer = find(shell, "analyzer")
+    assert find(shell, "analyzerCard").isVisible()  # the song's card, top left (R11.4.2)
+    assert find(shell, "analyzerAgo").property("text") == "← 3 seconds ago"
+    click(shell, find(shell, "analyzerGear"))
+    qtbot.waitUntil(lambda: find(shell, "bands128").isVisible(), timeout=WAIT)
+    click(shell, find(shell, "bands128"))
+    qtbot.waitUntil(lambda: analyzer.property("bands") == 128, timeout=WAIT)
+    click(shell, find(shell, "analyzerGear"))
+    qtbot.waitUntil(lambda: find(shell, "speedSlow").isVisible(), timeout=WAIT)
+    click(shell, find(shell, "speedSlow"))
+    qtbot.waitUntil(lambda: analyzer.property("seconds") == 6.0, timeout=WAIT)
+    assert now.property("analyzerText") == "Bands: 128 · Speed: 0.5×"
+    now.go({})
 
 
 @pytest.mark.slow

@@ -206,7 +206,10 @@ merge whatever its spellings, as names that differ only in case are; both are ed
 
 The shared `settings.json` (`shared-settings.v1.schema.json`). A custom preset is parametric, with
 its bands, or graphic, with its ten gains (R19.1); a graphic one fitted from parametric bands keeps
-them as `from_bands` until a slider changes (R19.6):
+them as `from_bands` until a slider changes (R19.6). `appearance` keeps Now Playing's visualization
+(R11.4.5) and the 3D analyzer's bands and the seconds its landscape holds, set from its gear
+(R11.3.1): the gear offers 6, 3 and 1.5 seconds as speeds 0.5×, 1× and 2×, and a hand-edited file
+may give any from 1 to 12:
 
 ```json
 {
@@ -227,7 +230,7 @@ them as `from_bands` until a slider changes (R19.6):
     "genres": {"Classical": "Classical", "Jazz": "Jazz", "Electronic": "Late night"}
   },
   "appearance": {"theme": "system", "visualization": "waveform", "analyzer_bands": 96,
-                 "analyzer_seconds": 4, "tint": true, "minimize_for_mini": true, "text_size": 100,
+                 "analyzer_seconds": 3, "tint": true, "minimize_for_mini": true, "text_size": 100,
                  "reduce_motion": "system"},
   "online": {"allowed": false, "services": {"musicbrainz": true, "coverartarchive": true,
              "lrclib": true}, "save_mbids": true, "check_updates": false},

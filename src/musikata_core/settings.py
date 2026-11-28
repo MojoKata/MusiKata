@@ -6,7 +6,8 @@ shape a person, a sync tool or another version of MusiKata left it, and writing 
 every field it doesn't know kept (A2.10); this computer's id (A2.8), made when it has none;
 Playback's output device and ReplayGain (R13.7), read only, until Settings (R13) writes them;
 shuffle and repeat (R7.3), written when the user changes them; and Now Playing's visualization
-(R11.4.5), written when the picker changes it. Of the root's own `settings.json`,
+(R11.4.5), written when the picker changes it, and the 3D analyzer's bands and speed (R11.3.1),
+written when its gear changes them. Of the root's own `settings.json`,
 the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
 are read (`root_tags`), with the genre list and the genres the user has said are the same (R9.5,
 R9.6). The rest of both files comes with Settings.
@@ -69,14 +70,21 @@ class Playback:
 
 
 VISUALIZATIONS = ("waveform", "analyzer", "none")  # R11.4.5: Waveform the default
+ANALYZER_BANDS = (48, 96, 128)  # R11.3.1's band counts
+ANALYZER_SPEEDS = (6.0, 3.0, 1.5)  # the gear's speeds (R11.3.1): the seconds each holds
+ANALYZER_SECONDS = (1.0, 12.0)  # the seconds a hand-edited file may give, at least and at most
 
 
 @dataclass(frozen=True)
 class Appearance:
     """R13.8's Appearance as read, as far as it is built: Now Playing's visualization, one of
-    VISUALIZATIONS, chosen in its picker and kept (R11.4.5)."""
+    VISUALIZATIONS, chosen in its picker and kept (R11.4.5); and the 3D analyzer's bands, one of
+    ANALYZER_BANDS, and the seconds its landscape holds (its speed), set from its gear and kept
+    (R11.3.1)."""
 
     visualization: str = "waveform"
+    analyzer_bands: int = 96
+    analyzer_seconds: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -156,7 +164,34 @@ def _appearance(value: object, problems: list[str]) -> Appearance:
             f"appearance.visualization isn't waveform, analyzer or none: {shown!r}; waveform"
         )
         shown = default.visualization
-    return Appearance(shown)
+    bands = _number(value.get("analyzer_bands", default.analyzer_bands))
+    if bands is None or bands not in ANALYZER_BANDS:
+        problems.append(
+            f"appearance.analyzer_bands isn't 48, 96 or 128: {value.get('analyzer_bands')!r}; 96"
+        )
+        bands = default.analyzer_bands
+    seconds = _number(value.get("analyzer_seconds", default.analyzer_seconds))
+    least, most = ANALYZER_SECONDS
+    if seconds is None or not least <= seconds <= most:
+        problems.append(
+            f"appearance.analyzer_seconds isn't {least:g} to {most:g} seconds:"
+            f" {value.get('analyzer_seconds')!r}; {default.analyzer_seconds:g}"
+        )
+        seconds = default.analyzer_seconds
+    return Appearance(shown, int(bands), float(seconds))
+
+
+def _number(value: object) -> float | None:
+    """A number, or one written as text ("96", " 3 "); None when it is neither, or not finite."""
+    number: float | None = None
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        number = float(value)
+    elif isinstance(value, str):
+        try:
+            number = float(value.strip())
+        except ValueError:
+            number = None
+    return number if number is not None and math.isfinite(number) else None
 
 
 def _decibels(group: Mapping[str, object], key: str, problems: list[str]) -> float:
@@ -279,8 +314,8 @@ def with_appearance(
     new_id: Callable[[], str] = _new_id,
 ) -> dict[str, object]:
     """The file's content with `fields` set in its `appearance` group (the visualization,
-    R11.4.5): the rest as it was read, fields it doesn't know included (A2.10), and this
-    computer's id made when it has none (A2.8)."""
+    R11.4.5; the analyzer's bands and seconds, R11.3.1): the rest as it was read, fields it
+    doesn't know included (A2.10), and this computer's id made when it has none (A2.8)."""
     return _with_group(shared, computer_name, "appearance", fields, new_id)
 
 
@@ -353,8 +388,9 @@ def set_playback(path: str, home: str, computer_name: str, **fields: object) -> 
 
 
 def set_appearance(path: str, home: str, computer_name: str, **fields: object) -> bool:
-    """Keeps `fields` (the visualization: R11.4.5) in the appearance group of the shared settings
-    at `path`, the rest as it was; False, logged, when they can't be written (`_writable`)."""
+    """Keeps `fields` (the visualization, R11.4.5; the analyzer's bands and seconds, R11.3.1) in
+    the appearance group of the shared settings at `path`, the rest as it was; False, logged, when
+    they can't be written (`_writable`)."""
     what = ", ".join(f"{k} {v}" for k, v in fields.items())
     shared = _writable(path, home, what)
     return shared is not None and save(path, with_appearance(shared, computer_name, fields))

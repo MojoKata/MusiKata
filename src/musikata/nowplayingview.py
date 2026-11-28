@@ -12,9 +12,10 @@ genres; the queue is the Player bridge's (bridges.py). What every text says is d
 (docs/process/coding.md: QML only lays out and binds).
 
 The choice of visualization is kept in the shared settings' `appearance` (A2.10): it belongs to
-this computer and this person, as Appearance does (R13.9), not to the root. The 3D analyzer is
-slice 8.3's (R11.3, R11.4.2): until then choosing it shows that it comes later. The Lyrics switch
-(R17.3) and the Equalizer button (R19.2) are there, faded, saying they come later."""
+this computer and this person, as Appearance does (R13.9), not to the root; so are the 3D
+analyzer's bands and speed, set from its gear (R11.3.1), and what its gear and its labels say is
+decided here too. The Lyrics switch (R17.3) and the Equalizer button (R19.2) are there, faded,
+saying they come later."""
 
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ from typing import Any
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, Signal, Slot
 
-from musikata_core.settings import VISUALIZATIONS
+from musikata_core.analysis.landscape import SECONDS
+from musikata_core.settings import ANALYZER_BANDS, ANALYZER_SPEEDS, VISUALIZATIONS
 
 from .models import KINDS, LOSSLESS, artist_text, cover_url, time_text
 from .nowplaying import read_songs
@@ -33,7 +35,6 @@ from .nowplaying import read_songs
 # each choice of the picker (R11.4.5): its setting, its name and its icon (Icons.js)
 MODES = {"waveform": ("Waveform", "wave"), "analyzer": ("3D analyzer", "cube"),
          "none": ("No visualization", "nowave")}  # fmt: skip
-ANALYZER_LATER = "The 3D analyzer comes in a later version"  # R11.3, R11.4.2: slice 8.3 (#25)
 LYRICS_LATER = "Lyrics come in a later version"  # R17.3: slice 8.4 (#25)
 EQUALIZER_LATER = "The equalizer comes in a later version"  # R19.2: slice 9 (#26)
 UP_NEXT_SHOWN = 5  # Up next's songs beside the cover with Waveform (N01)
@@ -107,6 +108,23 @@ def format_line(kind: str | None, bits: int | None, rate: int | None, bitrate: i
     return " ".join(p for p in (name, detail) if p)
 
 
+def speed_text(seconds: float) -> str:
+    """The analyzer's speed (R11.3.1) as its gear says it: 1× for the SECONDS N02 holds, 2× for
+    half of them, 0.5× for twice as many."""
+    return f"{round(SECONDS / seconds, 2):g}×"
+
+
+def analyzer_text(bands: int, seconds: float) -> str:
+    """What the analyzer's gear says (N02): Bands: 96 · Speed: 1×."""
+    return f"Bands: {bands} · Speed: {speed_text(seconds)}"
+
+
+def ago_text(seconds: float) -> str:
+    """What the back of the landscape is labelled (N02): ← 3 seconds ago."""
+    unit = "second" if seconds == 1 else "seconds"
+    return f"← {seconds:g} {unit} ago"
+
+
 def minute_marks(length: float) -> list[dict[str, Any]]:
     """The waveform's marks (N01): one a minute from the start, each its place (0 to 1) and its
     time; every few minutes when a minute each would be more than MARKS_AT_MOST."""
@@ -163,11 +181,13 @@ def up_next_rows(c: sqlite3.Connection, songs: list[int]) -> list[dict[str, str]
 class NowPlayingView(QObject):
     """Now Playing over the window (R11.4): open or not, its visualization, and the words of the
     song `player` (the Player bridge) shows, read through `read` with ReplayGain's `replaygain`
-    mode (R7.5). `visualization` is the one kept (settings.Appearance); `keep` keeps a new one
+    mode (R7.5). `visualization` is the one kept (settings.Appearance), with the analyzer's `bands`
+    and `seconds` (R11.3.1); `keep` keeps a new one, given as the appearance group's fields
     (Player.remember_appearance: on its thread)."""
 
     changed = Signal()  # open, the visualization
     songChanged = Signal()  # the song's words, its chips, Up next, the minute marks
+    analyzerChanged = Signal()  # the analyzer's bands or speed
 
     def __init__(
         self,
@@ -175,12 +195,16 @@ class NowPlayingView(QObject):
         read: Callable[[], sqlite3.Connection] | None,
         replaygain: str = "album",
         visualization: str = "waveform",
-        keep: Callable[[str], object] | None = None,
+        keep: Callable[..., object] | None = None,
+        bands: int = 96,
+        seconds: float = SECONDS,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._player, self._read, self._replaygain, self._keep = player, read, replaygain, keep
         self._mode = visualization if visualization in VISUALIZATIONS else VISUALIZATIONS[0]
+        self._bands = bands if bands in ANALYZER_BANDS else 96
+        self._seconds = seconds if seconds > 0 else SECONDS
         self._opened = False
         self._song: int | None = None
         self._details: dict[str, Any] = {}
@@ -225,7 +249,27 @@ class NowPlayingView(QObject):
             self._mode = mode
             self.changed.emit()
             if self._keep is not None:
-                self._keep(mode)
+                self._keep(visualization=mode)
+
+    # ---------- the analyzer's gear (R11.3.1) ----------
+
+    @Slot(int)
+    def setBands(self, bands: int) -> None:  # noqa: N802
+        """A band count chosen from the gear: shown, and kept."""
+        if bands in ANALYZER_BANDS and bands != self._bands:
+            self._bands = bands
+            self.analyzerChanged.emit()
+            if self._keep is not None:
+                self._keep(analyzer_bands=bands)
+
+    @Slot(float)
+    def setSeconds(self, seconds: float) -> None:  # noqa: N802
+        """A speed chosen from the gear, as the seconds it holds: shown, and kept."""
+        if seconds in ANALYZER_SPEEDS and seconds != self._seconds:
+            self._seconds = seconds
+            self.analyzerChanged.emit()
+            if self._keep is not None:
+                self._keep(analyzer_seconds=seconds)
 
     def go(self, step: dict[str, Any]) -> None:
         """A tour's step (A1.6): {"nowPlaying": "none"} opens Now Playing with that visualization
@@ -285,6 +329,17 @@ class NowPlayingView(QObject):
     def _get_mode_icon(self) -> str:
         return MODES[self._mode][1]
 
+    def _get_band_choices(self) -> list[dict[str, Any]]:
+        return [
+            {"value": n, "text": f"{n} bands", "checked": n == self._bands} for n in ANALYZER_BANDS
+        ]
+
+    def _get_speed_choices(self) -> list[dict[str, Any]]:
+        return [
+            {"value": s, "text": f"{speed_text(s)} · {s:g} s", "checked": s == self._seconds}
+            for s in ANALYZER_SPEEDS
+        ]
+
     def _get_details(self) -> dict[str, Any]:
         return self._details
 
@@ -306,6 +361,13 @@ class NowPlayingView(QObject):
     upNext = QtProperty(list, _get_up_next, notify=songChanged)
     marks = QtProperty(list, _get_marks, notify=songChanged)  # [{at: 0.23, text: "1:00"}]
     emptyText = QtProperty(str, _get_empty_text, notify=songChanged)
-    analyzerLater = QtProperty(str, lambda self: ANALYZER_LATER, constant=True)
+    analyzerBands = QtProperty(int, lambda self: self._bands, notify=analyzerChanged)
+    analyzerSeconds = QtProperty(float, lambda self: self._seconds, notify=analyzerChanged)
+    analyzerText = QtProperty(
+        str, lambda self: analyzer_text(self._bands, self._seconds), notify=analyzerChanged
+    )  # Bands: 96 · Speed: 1×
+    analyzerAgo = QtProperty(str, lambda self: ago_text(self._seconds), notify=analyzerChanged)
+    bandChoices = QtProperty(list, _get_band_choices, notify=analyzerChanged)  # the gear's menu
+    speedChoices = QtProperty(list, _get_speed_choices, notify=analyzerChanged)
     lyricsLater = QtProperty(str, lambda self: LYRICS_LATER, constant=True)
     equalizerLater = QtProperty(str, lambda self: EQUALIZER_LATER, constant=True)

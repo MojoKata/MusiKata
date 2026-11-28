@@ -347,6 +347,50 @@ def test_the_visualization_set_keeps_the_rest_of_the_file_valid_under_its_schema
     assert not settings.set_appearance(str(newer), HOME, "PC", visualization="none")
 
 
+def test_the_analyzers_bands_and_seconds_are_read_from_appearance_96_and_3_by_default():
+    got = parse({"format": 1, "appearance": {"analyzer_bands": 128, "analyzer_seconds": 6}})
+    assert got.appearance == settings.Appearance("waveform", 128, 6.0) and got.problems == ()
+    assert parse({"format": 1}).appearance == settings.Appearance("waveform", 96, 3.0)
+
+
+@pytest.mark.parametrize(
+    "appearance, bands, seconds, problem",
+    [
+        ({"analyzer_bands": "48", "analyzer_seconds": " 1.5 "}, 48, 1.5, ""),
+        ({"analyzer_bands": 96.0, "analyzer_seconds": 4}, 96, 4.0, ""),  # a hand edit
+        ({"analyzer_bands": 64}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_bands": True}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_bands": None}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_bands": "many"}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_seconds": 0}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": 60}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": float("nan")}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": "3 s"}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": False}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+    ],
+)
+def test_the_analyzers_bands_and_seconds_broken_out_of_range_or_as_text(
+    appearance, bands, seconds, problem
+):
+    got = parse({"format": 1, "appearance": appearance})
+    assert (got.appearance.analyzer_bands, got.appearance.analyzer_seconds) == (bands, seconds)
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_analyzers_bands_and_seconds_set_keep_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"format": 1, "appearance": {"visualization": "analyzer"}}))
+    assert settings.set_appearance(str(path), HOME, "PC", analyzer_bands=128)
+    assert settings.set_appearance(str(path), HOME, "PC", analyzer_seconds=1.5)
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {
+        "visualization": "analyzer", "analyzer_bands": 128, "analyzer_seconds": 1.5
+    }  # fmt: skip
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).appearance == settings.Appearance("analyzer", 128, 1.5)
+
+
 def test_this_computers_id_is_the_files_else_made_once_and_kept(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"format": 1, "library": {"root": "/m"}, "later": 1}))

@@ -13,6 +13,15 @@ function starPoints(r) {
     }
     return d + "Z"
 }
+function spokes(cx, cy, r0, r1, n) {
+    let d = ""
+    for (let i = 0; i < n; i++) {
+        const a = i * 2 * Math.PI / n
+        d += `M${(cx + r0 * Math.cos(a)).toFixed(2)} ${(cy + r0 * Math.sin(a)).toFixed(2)}`
+            + `L${(cx + r1 * Math.cos(a)).toFixed(2)} ${(cy + r1 * Math.sin(a)).toFixed(2)}`
+    }
+    return d
+}
 const STROKE = {
     song: "M8 14.5V3.5L15 2.5V12.5",
     album: ellipse(10, 10, 7, 7) + ellipse(10, 10, 2, 2),
@@ -65,6 +74,8 @@ const STROKE = {
     lyrics: "M4.5 3H15.5Q17.5 3 17.5 5V11.5Q17.5 13.5 15.5 13.5H8L4.5 17V13.5Q2.5 13.5 2.5 11.5V5"
         + "Q2.5 3 4.5 3Z M6 6.8H14 M6 9.8H11.5",
     eq: "M5 3V17M10 3V17M15 3V17",
+    // the 3D analyzer's gear (R11.3.1)
+    gear: ellipse(10, 10, 2.6, 2.6) + ellipse(10, 10, 5.2, 5.2) + spokes(10, 10, 5, 7.2, 8),
 }
 const FILL = {
     song: ellipse(5.8, 14.8, 2.4, 2) + ellipse(12.8, 12.8, 2.4, 2),
