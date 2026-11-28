@@ -20,7 +20,11 @@ A4.1. **The pipeline.**
 - **Output** is Qt Multimedia's `QAudioSink` in pull mode, reading float samples from a ring buffer
   at the device's own sample rate. In pull mode the sink asks for samples on the thread it lives on,
   so it lives on the playback thread, which runs its own event loop, and its own buffer is set to
-  about 250 ms: a busy GUI thread or a wait for Python's lock never starves the device.
+  about 250 ms: a busy GUI thread or a wait for Python's lock never starves the device. Each sink
+  is made on the GUI thread and moved there (`musikata.player.Sinks`), as a song opens or moves
+  to another device: making one takes Qt's connection locks, which the playback thread, holding
+  Python's lock, could wait on while the GUI thread holds one and waits on Python's lock
+  (`docs/process/coding.md`, "Threads and processes").
 - The playback thread (A1.3) decodes and processes blocks of about 20 ms until the ring buffer
   holds two seconds; the device pulls from it on its own schedule, so a busy GUI or a slow disk
   doesn't stop the sound.

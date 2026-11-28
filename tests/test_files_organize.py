@@ -202,6 +202,60 @@ def test_a_plan_never_moves_two_files_to_one_path_nor_one_onto_a_file(found, unc
                    for n in beside[folder])  # fmt: skip
 
 
+@given(PATHS, st.lists(st.integers(0, 11), max_size=12), st.booleans())
+def test_checking_recounts_what_a_checkbox_touches_as_the_whole_plan_would(found, clicks, prune):
+    """R12.2 to R12.4, a property: the plan made once and each checkbox changed after it
+    (organize.Checking) is, after every click, the plan made anew with those moves unchecked:
+    its moves, their conflicts, the files beside the songs and the folders left empty."""
+    sources = []
+    for n, (folder, name, track, album) in enumerate(found):
+        path = f"{folder}/{name}{n}.mp3" if folder else f"{name}{n}.mp3"
+        sources.append(Source(n, path, Tags(title=name, artist="A", album=album, track=track)))
+    existing = {s.path for s in sources} | {"A/A/X/01 - b.mp3"}
+    beside = beside_of(*existing, *(f"{os.path.dirname(p)}/cover.jpg".lstrip("/")
+                                    for p in existing), "D/E/F/x.lrc")  # fmt: skip
+
+    def taken(x):
+        return x in existing
+
+    checking = organize.Checking(sources, LAYOUT, beside, taken, prune=prune)
+    rows = checking.rows
+    assert checking.plan() == organize.plan(sources, LAYOUT, beside, taken, prune=prune)
+    off: set[str] = set()
+    for i in clicks:
+        if not rows:
+            break
+        old = rows[i % len(rows)].old
+        off ^= {old}
+        checking.toggle(old)
+        want = organize.plan(sources, LAYOUT, beside, taken, off, prune=prune)
+        assert checking.plan() == want
+        assert checking.chosen() == want.chosen and checking.chosen_count == len(want.chosen)
+        assert checking.conflict_count == len(want.conflicts)
+        assert all(checking.ready(m.old) == m.ready for m in want.moves)
+
+
+@pytest.mark.slow
+def test_checking_a_library_of_50000_songs_answers_a_click_at_once():
+    """R12.2: a checkbox recounts in well under a frame, the plan made once."""
+    import time
+
+    sources, beside = [], {"": [f"Old{a}/" for a in range(5000)]}
+    for a in range(5000):
+        beside[f"Old{a}"] = [f"{t}.flac" for t in range(10)] + ["cover.jpg"]
+        sources += [Source(a * 10 + t, f"Old{a}/{t}.flac",
+                           Tags(title=f"S{t}", artist="A", album=f"B{a}", track=t + 1))
+                    for t in range(10)]  # fmt: skip
+    checking = organize.Checking(sources, LAYOUT, beside, nothing)
+    assert checking.chosen_count == 55_000 and len(checking.emptied()) == 5000
+    start = time.perf_counter()
+    for n in range(20):
+        checking.toggle(f"Old{n}/0.flac")
+    took = (time.perf_counter() - start) / 20
+    assert took < 0.016, f"a click took {took * 1000:.1f} ms"  # a frame, measured or not
+    assert checking.chosen_count == 55_000 - 40 and len(checking.emptied()) == 4980
+
+
 # ---------- the move, and what follows it (R12.4, A2.8) ----------
 
 
@@ -316,7 +370,7 @@ def organized(root, index, clock, unchecked=()):
                       organize.taken_in(root), unchecked)  # fmt: skip
     store = playlists.Store(root, index, "Playlists", "cp1252")
     rec = Recording(root, lambda: ME, clock)
-    jobs = [organize.move_job(root, m) for m in p.chosen]
+    jobs = organize.move_jobs(root, p.chosen)
     out = Batch(jobs, organize.move_file, record=rec, action="organize",
                 description="Organize files: 3 files").run()  # fmt: skip
     followed = organize.Follower(root, lambda fn: index.write(fn).result(), store.repoint)(
@@ -653,3 +707,217 @@ def test_files_brought_in_are_indexed_as_a_scans_batch_would(library):
         "New one",
         5.0,
     )
+
+
+# ---------- removing songs to the trash (R2.11) ----------
+
+
+def test_a_removal_takes_each_folder_whole_and_each_song_with_its_own_lyrics():
+    """R2.11: a folder goes whole, with every song beneath it, a folder beneath another that goes
+    and the songs in it left to it, never the root; a song goes with its own .lrc, and alone
+    while its folder keeps other songs."""
+    beside = {"A": ["a.flac", "a.lrc", "b.flac", "cover.jpg", "x.log", "sub/"]}
+    plan = organize.removal(
+        [("A/a.flac", "h1"), ("K/s/t.mp3", "h2"), ("A/a.flac", "h1")],
+        {"K": [("K/s/t.mp3", "h2"), ("K/u.mp3", None)], "K/s": [("K/s/t.mp3", "h2")], "": []},
+        beside,
+    )
+    assert [(g.path, g.folder) for g in plan.going] == [
+        ("K", True), ("A/a.flac", False), ("A/a.lrc", False)]  # fmt: skip
+    assert plan.folders[0].songs == (("K/s/t.mp3", "h2"), ("K/u.mp3", None))
+    assert plan.songs == [("K/s/t.mp3", "h2"), ("K/u.mp3", None), ("A/a.flac", "h1")]
+    assert [g.path for g in plan.beside] == ["A/a.lrc"]
+    assert organize.removal([], {}, {}).going == ()
+
+
+def test_the_files_beside_an_album_go_with_it_only_when_every_song_of_its_folder_goes():
+    """R2.11, R12.3: the images, .cue, .lrc and .log files beside an album's songs go when the
+    whole album goes; files that aren't R12.3's, and subfolders, stay."""
+    names = ["01.flac", "02.flac", "Cover.JPG", "album.cue", "rip.log", "notes.nfo", "Scans/"]
+    whole = organize.removal([("R/01.flac", "a"), ("R/02.flac", "b")], {}, {"R": names})
+    assert [g.path for g in whole.beside] == ["R/Cover.JPG", "R/album.cue", "R/rip.log"]
+    assert all(g.hash is None and not g.songs for g in whole.beside)
+    some = organize.removal([("R/01.flac", "a")], {}, {"R": names})
+    assert [g.path for g in some.going] == ["R/01.flac"]
+    at_root = organize.removal([("01.flac", "a")], {}, {"": ["01.flac", "cover.jpg"]})
+    assert [g.path for g in at_root.going] == ["01.flac", "cover.jpg"]
+
+
+def test_organize_and_removal_share_r12_3s_rule_of_what_goes_with_the_songs():
+    names = ["a.flac", "a.lrc", "b.flac", "b.LRC", "c.flac", "front.png", "sub/"]
+    assert organize.companions(names, {"a.flac"}) == [("a.lrc", "a.flac")]
+    assert organize.companions(names, {"a.flac", "b.flac", "c.flac"}) == [
+        ("a.lrc", "a.flac"), ("b.LRC", "b.flac"), ("front.png", None)]  # fmt: skip
+    assert organize.companions([], {"a.flac"}) == []
+
+
+def test_the_trasher_moves_a_file_or_folder_to_the_trash_or_says_why_not(tmp_path):
+    """R2.11 (Principle 5): to the system's trash, never deleted; a file gone or one the trash
+    refuses fails with why, nothing moved."""
+    (tmp_path / "K").mkdir()
+    (tmp_path / "K" / "t.mp3").write_bytes(b"x")
+    (tmp_path / "a.mp3").write_bytes(b"x")
+    taken = []
+
+    def trash(path):
+        taken.append(path)
+        shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+        return True
+
+    write = organize.trasher(trash)
+    folder = organize.Going("K", None, True, (("K/t.mp3", "h"),))
+    got = write(organize.trash_job(str(tmp_path), folder))
+    assert got == organize.Trashed(str(tmp_path / "K"), None, (("K/t.mp3", "h"),))
+    got = write(organize.trash_job(str(tmp_path), organize.Going("a.mp3", "h2", False,
+                                                                 (("a.mp3", "h2"),))))  # fmt: skip
+    assert got.hash == "h2" and taken == [str(tmp_path / "K"), str(tmp_path / "a.mp3")]
+    with pytest.raises(tags.WriteError, match="isn't there any more"):
+        write(organize.trash_job(str(tmp_path), organize.Going("a.mp3")))
+    (tmp_path / "b.mp3").write_bytes(b"x")
+    with pytest.raises(tags.WriteError, match="couldn't be moved to the trash"):
+        organize.trasher(lambda _p: False)(
+            organize.trash_job(str(tmp_path), organize.Going("b.mp3"))
+        )
+    assert (tmp_path / "b.mp3").exists()
+    assert organize.folders_left(
+        str(tmp_path),
+        [
+            organize.Trashed(str(tmp_path / "K" / "s")),
+            organize.Trashed(str(tmp_path / "a.mp3")),
+            organize.Trashed("/elsewhere/x"),
+        ],
+    ) == {"K", ""}
+
+
+def test_a_removal_is_one_entry_naming_each_song_moved_to_the_trash_which_undo_leaves(tmp_path):
+    """R2.11, R4.9: the change history keeps the removal, each song of a folder named by its path
+    and hash, a file beside them named too; Undo can't take them out of the trash."""
+    root = str(tmp_path)
+    (tmp_path / "K").mkdir()
+    rec = Recording(root, lambda: ME, FakeClock(WHEN))
+    rec.saved(organize.Trashed(str(tmp_path / "K"), None, (("K/a.mp3", "a" * 64),
+                                                            ("K/b.mp3", None))))  # fmt: skip
+    rec.saved(organize.Trashed(str(tmp_path / "c.mp3"), "c" * 64))
+    rec.saved(organize.Trashed("/elsewhere/d.mp3", "d" * 64))
+    name = rec.done("trash", "3 songs to the trash")
+    entry = history.read(history.folder_of(root), name)
+    assert [(f.path, f.hash, f.trashed) for f in entry.files] == [
+        ("K/a.mp3", "a" * 64, True),
+        ("K/b.mp3", None, True),
+        ("c.mp3", "c" * 64, True),
+    ]
+    plan = history.plan(entry, root, lambda _h: [])
+    assert len(plan.in_trash) == 3 and history.jobs(plan, root, True) == []
+
+
+# ---------- a .cue sheet's FILE lines follow the files it names (R12.3, A2.6) ----------
+
+
+@pytest.mark.parametrize(
+    ("sheet", "names", "after"),
+    [
+        (
+            b'FILE "a.wav" WAVE\r\n  TRACK 01 AUDIO\r\n',
+            {"a.wav": "01 - A.wav"},
+            b'FILE "01 - A.wav" WAVE\r\n  TRACK 01 AUDIO\r\n',
+        ),
+        (b"\xef\xbb\xbffile a.wav WAVE\n", {"a.wav": "01.wav"}, b"\xef\xbb\xbffile 01.wav WAVE\n"),
+        (b"FILE a.wav WAVE\rREM x\r", {"a.wav": "01 - A.wav"}, b'FILE "01 - A.wav" WAVE\rREM x\r'),
+        (b'FILE\t"A.WAV" WAVE\n', {"a.wav": "b.wav"}, b'FILE\t"b.wav" WAVE\n'),
+        (
+            b'FILE "C:\\Rips\\a.wav" WAVE\n',
+            {"a.wav": "01 - A.wav"},
+            b'FILE "C:\\Rips\\01 - A.wav" WAVE\n',
+        ),
+        (
+            b'FILE "a.wav" WAVE\n',
+            {"a.wav": "../Elsewhere/a.wav"},
+            b'FILE "../Elsewhere/a.wav" WAVE\n',
+        ),
+        (
+            b'REM COMMENT "Caf\xe9"\nFILE "a.wav" WAVE\n',
+            {"a.wav": "\u00e9t\u00e9.wav"},
+            b'REM COMMENT "Caf\xe9"\nFILE "\xe9t\xe9.wav" WAVE\n',
+        ),
+    ],
+)
+def test_a_cue_sheets_file_lines_name_the_files_anew_in_its_encoding_and_line_ends(
+    sheet, names, after
+):
+    """R12.3, A2.6's shapes: quoted and not, `file` in lower case, a tab after it, a ripper's
+    folder before the name (kept), the name in another case, a path to another folder; UTF-8 with
+    its BOM, cp1252; CRLF, LF and CR, each kept."""
+    assert organize.cue_renamed(sheet, names) == after
+
+
+def test_a_cue_line_naming_a_subfolders_file_or_a_name_its_encoding_cant_hold_is_left():
+    sheet = 'REM COMMENT "Caf\u00e9"\r\nFILE "CD1/a.wav" WAVE\r\nFILE "b.wav" WAVE\r\n'.encode(
+        "cp1252"
+    )
+    assert organize.cue_renamed(sheet, {"a.wav": "x.wav"}) is None
+    assert organize.cue_renamed(sheet, {"b.wav": "\u0416.wav"}) is None
+    assert organize.cue_renamed(b"FILE x.wav WAVE\n", {}) is None
+    assert organize.cue_encoding(b"\xff\xfe\x81") == "latin-1"
+
+
+def test_a_cue_sheet_moved_with_its_album_names_its_files_anew_and_undo_puts_it_back(library):
+    """R12.3, R4.9: an album's .cue moves with its songs, its FILE lines naming them by their new
+    names, in the sheet's own encoding and line ends; a line naming another file is left; Undo
+    puts the sheet back, byte for byte."""
+    root, index = library
+    sheet = (
+        'REM COMMENT "Caf\u00e9"\r\nFILE "a.wav" WAVE\r\n  TRACK 01 AUDIO\r\n'
+        'FILE "C:\\Rips\\b.wav" WAVE\r\nFILE "Other.wav" WAVE\r\n'
+    ).encode("cp1252")
+    (Path(root) / "Old" / "Tide Tables.cue").write_bytes(sheet)
+    clock = FakeClock(WHEN)
+    _, out, _ = organized(root, index, clock)
+    moved = Path(root) / "Lumen Drift" / "2022 - Tide Tables" / "Tide Tables.cue"
+    assert moved.read_bytes() == sheet.replace(b'"a.wav"', b'"01 - Neap Tide.wav"').replace(
+        b"\\b.wav", b"\\02 - Spring Tide.wav")  # fmt: skip
+    e = history.read(history.folder_of(root), out.entry)
+    p = history.plan(e, root, history.finder(index.read()))
+    done = history.undo(p, root, False, lambda job: None, None)
+    assert done.failed == []
+    assert (Path(root) / "Old" / "Tide Tables.cue").read_bytes() == sheet
+
+
+def test_a_cue_that_cant_be_rewritten_still_moves_and_the_log_says_so(
+    tmp_path, caplog, monkeypatch
+):
+    (tmp_path / "a.cue").write_bytes(b'FILE "a.wav" WAVE\n')
+    job = organize.move_jobs(str(tmp_path), [organize.Move("a.cue", "B/a.cue"),
+                                              organize.Move("a.wav", "B/01.wav")])[0]  # fmt: skip
+    assert job.changes[organize.NAMES] == {"a.wav": "01.wav"}
+    monkeypatch.setattr(organize, "tmp_path", lambda p: str(tmp_path / "no" / "such" / "x"))
+    organize.move_file(job)
+    assert (tmp_path / "B" / "a.cue").read_bytes() == b'FILE "a.wav" WAVE\n'
+    assert "weren't rewritten" in caplog.text
+
+
+def test_a_dismissal_about_an_albums_folder_follows_the_album_moved_and_back(library):
+    """R2.8, A2.8, R12: Needs attention's Ignore of an album's folder (its songs' tags differ from
+    their path, its cover small) follows the album to the folder Organize files moved it to, in
+    the index and in ignored.json, the old one kept for an Undo that brings the album back; a
+    dismissal about a song follows it by its hash already (A2.8), and a folder its songs stay in
+    keeps its own."""
+    from musikata_core import attention
+
+    root, index = library
+    old = [rootfiles.Dismissal(attention.PATH, "Old", None, 5.0, "2026-11-27T15:00:00Z"),
+           rootfiles.Dismissal(attention.COVER_SMALL, "Old", None, None, "2026-11-27T15:00:00Z"),
+           rootfiles.Dismissal(attention.ONE_FILE, "Old/a.wav", "a" * 64, 5.0,
+                               "2026-11-27T15:00:00Z")]  # fmt: skip
+    index.write(lambda c: rootfiles.load_ignored(c, old)).result()
+    clock = FakeClock(WHEN)
+    _, out, _ = organized(root, index, clock)
+    album = "Lumen Drift/2022 - Tide Tables"
+    there = {(d.kind, d.about) for d in rootfiles.dismissals(index.read())}
+    assert {(attention.PATH, album), (attention.COVER_SMALL, album)} <= there
+    assert (attention.ONE_FILE, album) not in there
+    kept = rootfiles.read_ignored(rootfiles.ignored_of(root))
+    assert {(d.kind, d.about, d.modified, d.changed) for d in kept.entries} == {
+        (attention.PATH, album, 5.0, "2026-11-27T15:00:00Z"),
+        (attention.COVER_SMALL, album, None, "2026-11-27T15:00:00Z"),
+    }
+    assert attention.followed(index.read(), [("c.wav", "c.wav")]) == []

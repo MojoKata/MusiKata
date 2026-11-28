@@ -58,11 +58,13 @@ COPIES = "copies"  # a song's other copies moved to the trash (R2.12)
 ENCODING = "encoding"  # text in the wrong encoding written as Unicode (R4.10)
 INFER = "infer"  # tags filled or corrected from the files' paths (R3.8)
 ORGANIZE = "organize"  # files moved and renamed to match their tags (R12)
+TRASH = "trash"  # songs, folders and the files beside them moved to the trash (R2.11)
 OFFERED = "offered"  # a message's Undo that isn't an entry's: the change's own (`offer`)
 ACTIONS = {history.ACTION: "Edited tags", history.UNDO: "Undo", RATE: "Rated songs",
            ART: "Album art", GENRE: "Genres", NAMES: "Names merged",
            COPIES: "Copies moved to the trash", ENCODING: "Encoding fixed",
-           INFER: "Tags from paths", ORGANIZE: "Organize files"}  # fmt: skip  # an entry
+           INFER: "Tags from paths", ORGANIZE: "Organize files",
+           TRASH: "Moved to the trash"}  # fmt: skip  # an entry
 # with no description, by its action
 
 

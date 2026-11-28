@@ -643,3 +643,58 @@ def test_double_clicking_a_song_plays_it_and_marks_its_row(tmp_path, qtbot, null
     finally:
         shell.close()
     assert tone.closed == tone.opened
+
+
+# A QAudioSink made takes Qt's connection locks with the GIL held, so the engine has its sinks made
+# on the GUI thread (player.Sinks): here the playback thread asks for one while every lock is held
+# by a thread that waits on the GIL (tests/locks.py), as the GUI thread may hold one; it waits for
+# the GUI thread without the GIL, and the sink comes once the locks are let go. Made on the
+# playback thread itself, as it once was, it never came.
+SINK = """
+from PySide6.QtCore import QCoreApplication, QThread
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtMultimedia import QMediaDevices
+from musikata import player
+app = QGuiApplication([])
+device = QMediaDevices.defaultAudioOutput()
+if device.isNull():
+    print("no device")
+    raise SystemExit(0)
+fmt = player.output_format(device)
+sinks = player.Sinks()
+made = []
+kept, holders = hold(1.0)
+def playback():
+    sink = sinks.make(device, fmt)
+    made.append(sink is not None and sink.thread() is QThread.currentThread())
+t = threading.Thread(target=playback)
+t.start()
+for h in holders:
+    h.join()
+while t.is_alive():
+    QCoreApplication.processEvents()
+    t.join(0.01)
+print("made" if made == [True] else made)
+"""
+
+
+@pytest.mark.slow
+def test_a_sink_is_made_on_the_gui_thread_so_opening_a_song_never_deadlocks():
+    import locks
+
+    done = locks.run(SINK)
+    assert done is not None, "making a sink deadlocked with a thread holding Qt's lock"
+    if done.stdout.strip() == "no device":
+        pytest.skip("no sound device: tier 1's container has PulseAudio's null sink")
+    assert done.returncode == 0 and done.stdout.strip() == "made", done.stderr
+
+
+def test_a_sink_asked_for_once_closed_is_none_and_one_asked_on_the_gui_thread_is_made_there(qapp):
+    sinks = player.Sinks()
+    device, fmt = QAudioDevice(), QAudioFormat()
+    made = sinks.make(device, fmt)
+    assert made is not None and made.thread() is sinks.thread()
+    Shiboken.delete(made)
+    sinks.close()
+    assert sinks.make(device, fmt) is None
+    Shiboken.delete(sinks)

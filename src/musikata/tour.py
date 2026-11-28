@@ -35,6 +35,7 @@ from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
 from .organize import OrganizeFiles
+from .removing import Removing
 from .smart import SmartPlaylists
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
@@ -60,7 +61,9 @@ SIZES = (SHOT, DESIGN)
 # page, as its mockup draws it. G01 is Genres (R9.1) with the banner of the demo library's near
 # duplicates (R9.5) and Electronic's ⋯ menu open, as its mockup draws it. L09 is Needs attention
 # (R2.8) with Same song twice chosen (R2.12), its groups of copies open and the other groups folded
-# after it, as its mockup draws it. L13 has no mockup: the Review… dialog of Signal Fires' copies
+# after it, as its mockup draws it. L14 has no mockup: Move to trash's question (R2.11) over
+# Folders, about Mara Okafor's Kindling, drawn after L13's. L13 has no mockup: the Review… dialog
+# of Signal Fires' copies
 # (R2.12) over it, drawn after T01's preview. T06 is Fix encoding… (R4.10) over it, on the demo
 # library's Маяк, saved as Windows-1251 in a Latin-1 frame, as its mockup draws it. P01 is Road
 # Trip's page (R8.2) with the sidebar's playlists (R6.3) and a drag held still (R8.5, R6.10), as
@@ -121,6 +124,15 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         {"view": "folders", "folder": "Lumen Drift/Tide Tables", "mode": "small", "infer": True},
     ),
     ("T03-organize-files", {"view": "folders", "folder": "", "mode": "small", "organize": ""}),
+    (
+        "L14-move-to-trash",
+        {
+            "view": "folders",
+            "folder": "Mara Okafor",
+            "mode": "small",
+            "trash": "Mara Okafor/Kindling",
+        },
+    ),
     ("L12-search", {"view": "albums", "search": "lumen dri"}),
     (
         "N08-up-next",
@@ -205,6 +217,7 @@ class Tour(QObject):
         dragging: Dragging | None = None,
         smart: SmartPlaylists | None = None,
         organize: OrganizeFiles | None = None,
+        removing: Removing | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -217,7 +230,7 @@ class Tour(QObject):
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
-        self.smart, self.organize = smart, organize
+        self.smart, self.organize, self.removing = smart, organize, removing
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -271,6 +284,8 @@ class Tour(QObject):
             self.smart.go(step)
         if self.organize is not None and "view" in step:
             self.organize.go(step)
+        if self.removing is not None and "view" in step:
+            self.removing.go(step)
         self._size = 0
         self._at_size()
 

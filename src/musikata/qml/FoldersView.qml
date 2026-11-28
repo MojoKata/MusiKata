@@ -37,6 +37,7 @@ Item {
     property var dragging: null  // folders and files dragged: the selection when the row is in it
     property var organize: null  // Organize files' dialog (R12.2)
     property var attention: null  // Show in file manager (R2.9.6), as Needs attention's Show in folder
+    property var removing: null  // Move to trash and Ignore this folder (R2.11, R2.11.1); Delete's
     readonly property var folders: library.folders
     readonly property var rowsModel: folders.model
     readonly property string mode: folders.mode
@@ -65,6 +66,7 @@ Item {
     TapHandler { acceptedButtons: Qt.BackButton; onTapped: view.folders.back() }
     Keys.onReturnPressed: if (view.current >= 0) view.folders.activate(view.current)
     Keys.onEnterPressed: if (view.current >= 0) view.folders.activate(view.current)
+    Keys.onDeletePressed: if (view.removing !== null) view.removing.askSelection(view.rowsModel)
     // ← and → move the selection here, rather than seek (R6.9); Alt+← stays Back
     Keys.onShortcutOverride: (event) => event.accepted = (event.key === Qt.Key_Left || event.key === Qt.Key_Right) && !(event.modifiers & Qt.AltModifier)
     Keys.onLeftPressed: view.step(-1)
@@ -483,7 +485,7 @@ Item {
         return out
     }
 
-    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer; organize: view.organize; reveal: view.attention; playlists: view.playlists; playlistList: view.library.playlists }
+    SongMenu { id: songMenu; player: view.player; edit: view.edit; art: view.art; infer: view.infer; organize: view.organize; reveal: view.attention; removing: view.removing; playlists: view.playlists; playlistList: view.library.playlists }
 
     SelectionBar {
         objectName: "selectionBar"

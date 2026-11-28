@@ -22,6 +22,11 @@ use goes away (`QMediaDevices.audioOutputsChanged`), playback pauses, a new sink
 default device at its own rate, and the stream goes on from the sample the old device had played
 when the user presses play (A4.6).
 
+Each sink is made on the GUI thread and handed to the playback thread (`Sinks`): making one takes
+Qt's connection locks, which the GUI thread may hold while it waits on the GIL, so made on the
+playback thread, which holds the GIL, it could freeze the app (docs/process/coding.md, "Threads
+and processes").
+
 The GUI thread talks to the engine by queued signals only (the `Player` bridge, bridges.py), and
 hears back the same way; each song asked for carries a ticket of the bridge's, which comes back
 with what the engine says of it. What opens a song and which device it plays on are given to the
@@ -31,6 +36,7 @@ slice 9's (R19)."""
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 
 from PySide6.QtCore import (
@@ -56,6 +62,7 @@ log = logging.getLogger(__name__)
 
 FALLBACK_RATE = 48_000  # when a device doesn't say which rate it prefers
 NO_DEVICE = "there is no sound device"  # why a song failed when no device was there to play it
+CLOSING = "MusiKata is closing"  # why a song asked for as the window closes didn't play
 MOVED_STEP = 0.1  # the position is reported when it moves by this much (seconds)
 
 
@@ -138,6 +145,56 @@ class RingDevice(QIODevice):
         return True
 
 
+SinkMaker = Callable[[QAudioDevice, QAudioFormat], QAudioSink | None]
+
+
+class Sinks(QObject):
+    """Makes the playback thread's sinks on the GUI thread, where this lives, and moves each to
+    the thread that asked (A1.3, A4.1): a QAudioSink made holds Qt's connection locks while
+    PySide holds the GIL, so made on the playback thread it could wait on a lock the GUI thread
+    holds while that waits on the GIL, and neither would run again (docs/process/coding.md). The
+    playback thread waits for it, the GIL let go, only as a song opens or moves to another device,
+    when no sink plays; once closed, none is made and the wait ends."""
+
+    _asked = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._wanted: tuple[QAudioDevice, QAudioFormat, QThread] | None = None
+        self._made: QAudioSink | None = None
+        self._ready = threading.Event()
+        self._closed = False
+        self._asked.connect(self._make, Qt.ConnectionType.QueuedConnection)
+
+    def make(self, device: QAudioDevice, fmt: QAudioFormat) -> QAudioSink | None:
+        """A sink on `device` in `fmt`, living on the calling thread: made here when this is the
+        GUI thread, else made there and moved; None once closed."""
+        here = Shiboken.getCppPointer(QThread.currentThread())
+        if here == Shiboken.getCppPointer(self.thread()):
+            return None if self._closed else QAudioSink(device, fmt)
+        self._ready.clear()
+        self._wanted = (device, fmt, QThread.currentThread())
+        self._asked.emit()
+        self._ready.wait()
+        made, self._made = self._made, None
+        return made
+
+    @Slot()
+    def _make(self) -> None:
+        wanted, self._wanted = self._wanted, None
+        if wanted is not None and not self._closed:
+            device, fmt, thread = wanted
+            sink = QAudioSink(device, fmt)
+            sink.moveToThread(thread)
+            self._made = sink
+        self._ready.set()
+
+    def close(self) -> None:
+        """No sink is made from now on; a thread waiting for one is answered with none."""
+        self._closed = True
+        self._ready.set()
+
+
 class Engine(QObject):
     """The songs playing, on the playback thread: its slots are called there, by queued signals,
     and what it says goes back the same way, each song named by the ticket it was asked for
@@ -178,6 +235,8 @@ class Engine(QObject):
         self._reported = -1.0
         self._level = 1.0  # the volume, as a linear gain (R6.5)
         self._volume: gain.Volume | None = None  # applied to what the device takes (A4.4)
+        # what makes a sink: on the GUI thread, once on the playback thread (Sinks.make)
+        self.make_sink: SinkMaker = QAudioSink
 
     @Slot()
     def setup(self) -> None:
@@ -231,8 +290,12 @@ class Engine(QObject):
         """A sink on `device` reading `ring` at the volume, started or (after a move) waiting for
         play; False when it didn't open (and playing has stopped)."""
         rate, channels = fmt.sampleRate(), fmt.channelCount()
+        made = self.make_sink(device, fmt)
+        if made is None:
+            self._fail(CLOSING)
+            return False
         self._device = device
-        self._sink = QAudioSink(device, fmt)
+        self._sink = made
         self._sink.setBufferSize(stream.frames_of(stream.DEVICE_SECONDS, rate) * 4 * channels)
         self._volume = gain.Volume(self._level, stream.frames_of(gain.RAMP_SECONDS, rate))
         self._io = RingDevice(ring, self._volume)
@@ -463,6 +526,8 @@ class PlaybackThread:
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
+        self._sinks: Sinks | None = Sinks()  # the engine's sinks, made on this, the GUI thread
+        engine.make_sink = self._sinks.make
         self._thread: QThread | None = QThread()
         self._thread.setObjectName("playback")
         engine.moveToThread(self._thread)
@@ -479,12 +544,17 @@ class PlaybackThread:
         thread running, as it isn't once ended or when no song played."""
         if self._thread is None:
             return
+        if self._sinks is not None:  # a sink waited for is answered with none
+            self._sinks.close()
         if self._thread.isRunning():
             QMetaObject.invokeMethod(
                 self.engine, "shutdown", Qt.ConnectionType.BlockingQueuedConnection
             )
             self._thread.quit()
             self._thread.wait()
+        self.engine.make_sink = QAudioSink
         Shiboken.delete(self.engine)
         Shiboken.delete(self._thread)
-        self._thread = None
+        if self._sinks is not None:
+            Shiboken.delete(self._sinks)
+        self._thread = self._sinks = None

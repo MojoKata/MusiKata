@@ -716,3 +716,33 @@ def test_a_song_a_scan_finds_new_is_added_now_and_on_a_first_scan_when_its_file_
     added = dict(index.read().execute("SELECT path, added FROM song"))
     index.close()
     assert added == {"A/a.wav": 1_600_000_000.0, "C/b.wav": (now + timedelta(days=1)).timestamp()}
+
+
+def test_ignoring_a_folder_writes_its_musikataignore_and_its_songs_leave_at_once(tmp_path):
+    """R2.11.1, R2.3.1: Ignore this folder writes the folder's .musikataignore, so no scan walks
+    it, and its songs and folders leave the index at once, their files left where they are; an
+    ignore file there already stays as it was, and the root itself can't be ignored."""
+    root = tmp_path / "Music"
+    wav(root / "Keep" / "a.wav", 1)
+    wav(root / "Kindling" / "b.wav", 2)
+    wav(root / "Kindling" / "Live" / "c.wav", 3)
+    index = db.Index(str(tmp_path / "musikata.db"))
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            scanner.scan(str(root), index, pool, hold=False)
+            path = scanner.ignore(str(root), "Kindling")
+            assert path == str(root / "Kindling" / scanner.IGNORE)
+            assert scanner.forget(index, "Kindling") == 2
+            c = index.read()
+            assert [p for (p,) in c.execute("SELECT path FROM song")] == ["Keep/a.wav"]
+            assert sorted(p for (p,) in c.execute("SELECT path FROM folder")) == ["", "Keep"]
+            assert (root / "Kindling" / "Live" / "c.wav").exists()
+            (root / "Kindling" / scanner.IGNORE).write_text("kept")
+            scanner.ignore(str(root), "Kindling")
+            assert (root / "Kindling" / scanner.IGNORE).read_text() == "kept"
+            assert scanner.scan(str(root), index, pool, hold=False).added == 0
+            assert scanner.forget(index, "Gone") == 0
+        with pytest.raises(ValueError):
+            scanner.ignore(str(root), "")
+    finally:
+        index.close()

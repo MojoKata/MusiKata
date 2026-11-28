@@ -183,6 +183,18 @@ def thumbnail(data: bytes, side: int) -> QImage:
     return decoded(data, size.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatioByExpanding))
 
 
+def start_image_threads() -> None:
+    """Qt's GUI thread pool, which QImage's smooth scaling and its conversions share their work
+    with, made here, on the GUI thread, as the window loads (A1.3). Qt makes it at its first use:
+    made there by a cover's thread, holding the GIL, its making takes Qt's connection locks, which
+    the GUI thread may hold while it waits on the GIL, and the app freezes
+    (docs/process/coding.md, "Threads and processes"). An image of four of the conversion's
+    segments of 65,536 pixels, converted, is what makes Qt start it."""
+    image = QImage(512, 512, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    image.convertToFormat(QImage.Format.Format_RGB32)
+
+
 class Covers(QQuickImageProvider):
     """`image://covers/<name>`: an album's cover's thumbnail, from the cache or made and kept
     there. `read` is this thread's connection to the index (db.Index.read), `pictures` reads a
@@ -196,6 +208,7 @@ class Covers(QQuickImageProvider):
         pictures: Callable[[str], list[tags.Picture]] = tags.pictures,
     ) -> None:
         super().__init__(QQuickImageProvider.ImageType.Image)
+        start_image_threads()  # here, on the GUI thread, before a cover's thread scales one
         self._root, self._read, self._cache, self._pictures = root, read, cache, pictures
 
     def requestImage(self, id: str, size: QSize, requestedSize: QSize) -> QImage:  # noqa: A002, N803

@@ -69,6 +69,7 @@ from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .playlists import Playlists
 from .plays import PlayCounts
 from .ratings import Ratings, file_writer
+from .removing import Removing
 from .smart import SmartPlaylists
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
@@ -185,6 +186,7 @@ class Shell:
     dragging: Dragging | None = None
     smart: SmartPlaylists | None = None
     organize: OrganizeFiles | None = None
+    removing: Removing | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -195,7 +197,7 @@ class Shell:
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
             self.copies, self.encodings, self.infer, self.playlists, self.dragging, self.smart,
-            self.organize,
+            self.organize, self.removing,
         )  # fmt: skip
 
 
@@ -219,6 +221,7 @@ def close_bridges(
     dragging: Dragging | None = None,
     smart: SmartPlaylists | None = None,
     organize: OrganizeFiles | None = None,
+    removing: Removing | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the
     playback thread, the Edit tags panel's, Album art's, the merges', Fix encoding…'s and Infer
@@ -251,6 +254,8 @@ def close_bridges(
         smart.shut()
     if organize is not None:
         organize.shut()
+    if removing is not None:
+        removing.shut()
     if dragging is not None:
         dragging.close()
     if attention is not None:
@@ -265,7 +270,7 @@ def close_bridges(
     index.close()
     release(
         controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, dragging,
-        smart, organize, attention, ratings, changes, player, library,
+        smart, organize, removing, attention, ratings, changes, player, library,
     )  # fmt: skip
 
 
@@ -391,6 +396,9 @@ def load(
     dragging = Dragging(root, index.read, library, lists, player, say=changes.say)
     files = organize_files(root, index, library, changes, store, lists, dragging, tags_settings,
                            home_of(env), clock)  # fmt: skip
+    # Move to trash and Ignore this folder (R2.11, R2.11.1), between the library's scans
+    removing = Removing(root, index, library, changes,
+                        available=lambda: bool(library.property("available")))  # fmt: skip
     needs, names, copies = attend(
         library, root, index, clock, edit, album_art, genre_tools, writing, changes, tags_settings,
         missing, counts, fix, infer, lists, store,
@@ -413,6 +421,7 @@ def load(
             "dragging": dragging,
             "smart": smart,
             "organize": files,
+            "removing": removing,
         }  # fmt: skip
     )
     engine.load(QUrl.fromLocalFile(QML))
@@ -423,7 +432,8 @@ def load(
         close_bridges(player, counts, library, index, changes=changes, edit=edit, ratings=rating,
                       art=album_art, genres=genre_tools, attention=needs, names=names,
                       copies=copies, encodings=fix, infer=infer, playlists=lists,
-                      dragging=dragging, smart=smart, organize=files)  # fmt: skip
+                      dragging=dragging, smart=smart, organize=files,
+                      removing=removing)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -431,7 +441,7 @@ def load(
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
         changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
-        dragging, smart, files,
+        dragging, smart, files, removing,
     )  # fmt: skip
 
 
@@ -904,11 +914,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         dragging = session.shell.dragging if session.shell is not None else None
         smart = session.shell.smart if session.shell is not None else None
         files = session.shell.organize if session.shell is not None else None
+        removing = session.shell.removing if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
             copies=copies, encodings=fix, infer=infer, dragging=dragging, smart=smart,
-            organize=files,
+            organize=files, removing=removing,
         ).start()  # fmt: skip
     else:
         session.window.show()

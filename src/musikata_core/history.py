@@ -61,7 +61,7 @@ from datetime import UTC, datetime, timedelta
 from . import art, db, organize, rootfiles, scanner
 from .art import ImageWritten
 from .clock import Clock
-from .organize import Moved
+from .organize import Moved, Trashed
 from .rootfiles import Entry as Plays
 from .tags import Batch, Failed, Job, Outcome, Picture, Tags, WriteError, Written, compose
 from .tags import pictures as read_pictures
@@ -713,15 +713,19 @@ class Recording:
         self._history = folder_of(root)
         self.files: list[FileChange] = []
 
-    def saved(self, written: Written | ImageWritten | Moved) -> None:
+    def saved(self, written: Written | ImageWritten | Moved | Trashed) -> None:
         """A file written (safe.Written, or art.ImageWritten for cover.jpg): what it changed kept,
-        its old cover, other pictures or image in images/; or a file moved (organize.Moved, R12):
-        the path it had."""
+        its old cover, other pictures or image in images/; a file moved (organize.Moved, R12):
+        the path it had; or a file or folder moved to the trash (organize.Trashed, R2.11): each
+        song that went, or the file itself."""
         if isinstance(written, ImageWritten):
             self._image(written)
             return
         if isinstance(written, Moved):
             self._moved(written)
+            return
+        if isinstance(written, Trashed):
+            self._trashed(written)
             return
         if not written.changed or written.before is None:
             return
@@ -764,6 +768,15 @@ class Recording:
                         self._root)  # fmt: skip
             return
         self.files.append(FileChange(path, moved.hash, {}, moved_from=old))
+
+    def _trashed(self, trashed: Trashed) -> None:
+        path = scanner.path_under(self._root, trashed.path)
+        if path is None:
+            log.warning("%s isn't under %s: the change history passes it by", trashed.path,
+                        self._root)  # fmt: skip
+            return
+        went = trashed.songs or ((path, trashed.hash),)
+        self.files += [FileChange(p, h, {}, trashed=True) for p, h in went]
 
     def _keep(self, data: bytes, path: str) -> str:
         try:
@@ -1062,12 +1075,19 @@ def jobs(plan_: Plan, root: str, overwrite: bool) -> list[Job]:
     """The files to write to undo `plan_`: each that can be, with its old values; those changed
     since (R4.9.1) only when `overwrite`, the user's answer."""
     out = []
-    for f in plan_.files:
-        if f.why or f.path is None or (f.lost and not overwrite):
-            continue
+    doing = [f for f in plan_.files if not f.why and f.path is not None
+             and (not f.lost or overwrite)]  # fmt: skip
+    # the moves (R12) back, a .cue sheet's FILE lines with them (organize.move_jobs)
+    moves = [
+        organize.Move(f.path, f.change.moved_from, hash=f.change.hash)
+        for f in doing
+        if f.path is not None and f.change.moved_from is not None and not f.change.tags
+    ]
+    back = {m.old: job for m, job in zip(moves, organize.move_jobs(root, moves), strict=True)}
+    for f in doing:
+        assert f.path is not None
         if f.change.moved_from is not None and not f.change.tags:  # a move (R12): back
-            out.append(organize.move_job(root, organize.Move(f.path, f.change.moved_from,
-                                                             hash=f.change.hash)))  # fmt: skip
+            out.append(back[f.path])
             continue
         if not f.change.image and not f.change.tags:
             continue  # its plays alone (R2.12): `undo` gives them back

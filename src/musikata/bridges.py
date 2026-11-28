@@ -542,6 +542,7 @@ class Library(QObject):
     _finished = Signal(object)
     _reached = Signal(str, str, object)  # a folder a scan's walk listed (scanner.Reached)
     _indexed = Signal(object)  # the rows of files MusiKata wrote updated (`saved`), or why not
+    _ran = Signal(object)  # a job run between scans (`between`): its `then`, and what it gave
 
     def __init__(
         self,
@@ -617,6 +618,7 @@ class Library(QObject):
         self._finished.connect(self._on_finished)
         self._reached.connect(self._on_reached)
         self._indexed.connect(self._on_indexed)
+        self._ran.connect(self._on_ran)
         self._counts = (0, 0, 0)
         self._given = given
         self._missing = missing  # the root isn't there (R2.10)
@@ -625,6 +627,8 @@ class Library(QObject):
         self._held: list[str] = []  # songs gone, waiting on the user's answer (R2.10.1)
         self._kept: set[str] = set()  # songs gone the user said to keep, not asked about again
         self._removing: list[str] = []  # songs gone the user said to remove, waiting their turn
+        # jobs that change which files the library has, waiting their turn (`between`)
+        self._jobs: list[tuple[Callable[[], object], Callable[[object], object]]] = []
         self._taking: set[str] = set()  # those being taken out now
         self._unreadable: tuple[int, list[tuple[str, str]]] = (0, [])
         self._presence = watch.Presence(root, looking, look_every, self)
@@ -975,7 +979,9 @@ class Library(QObject):
         root's, if asked for meanwhile, else the folders gathered and due."""
         if self._busy or self._closed:
             return
-        if self._removing:
+        if self._jobs:
+            self._start_job()
+        elif self._removing:
             self._start_removal()
         elif self._scanning:
             self._start(None)
@@ -1080,6 +1086,40 @@ class Library(QObject):
         self._removing += self._held
         self._held = []
         self.changed.emit()
+        self._next()
+
+    def between(self, job: Callable[[], object], then: Callable[[object], object]) -> None:
+        """A job that changes which files the library has (R2.11's Move to trash, R2.11.1's
+        Ignore this folder), run on the scan's thread when no scan runs, so no scan meets its
+        files half gone and takes them for missing (R2.10.1); `then` is given what it gave (or
+        the exception it raised, logged), here, once the lists are read again."""
+        self._jobs.append((job, then))
+        self._next()
+
+    def _start_job(self) -> None:
+        self._busy = True
+        job, then = self._jobs.pop(0)
+        self._thread = threading.Thread(
+            target=self._run_job, args=(job, then), name="scan", daemon=True
+        )
+        self._thread.start()
+
+    def _run_job(self, job: Callable[[], object], then: Callable[[object], object]) -> None:
+        result: object
+        try:
+            result = job()
+        except Exception as e:  # noqa: BLE001  (logged; `then` says what wasn't done)
+            log.exception("a change to the library's files failed")
+            result = without_traceback(e)
+        self._ran.emit((then, result))
+
+    @Slot(object)
+    def _on_ran(self, ran: tuple[Callable[[object], object], object]) -> None:
+        self._busy = False
+        if not self._closed:
+            self.reload()
+            then, result = ran
+            then(result)
         self._next()
 
     def _start_removal(self) -> None:
@@ -1237,6 +1277,7 @@ class Library(QObject):
         """Stops watching, waits for the threads and ends the worker processes: for closing. No
         scan starts after."""
         self._closed = True
+        self._jobs = []  # what waited its turn never runs, and its callbacks are let go (A1.3)
         self._presence.close()
         if self._watcher is not None:
             self._watcher.close()

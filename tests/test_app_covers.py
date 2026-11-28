@@ -471,3 +471,42 @@ def test_after_each_scan_the_cache_is_trimmed_on_the_scans_thread(tmp_path, inde
     scanned(lib)
     assert isinstance(lib.last, scanner.Result) and "trimming the cover cache" in caplog.text
     lib.close()
+
+
+# Qt's GUI thread pool, which QImage's smooth scaling and its conversions share their work with,
+# is made at its first use; made by a cover's thread, which holds the GIL, its making takes Qt's
+# connection locks, and the GUI thread may hold one of those while it waits on the GIL
+# (tests/locks.py). So the window makes it (covers.start_image_threads); here, after it, a cover's
+# thread scales and converts while every lock is held, and returns once they are let go.
+POOL = """
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication, QImage
+from musikata import covers
+app = QGuiApplication([])
+if "{start}" == "yes":
+    covers.start_image_threads()
+image = QImage(1200, 1200, QImage.Format.Format_ARGB32_Premultiplied)
+image.fill(0)
+kept, threads = hold(1.0)
+done = []
+def cover():
+    image.scaled(600, 600, Qt.AspectRatioMode.KeepAspectRatio,
+                 Qt.TransformationMode.SmoothTransformation)
+    image.convertToFormat(QImage.Format.Format_RGB32)
+    done.append(True)
+t = threading.Thread(target=cover)
+t.start()
+t.join()
+for h in threads:
+    h.join()
+print("done" if done else "not done")
+"""
+
+
+@pytest.mark.slow
+def test_qts_image_threads_are_made_on_the_gui_thread_so_a_covers_scaling_never_deadlocks():
+    import locks
+
+    done = locks.run(POOL.replace("{start}", "yes"))
+    assert done is not None, "a cover's smooth scaling deadlocked with a thread holding Qt's lock"
+    assert done.returncode == 0 and done.stdout.strip() == "done", done.stderr

@@ -15,6 +15,7 @@ Item {
     required property var library
     property var history: null
     property var organize: null        // Organize files (R12.2), in Folders and on an album's page
+    property var removing: null        // in Folders: Ignore this folder and Move to trash (R2.11)
     property bool open: false           // the search box opened from its icon on a narrow header
     readonly property real fieldMax: 250
     readonly property real fieldMin: 180
@@ -331,7 +332,8 @@ Item {
         }
 
         Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, and Change history, R4.9, so far; Organize
-            // files…, R12.2, first in Folders and on an album's page)
+            // files…, R12.2, first in Folders and on an album's page; in a folder of Folders,
+            // Ignore this folder and Move to trash, R2.11.1, R2.11)
             id: moreButton
             objectName: "more"
             width: 34
@@ -368,6 +370,22 @@ Item {
             visible: header.organize !== null && header.library.canOrganize
             height: visible ? implicitHeight : 0
             onTriggered: header.organize.openView(header.library)
+        }
+        MenuItem {
+            objectName: "ignoreFolder"
+            text: qsTr("Ignore this folder")
+            visible: header.removing !== null && header.library.view === "folders"
+                     && header.library.folders.path !== ""
+            height: visible ? implicitHeight : 0
+            onTriggered: header.removing.ignoreFolder(header.library.folders.path)
+        }
+        MenuItem {
+            objectName: "trashFolder"
+            text: qsTr("Move to trash")
+            visible: header.removing !== null && header.library.view === "folders"
+                     && header.library.folders.path !== ""
+            height: visible ? implicitHeight : 0
+            onTriggered: header.removing.askFolder(header.library.folders.path)
         }
         MenuItem {
             objectName: "rescan"

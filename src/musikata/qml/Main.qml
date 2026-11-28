@@ -34,7 +34,9 @@ import "."
 // MusiKata as their files; the drag's picture is a card kept off the window (DragCard), and files
 // from another app dropped anywhere else are brought into the library (R12.5). Organize files (R12)
 // opens its dialog over the whole window, from the header's ⋮ menu in Folders and on an album's
-// page, the selection bars and the right-click menus, and for files dropped from outside.
+// page, the selection bars and the right-click menus, and for files dropped from outside. Move to
+// trash (R2.11), from the right-click menus, an album's ⋯ menu, Folders' ⋮ menu and Delete in the
+// library views, asks first over the window; Ignore this folder (R2.11.1) doesn't.
 Window {
     id: win
     required property var library
@@ -53,6 +55,7 @@ Window {
     required property var dragging
     required property var smart
     required property var organize
+    required property var removing
     width: 1280
     height: 800
     minimumWidth: 960
@@ -66,6 +69,7 @@ Window {
                                   || win.encodings.opened || win.infer.opened
                                   || win.playlists.opened || win.smart.opened
                                   || win.organize.opened
+                                  || win.removing.question.title !== undefined
 
     DropArea {  // files from another app dropped anywhere else (R6.10): into the library (R12.5)
         objectName: "windowDrop"
@@ -101,6 +105,7 @@ Window {
         library: win.library
         history: win.history
         organize: win.organize
+        removing: win.removing
     }
     Item {  // the panel docked on the right: Change history over Edit tags
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -201,15 +206,15 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art; dragging: win.dragging } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize } }
+    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; removing: win.removing } }
     Component { id: artists; ArtistsView { library: win.library; dragging: win.dragging } }
-    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists; dragging: win.dragging } }
+    Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists; dragging: win.dragging; removing: win.removing } }
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres; dragging: win.dragging } }
-    Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists; dragging: win.dragging } }
-    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize } }
+    Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists; dragging: win.dragging; removing: win.removing } }
+    Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; removing: win.removing } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; attention: win.attention } }
-    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; smart: win.smart } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; attention: win.attention; removing: win.removing } }
+    Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; smart: win.smart; removing: win.removing } }
 
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -291,6 +296,11 @@ Window {
         objectName: "playlistQuestion"
         anchors.fill: parent
         copies: win.playlists
+    }
+    CopiesQuestion {  // Move to trash's question (R2.11, R6.8)
+        objectName: "removingQuestion"
+        anchors.fill: parent
+        copies: win.removing
     }
     Shortcut {
         sequence: "Ctrl+E"

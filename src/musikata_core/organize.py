@@ -31,6 +31,8 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import posixpath
+import re
 import shutil
 import sqlite3
 import unicodedata
@@ -38,7 +40,7 @@ from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
-from . import albums, art, folders, patterns, rootfiles, scanner, search, sortnames
+from . import albums, art, attention, folders, patterns, rootfiles, scanner, search, sortnames
 from .patterns import Pattern
 from .tags import EXTENSIONS, Job, Tags, WriteError, Written
 from .tags import read as read_tags
@@ -51,6 +53,8 @@ SIDECARS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".cue", ".lrc", ".
 LYRICS = ".lrc"  # a song's own lyrics, named as it is (R17.1), follow it renamed
 # what a system leaves in a folder of its own accord: a folder holding nothing else is empty
 CLUTTER = frozenset({".ds_store", "thumbs.db", "desktop.ini"})
+CUE = ".cue"  # a sheet naming an album's files (A2.6), its FILE lines following them (R12.3)
+NAMES = "names"  # a .cue's move: the files of its folder that move too, and where (`move_jobs`)
 TWICE = "twice"  # R12.4: another file of the plan gets the same path
 TAKEN = "taken"  # R12.4: a file is at the new path already
 MOVE = "move"  # a move's Job: its changes name the whole path it goes to
@@ -191,6 +195,25 @@ def plan(
     return Plan(tuple(moves), in_place, tuple(untagged), emptied)
 
 
+def companions(names: Collection[str], going: Collection[str]) -> list[tuple[str, str | None]]:
+    """R12.3: of a folder's entries (`names`, a subfolder's with "/" after it), the files beside
+    its songs that go with the songs named in `going`, in order: each with the name of the song
+    whose own lyrics it is (named as it is, R17.1), or None for the album's (images, `.cue`,
+    `.log`, other lyrics), which go only when every song of the folder goes. Organize files moves
+    them (R12.3), Move to trash takes them to the trash (R2.11)."""
+    by_stem = {os.path.splitext(n)[0]: n for n in going}
+    whole = not any(_audio(n) and not n.endswith("/") and n not in going for n in names)
+    out: list[tuple[str, str | None]] = []
+    for n in sorted(names):
+        if n.endswith("/") or not _sidecar(n):
+            continue
+        stem, ext = os.path.splitext(n)
+        song = by_stem.get(stem) if ext.lower() == LYRICS else None
+        if song is not None or whole:
+            out.append((n, song))
+    return out
+
+
 def _sidecars(
     songs: Sequence[Move], beside: Mapping[str, Collection[str]], unchecked: Collection[str]
 ) -> list[Move]:
@@ -201,23 +224,14 @@ def _sidecars(
             leaving.setdefault(folder_of(m.old), []).append(m)
     out: list[Move] = []
     for folder, gone in leaving.items():
-        names = beside.get(folder, ())
-        by_stem = {os.path.splitext(name_of(m.old))[0]: m for m in gone}
-        moving = {name_of(m.old) for m in gone}
-        whole = not any(_audio(n) and not n.endswith("/") and n not in moving for n in names)
+        by_name = {name_of(m.old): m for m in gone}
         dest = Counter(folder_of(m.new) for m in gone).most_common(1)[0][0]
-        for n in sorted(names):
-            if n.endswith("/") or not _sidecar(n):
-                continue
-            stem, ext = os.path.splitext(n)
+        for n, owner in companions(beside.get(folder, ()), by_name):
             old = f"{folder}/{n}" if folder else n
-            song = by_stem.get(stem) if ext.lower() == LYRICS else None
-            if song is not None:  # the song's own lyrics, named as it is now
-                new = f"{os.path.splitext(song.new)[0]}{ext}"
-            elif whole:
-                new = f"{dest}/{n}" if dest else n
+            if owner is not None:  # the song's own lyrics, named as it is now
+                new = f"{os.path.splitext(by_name[owner].new)[0]}{os.path.splitext(n)[1]}"
             else:
-                continue
+                new = f"{dest}/{n}" if dest else n
             if new != old:
                 out.append(Move(old, new, None, None, old not in unchecked))
     return out
@@ -264,6 +278,201 @@ def _emptied(moves: Sequence[Move], beside: Mapping[str, Collection[str]]) -> tu
     return tuple(out)
 
 
+class Checking:
+    """Organize files' plan made once (`plan`, every move checked), off the GUI thread, and the
+    user's checkboxes over it (R12.2 to R12.4): a checkbox changed recounts only what it touches,
+    the files beside the songs of its folder (R12.3), the conflicts of the paths it shares (R12.4)
+    and the folders left empty, so a library of 50,000 songs answers a click at once. `now`, the
+    counts and `plan` are what `plan` would give with the same moves unchecked. `exists` says
+    whether a path is taken (R12.4's TAKEN): the disk's while the plan is made, then, set by the
+    caller, a lookup made once, so a checkbox reads nothing from the disk."""
+
+    def __init__(
+        self,
+        sources: Sequence[Source],
+        layout: Pattern,
+        beside: Mapping[str, Collection[str]],
+        exists: Callable[[str], bool],
+        articles: Sequence[str] = sortnames.ARTICLES,
+        prune: bool = True,
+    ) -> None:
+        whole = plan(sources, layout, beside, exists, (), articles, prune)
+        self.rows = tuple(replace(m, conflict="") for m in whole.moves)  # every move, checked
+        self.in_place, self.untagged = whole.in_place, whole.untagged
+        self._beside, self.exists, self._prune = beside, exists, prune
+        self._unchecked: set[str] = set()
+        self._songs: dict[str, list[Move]] = {}  # each folder's songs' moves, in order
+        for m in self.rows:
+            if m.song is not None:
+                self._songs.setdefault(folder_of(m.old), []).append(m)
+        self._sides: dict[str, list[str]] = {}  # each folder's files beside its songs moved now
+        self._now: dict[str, Move] = {}
+        self._counts: Counter[str] = Counter()  # each path's checked moves (TWICE)
+        self._by_key: dict[str, set[str]] = {}
+        self._ready: set[str] = set()
+        self._conflicted: set[str] = set()  # the checked moves waiting on a conflict
+        self._leaving: dict[str, set[str]] = {}  # each folder's names the ready moves take out
+        self._arriving: Counter[str] = Counter()  # each folder the ready moves go into or under
+        self._gone: set[str] = set()
+        for m in whole.moves:
+            if m.song is None:
+                self._sides.setdefault(folder_of(m.old), []).append(m.old)
+            self._now[m.old] = m
+            self._counts[_key(m.new)] += 1
+            self._by_key.setdefault(_key(m.new), set()).add(m.old)
+            if m.ready:
+                self._take(m)
+            elif m.checked:
+                self._conflicted.add(m.old)
+        self._gone = set(whole.emptied)
+
+    # ---------- reading it ----------
+
+    def now(self, old: str) -> Move | None:
+        """The move of the file at `old` as checked now; None for a file beside songs that stay
+        (R12.3), which doesn't move."""
+        return self._now.get(old)
+
+    def ready(self, old: str) -> bool:
+        """Whether the file at `old` moves: checked, with no conflict."""
+        return old in self._ready
+
+    @property
+    def chosen_count(self) -> int:
+        return len(self._ready)
+
+    @property
+    def conflict_count(self) -> int:
+        """The checked moves that wait on a conflict (R12.4)."""
+        return len(self._conflicted)
+
+    @property
+    def emptied_count(self) -> int:
+        return len(self._gone) if self._prune else 0
+
+    @property
+    def unchecked(self) -> frozenset[str]:
+        """The files whose moves are unchecked, by their paths."""
+        return frozenset(self._unchecked)
+
+    def chosen(self) -> list[Move]:
+        """The moves that will be made, in the rows' order."""
+        return [self._now[m.old] for m in self.rows if m.old in self._ready]
+
+    def emptied(self) -> tuple[str, ...]:
+        """The folders the moves leave empty, the deepest first (R12.3)."""
+        return tuple(sorted(self._gone, key=lambda p: (-p.count("/"), p))) if self._prune else ()
+
+    def plan(self) -> Plan:
+        """The plan as checked now, as `plan` gives it."""
+        moves = [self._now[m.old] for m in self.rows if m.old in self._now]
+        return Plan(tuple(moves), self.in_place, self.untagged, self.emptied())
+
+    # ---------- a checkbox ----------
+
+    def toggle(self, old: str) -> None:
+        """The move of the file at `old` checked, or not; what it touches recounted."""
+        self._unchecked ^= {old}
+        folder = folder_of(old)
+        moved = self._now.get(old)
+        if moved is None:  # a file beside songs that stay: checked or not, it waits for them
+            return
+        song = moved.song is not None
+        changed = {old} | (set(self._sides.get(folder, ())) if song else set())
+        before: dict[str, Move | None] = {o: self._now.get(o) for o in changed}
+        if song:  # the files beside its folder's songs go, or stay, with them
+            self._place_sides(folder)
+            changed |= set(self._sides.get(folder, ()))
+        else:
+            self._now[old] = replace(moved, checked=old not in self._unchecked)
+        for o in changed:
+            was, now = before.get(o), self._now.get(o)
+            if was is not None:
+                self._counts[_key(was.new)] -= was.checked
+                self._by_key[_key(was.new)].discard(o)
+            if now is not None:
+                self._counts[_key(now.new)] += now.checked
+                self._by_key.setdefault(_key(now.new), set()).add(o)
+        keys = {_key(m.new) for o in changed for m in (before.get(o), self._now.get(o)) if m}
+        touched = set(changed).union(*(self._by_key.get(k, set()) for k in keys))
+        prior = {o: before[o] if o in before else self._now.get(o) for o in touched}
+        for o in touched:
+            m = self._now.get(o)
+            self._conflicted.discard(o)
+            if m is not None:
+                self._now[o] = m = replace(m, conflict=self._conflict(m))
+                if m.checked and m.conflict:
+                    self._conflicted.add(o)
+        places: set[str] = set()
+        for o in touched:
+            was, now = prior[o], self._now.get(o)
+            if was is not None and o in self._ready and (now is None or not now.ready
+                                                         or now.new != was.new):  # fmt: skip
+                self._give_back(was)
+                places |= {folder_of(was.old), folder_of(was.new)}
+            if now is not None and now.ready and o not in self._ready:
+                self._take(now)
+                places |= {folder_of(now.old), folder_of(now.new)}
+        if self._prune:
+            self._recount_emptied(places)
+
+    def _conflict(self, m: Move) -> str:
+        """R12.4, as `_conflicts` says it."""
+        if m.checked and self._counts[_key(m.new)] > 1:
+            return TWICE
+        if m.checked and not same_path(m.old, m.new) and self.exists(m.new):
+            return TAKEN
+        return ""
+
+    def _place_sides(self, folder: str) -> None:
+        """The files beside `folder`'s songs moved now, by its checked songs (`_sidecars`)."""
+        for o in self._sides.pop(folder, []):
+            self._now.pop(o, None)
+        songs = [replace(m, checked=m.old not in self._unchecked) for m in self._songs[folder]]
+        for m in songs:
+            self._now[m.old] = replace(self._now[m.old], checked=m.checked)
+        for m in _sidecars(songs, {folder: self._beside.get(folder, ())}, self._unchecked):
+            self._now[m.old] = m
+            self._sides.setdefault(folder, []).append(m.old)
+
+    # ---------- the folders left empty (R12.3) ----------
+
+    def _take(self, m: Move) -> None:
+        self._ready.add(m.old)
+        self._leaving.setdefault(folder_of(m.old), set()).add(name_of(m.old))
+        folder = folder_of(m.new)
+        while folder:
+            self._arriving[_key(folder)] += 1
+            folder = folder_of(folder)
+
+    def _give_back(self, m: Move) -> None:
+        self._ready.discard(m.old)
+        self._leaving.get(folder_of(m.old), set()).discard(name_of(m.old))
+        folder = folder_of(m.new)
+        while folder:
+            self._arriving[_key(folder)] -= 1
+            folder = folder_of(folder)
+
+    def _recount_emptied(self, places: Iterable[str]) -> None:
+        every: set[str] = set()
+        for f in places:
+            while f:
+                every.add(f)
+                f = folder_of(f)
+        for f in sorted(every, key=lambda p: (-p.count("/"), p)):
+            self._gone.discard(f)
+            if f not in self._beside or self._arriving[_key(f)] > 0:
+                continue
+            leaving = self._leaving.get(f, set())
+            left = [
+                n for n in self._beside[f]
+                if n not in leaving and n.casefold() not in CLUTTER
+                and not (n.endswith("/") and f"{f}/{n[:-1]}" in self._gone)
+            ]  # fmt: skip
+            if not left:
+                self._gone.add(f)
+
+
 # ---------- the move (R12.4) ----------
 
 
@@ -295,10 +504,34 @@ def _taken(old: str, new: str) -> bool:
         return True
 
 
+def move_jobs(root: str, moves: Sequence[Move]) -> list[Job]:
+    """The batch's jobs of `moves` under `root` (`move_job`), in order; a `.cue` sheet's with the
+    files of its folder that move too, each by its name and the path it goes to from the sheet's
+    new folder (with /), so its FILE lines follow them (R12.3, `cue_renamed`). Organize files and
+    its Undo make theirs so."""
+    leaving: dict[str, dict[str, str]] = {}
+    for m in moves:
+        leaving.setdefault(folder_of(m.old), {})[name_of(m.old)] = m.new
+    out = []
+    for m in moves:
+        job = move_job(root, m)
+        if m.old.lower().endswith(CUE):
+            dest = folder_of(m.new) or "."
+            names = {n: posixpath.relpath(new, dest)
+                     for n, new in leaving.get(folder_of(m.old), {}).items()
+                     if n != name_of(m.old)}  # fmt: skip
+            if names:
+                job = Job(job.path, {**job.changes, NAMES: names})
+        out.append(job)
+    return out
+
+
 def move_file(job: Job) -> Moved:
     """A move (R12.4): the file at `job.path` renamed to the whole path its changes name (MOVE),
-    within its file system, the folder made first, never over another file. Raises WriteError,
-    the file left where it was, when it can't be."""
+    within its file system, the folder made first, never over another file; a `.cue` sheet's FILE
+    lines then name the files that moved with it where they went (NAMES, `cue_renamed`), a sheet
+    that can't be rewritten left as it was and logged. Raises WriteError, the file left where it
+    was, when it can't be moved."""
     new = str(job.changes[MOVE])
     digest = job.changes.get(HASH)
     if not os.path.lexists(job.path):
@@ -311,7 +544,87 @@ def move_file(job: Job) -> Moved:
     except OSError as e:
         raise WriteError(job.path, _why(e)) from e
     log.info("moved %s to %s", job.path, new)
+    names = job.changes.get(NAMES)
+    if isinstance(names, Mapping) and names:
+        _rewrite_cue(new, names)
     return Moved(new, job.path, digest if isinstance(digest, str) else None)
+
+
+def _rewrite_cue(path: str, names: Mapping[str, str]) -> None:
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        rewritten = cue_renamed(data, names)
+        if rewritten is None:
+            return
+        tmp = tmp_path(path)
+        try:
+            with open(tmp, "wb") as f:
+                f.write(rewritten)
+            shutil.copymode(path, tmp)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+            raise
+    except OSError as e:
+        log.warning("the FILE lines of %s, moved, weren't rewritten: %s", path, e)
+        return
+    log.info("the FILE lines of %s name the files moved with it", path)
+
+
+# a .cue sheet's FILE line: its start, its file quoted or not, and the type after it (A2.6)
+FILE_LINE = re.compile(r'(?i)^(\s*FILE\s+)(?:"([^"]*)"|(.*?))(\s+\S+\s*)?$')
+ABSOLUTE = re.compile(r"^(?:[A-Za-z]:|[\\/])")  # a ripper's folder: C:\Rips\ or /home/…/
+
+
+def cue_encoding(data: bytes) -> str:
+    """The encoding a `.cue` sheet's bytes are in, as attention.decode_cue reads them: UTF-8
+    with its BOM (`utf-8-sig`), UTF-8, else Windows' cp1252, else Latin-1."""
+    if data.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    for codec in ("utf-8", "cp1252"):
+        try:
+            data.decode(codec)
+        except UnicodeDecodeError:
+            continue
+        return codec
+    return "latin-1"
+
+
+def cue_renamed(data: bytes, names: Mapping[str, str]) -> bytes | None:
+    """A `.cue` sheet's bytes with each FILE line that names a file of `names` (by its name, after
+    any folder a ripper wrote before it, in any case) naming it as `names` gives instead: its path
+    from the sheet's folder, or, after a ripper's folder (`C:\\Rips\\`), its new name there. The
+    sheet keeps its encoding, its BOM and its line ends; a line naming a file in a subfolder, or a
+    name its encoding can't hold, is left as it was. None when no line changes."""
+    codec = cue_encoding(data)
+    text = data.decode(codec)
+    folded = {k.casefold(): v for k, v in names.items()}
+    parts = re.split(r"(\r\n|\r|\n)", text)
+    changed = False
+    for i in range(0, len(parts), 2):
+        found = FILE_LINE.match(parts[i])
+        if found is None:
+            continue
+        start, quoted, bare, tail = found.groups()
+        value = quoted if quoted is not None else (bare or "")
+        folder, _, name = value.replace("\\", "/").rpartition("/")
+        new = names.get(name, folded.get(name.casefold()))
+        if new is None or (folder and not ABSOLUTE.match(value)):
+            continue
+        if folder:  # a ripper's folder: kept as written, the new name after it
+            new = value[: len(folder) + 1] + new.rpartition("/")[2]
+        line = f'{start}"{new}"{tail or ""}' if quoted is not None or " " in new else (
+            f"{start}{new}{tail or ''}")  # fmt: skip
+        try:
+            line.encode(codec)
+        except UnicodeEncodeError:
+            log.warning("a .cue sheet in %s can't hold the name %s: its line is left", codec, new)
+            continue
+        if line != parts[i]:
+            parts[i], changed = line, True
+    return "".join(parts).encode(codec) if changed else None
 
 
 def _why(e: OSError) -> str:
@@ -463,6 +776,8 @@ class Follower:
         except Exception:  # noqa: BLE001  (logged: the next scan finds the moves by their hash)
             log.exception("the index didn't follow the files moved in %s", self.root)
             out.failed.append("the library")
+        else:
+            self._dismissals(moves)
         if self._repoint is not None:
             try:
                 out.playlists = self._repoint(dict(moves))
@@ -472,6 +787,18 @@ class Follower:
         if prune_left:
             out.removed = prune(self.root, {folder_of(old) for old, _ in moves})
         return out
+
+    def _dismissals(self, moves: Sequence[tuple[str, str]]) -> None:
+        """Needs attention's dismissals about an album's folder the moves emptied follow its songs
+        (attention.followed), in the index and the root's ignored.json (A2.8); one that can't be
+        written stays in the index, and the log says so."""
+        try:
+            made = self._write(lambda c: attention.followed(c, moves))
+            if isinstance(made, list) and made:
+                rootfiles.save_ignored(rootfiles.ignored_of(self.root), made)
+                log.info("%d dismissals followed the folders moved", len(made))
+        except (rootfiles.IgnoredError, OSError, sqlite3.Error) as e:
+            log.warning("the dismissals about the folders moved are in the index only: %s", e)
 
 
 # ---------- what the plan is made from: the index and the disk ----------
@@ -697,4 +1024,120 @@ def index_added(c: sqlite3.Connection, reads: list[scanner.Read], added: float,
         row = c.execute("SELECT id FROM song WHERE path = ?", (r.seen.path,)).fetchone()
         if row is not None:
             out.append(int(row[0]))
+    return out
+
+
+# ---------- removing songs to the trash (R2.11) ----------
+
+
+TRASH = "trash"  # a removal's Job: the file or folder at its path goes to the system's trash
+SONGS = "songs"  # and the songs it takes with it, for the change history
+
+
+@dataclass(frozen=True)
+class Going:
+    """A file or a folder Move to trash takes (R2.11): its path under the root, its audio hash
+    (None: a folder, or a file beside the songs), whether it is a folder, which goes whole, and
+    the songs it takes with it, each its path under the root and audio hash: a song's own, a
+    folder's every one beneath it."""
+
+    path: str
+    hash: str | None = None
+    folder: bool = False
+    songs: tuple[tuple[str, str | None], ...] = ()
+
+
+@dataclass(frozen=True)
+class Removal:
+    """What Move to trash would do (R2.11): the folders that go whole, then each song and the
+    files beside it that go with it (R12.3), in order."""
+
+    going: tuple[Going, ...] = ()
+
+    @property
+    def songs(self) -> list[tuple[str, str | None]]:
+        """Every song that goes, a folder's included: its path under the root and audio hash."""
+        return [s for g in self.going for s in g.songs]
+
+    @property
+    def folders(self) -> list[Going]:
+        """The folders that go whole."""
+        return [g for g in self.going if g.folder]
+
+    @property
+    def beside(self) -> list[Going]:
+        """The files beside the songs that go with them (R12.3)."""
+        return [g for g in self.going if not g.folder and not g.songs]
+
+
+def removal(
+    songs: Sequence[tuple[str, str | None]],
+    folders: Mapping[str, Sequence[tuple[str, str | None]]],
+    beside: Mapping[str, Collection[str]],
+) -> Removal:
+    """Move to trash's plan (R2.11) of `songs` (each its path under the root and audio hash) and
+    `folders` (each folder's path under the root, with the songs beneath it): each folder whole,
+    but one beneath another that goes, one with no songs (not the library's), and never the root;
+    each song but those in a folder that goes, with the files beside it in `beside` (each
+    folder's entries by name, as `listing` gives them) that go with it: its own lyrics, and the
+    album's images, `.cue`, `.lrc` and `.log` files when every song of its folder goes (R12.3,
+    `companions`)."""
+    chosen = sorted(f for f in folders if f and folders[f])  # a folder of no songs isn't listed
+    whole = [f for f in chosen if not any(f.startswith(o + "/") for o in chosen if o != f)]
+    going = [Going(f, None, True, tuple(dict.fromkeys(folders[f]))) for f in whole]
+    loose: dict[str, tuple[str, str | None]] = {}
+    for path, digest in songs:
+        if not any(path.startswith(f + "/") for f in whole):
+            loose.setdefault(path, (path, digest))
+    by_folder: dict[str, list[tuple[str, str | None]]] = {}
+    for song in loose.values():
+        by_folder.setdefault(folder_of(song[0]), []).append(song)
+    for folder, those in by_folder.items():
+        going += [Going(p, h, False, ((p, h),)) for p, h in those]
+        for n, _owner in companions(beside.get(folder, ()), {name_of(p) for p, _ in those}):
+            going.append(Going(f"{folder}/{n}" if folder else n))
+    return Removal(tuple(going))
+
+
+@dataclass(frozen=True)
+class Trashed:
+    """A file or folder moved to the trash (R2.11), as a batch's writer gives it: its whole path,
+    its audio hash (None: not a song) and the songs that went with it (paths under the root and
+    audio hashes; a folder's every one), which the change history names."""
+
+    path: str
+    hash: str | None = None
+    songs: tuple[tuple[str, str | None], ...] = ()
+
+
+def trash_job(root: str, g: Going) -> Job:
+    """The batch's job of moving `g` under `root` to the trash."""
+    return Job(scanner.full_path(root, g.path), {TRASH: True, HASH: g.hash, SONGS: g.songs})
+
+
+def trasher(trash: art.Trash = art.to_trash) -> Callable[[Job], Trashed]:
+    """Move to trash's writer (a tags.Batch's, R2.11): the file or folder at `job.path` moved to
+    the system's trash by `trash`, so the user can put it back by hand (Principle 5). Raises
+    WriteError, nothing moved, when it isn't there or can't be moved."""
+
+    def write(job: Job) -> Trashed:
+        if not os.path.lexists(job.path):
+            raise WriteError(job.path, "it isn't there any more")
+        if not trash(job.path):
+            raise WriteError(job.path, "it couldn't be moved to the trash")
+        log.info("moved %s to the trash", job.path)
+        digest, songs = job.changes.get(HASH), job.changes.get(SONGS)
+        return Trashed(job.path, digest if isinstance(digest, str) else None,
+                       tuple(songs) if isinstance(songs, tuple) else ())  # fmt: skip
+
+    return write
+
+
+def folders_left(root: str, trashed: Iterable[Trashed]) -> set[str]:
+    """The folders under `root` the files and folders `trashed` left, for `prune`."""
+    out = set()
+    for t in trashed:
+        path = scanner.path_under(root, t.path)
+        if path:
+            out.add(folder_of(path))
     return out

@@ -24,6 +24,7 @@ Item {
     property var art: null  // the Album art dialog (R5.2)
     property var infer: null  // Infer from path's dialog (R3.1)
     property var organize: null  // Organize files' dialog (R12.2)
+    property var removing: null  // Move to trash (R2.11): the ⋯ menu's, a row's, and Delete's
     property var dragging: null  // a song dragged: the selection when it is in it (R6.10)
     readonly property var album: library.album
     readonly property var tracks: album.songs
@@ -36,6 +37,7 @@ Item {
     }
     Keys.onReturnPressed: page.player.playSelection(page.tracks)
     Keys.onEnterPressed: page.player.playSelection(page.tracks)
+    Keys.onDeletePressed: if (page.removing !== null) page.removing.askSelection(page.tracks)
     Keys.onPressed: (event) => {
         const row = page.tracks.press(event.key, event.modifiers, Math.max(1, Math.floor(songs.height / 42)))
         event.accepted = row !== -2
@@ -174,6 +176,12 @@ Item {
                         enabled: page.library.playNote === ""
                         onTriggered: page.art.saveToFolder(page.album.id)
                     }
+                    MenuItem {
+                        objectName: "trashAlbum"
+                        text: qsTr("Move to trash")
+                        enabled: page.removing !== null && page.library.playNote === ""
+                        onTriggered: page.removing.askAlbum(page.album.id)
+                    }
                 }
             }
         }
@@ -262,5 +270,5 @@ Item {
             font { family: Theme.sans; pixelSize: 14 }
         }
     }
-    SongMenu { id: songMenu; player: page.player; edit: page.edit; infer: page.infer; playlists: page.playlists; playlistList: page.library.playlists }
+    SongMenu { id: songMenu; player: page.player; edit: page.edit; infer: page.infer; removing: page.removing; playlists: page.playlists; playlistList: page.library.playlists }
 }
