@@ -21,8 +21,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QObject, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QObject, QPoint, QRect, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QWindow
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 
 from . import layout
@@ -38,6 +38,7 @@ from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
 from .lyrics import Lyrics
+from .miniplayer import MiniPlayer
 from .nowplayingview import NowPlayingView
 from .organize import OrganizeFiles
 from .removing import Removing
@@ -85,7 +86,13 @@ SIZES = (SHOT, DESIGN)
 # offscreen, no platform drag can be held, so the targets' state is set directly). P02 has no
 # mockup: Four stars and up's page, a smart playlist (R8.9) drawn after P01, its kicker saying so,
 # its rule in words under its line, Edit rule beside Export… and its rows without drag handles; P03
-# is its Edit rule dialog over it, drawn after Export…'s.
+# is its Edit rule dialog over it, drawn after Export…'s. M01 is the mini player's seven layouts
+# (R15.3), a screen each (M01-mini-1-strip …), over Glass Harbor cued at Signal Fires as N01 is:
+# Cover's controls shown as under the pointer, as the mockup draws it, and Analyzer's landscape the
+# generated one N02's is; M02 is the Remote with its right-click menu open (R15.4). Each is the
+# mini player's own window (and its menu's) on a plain desktop, at its layout's default size.
+MINI = {"view": "album", "album": "Glass Harbor", "queue": "Glass Harbor", "at": 3,
+        "added": ["Neap Tide", "Moonpull"]}  # fmt: skip
 STEPS: list[tuple[str, dict[str, Any]]] = [
     ("L01-albums", {"view": "albums", "queue": "Glass Harbor"}),
     ("L02-album", {"view": "album", "album": "Glass Harbor", "search": "rating:>=4"}),
@@ -204,6 +211,14 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "lyrics": {"at": 98},
         },
     ),
+    ("M01-mini-1-strip", {**MINI, "mini": "strip"}),
+    ("M01-mini-2-cover", {**MINI, "mini": "cover", "miniHover": True}),
+    ("M01-mini-3-card", {**MINI, "mini": "card"}),
+    ("M01-mini-4-analyzer", {**MINI, "mini": "analyzer", "landscape": True}),
+    ("M01-mini-5-disc", {**MINI, "mini": "disc"}),
+    ("M01-mini-6-details", {**MINI, "mini": "details"}),
+    ("M01-mini-7-remote", {**MINI, "mini": "remote"}),
+    ("M02-mini-player-menu", {**MINI, "mini": "remote", "miniMenu": True}),
     ("T02-album-art", {"view": "album", "album": "Glass Harbor", "art": True}),
     ("G01-genres", {"view": "genres", "genreMenu": "Electronic"}),
     ("L09-needs-attention", {"view": "attention", "attention": "copies"}),
@@ -227,6 +242,8 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
     ("X02-root-unavailable", {"state": "unavailable", "view": "albums"}),
 ]
 POLL = 20  # ms between looks at whether the covers have loaded
+DESKTOP = QColor("#12151f")  # what the mini player's screens show behind its window
+ROOM = 40  # their room around it
 PATIENCE = 30_000  # ms the covers may take before the shot is taken anyway, and the tour fails
 
 
@@ -258,6 +275,33 @@ def analyzers(item: QQuickItem) -> list[Analyzer]:
     for child in item.childItems():
         found.extend(analyzers(child))
     return found
+
+
+def desktop(shots: list[tuple[QRect, QImage]]) -> QImage:
+    """Windows' pictures, each at its place on the screen, on a plain desktop ROOM wider than
+    them all (the mini player and its menu, M01, M02)."""
+    if not shots:
+        return QImage()
+    whole = QRect(shots[0][0])
+    for place, _ in shots[1:]:
+        whole = whole.united(place)
+    whole.adjust(-ROOM, -ROOM, ROOM, ROOM)
+    image = QImage(whole.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(DESKTOP)
+    painter = QPainter(image)
+    for place, shot in shots:
+        painter.drawImage(place.topLeft() - whole.topLeft(), shot)
+    painter.end()
+    return image
+
+
+def popups(skip: list[QWindow]) -> list[QQuickWindow]:
+    """The windows shown but those of `skip`: a menu's or a tooltip's of its own (Popup.Window)."""
+    return [
+        w
+        for w in QGuiApplication.topLevelWindows()
+        if isinstance(w, QQuickWindow) and w.isVisible() and all(w is not s for s in skip)
+    ]
 
 
 def _waiting_on(item: QQuickItem, tints: bool) -> None:
@@ -305,6 +349,7 @@ class Tour(QObject):
         now: NowPlayingView | None = None,
         tints: Tints | None = None,
         lyrics: Lyrics | None = None,
+        mini: MiniPlayer | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -318,7 +363,7 @@ class Tour(QObject):
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
         self.smart, self.organize, self.removing = smart, organize, removing
-        self.now, self.tints, self.lyrics = now, tints, lyrics
+        self.now, self.tints, self.lyrics, self.mini = now, tints, lyrics, mini
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -378,13 +423,37 @@ class Tour(QObject):
             self.lyrics.go(step)
         if self.now is not None and "view" in step:
             self.now.go(step)
-            for analyzer in analyzers(self.win.contentItem()):
-                analyzer.go(step)
+        if self.mini is not None and "view" in step:
+            self.mini.go(step)
+        if "view" in step:
+            for window in self._windows():
+                for analyzer in analyzers(window.contentItem()):
+                    analyzer.go(step)
         self._size = 0
         self._at_size()
 
+    def _windows(self) -> list[QQuickWindow]:
+        """The windows the step shows: the main window, and the mini player's when it is open."""
+        found = [self.win]
+        shown = self.mini.window if self.mini is not None else None
+        if isinstance(shown, QQuickWindow) and shown.isVisible():
+            found.append(shown)
+        return found
+
+    def _target(self) -> QQuickWindow:
+        """The window the current step's screen is of: the mini player's for M01 and M02."""
+        shown = self.mini.window if self.mini is not None else None
+        if "mini" in self.steps[self._i][1] and isinstance(shown, QQuickWindow):
+            return shown
+        return self.win
+
     def _at_size(self) -> None:
-        """The current step at its next size, once the window has taken it."""
+        """The current step at its next size, once the window has taken it; the mini player at
+        its layout's own."""
+        if self._target() is not self.win:
+            self._size = len(SIZES) - 1
+            QTimer.singleShot(0, self._shot)
+            return
         w, h = SIZES[self._size]
         if self.win.width() == w and self.win.height() == h:
             QTimer.singleShot(0, self._shot)
@@ -406,16 +475,18 @@ class Tour(QObject):
     def _shot(self) -> None:
         """Renders the step once, so its views make their rows and ask for their covers, then
         waits for the covers."""
-        self.win.grabWindow()
+        self._target().grabWindow()
         self._waited = 0
         self._settle()
 
     def _settle(self) -> None:
         name = self.steps[self._i][0]
-        if loading(self.win.contentItem()) or (self.tints is not None and self.tints.busy):
+        if loading(self._target().contentItem()) or (self.tints is not None and self.tints.busy):
             if self._waited < PATIENCE:
                 if self._waited % 2000 == 0:
-                    _waiting_on(self.win.contentItem(), self.tints is not None and self.tints.busy)
+                    _waiting_on(
+                        self._target().contentItem(), self.tints is not None and self.tints.busy
+                    )
                 self._waited += POLL
                 QTimer.singleShot(POLL, self._settle)
                 return
@@ -424,15 +495,23 @@ class Tour(QObject):
 
     def _take(self) -> None:
         name = self.steps[self._i][0]
-        w, h = SIZES[self._size]
-        image = self.win.grabWindow()
-        if SIZES[self._size] == SHOT:
+        target = self._target()
+        w, h = SIZES[self._size] if target is self.win else (target.width(), target.height())
+        shown = [target] if target is self.win else [target, *popups([self.win, target])]
+        if target is self.win:
+            image = target.grabWindow()
+        else:
+            image = desktop(
+                [(QRect(QPoint(s.x(), s.y()), s.size()), s.grabWindow()) for s in shown]
+            )
+        if SIZES[self._size] == SHOT or target is not self.win:
             os.makedirs(self.out, exist_ok=True)
             path = os.path.join(self.out, f"{name}.png")
             image.save(path)
             self.saved.append(path)
-        for fault in layout.faults(self.win):
-            self.faults.append(f"{name} at {w} x {h}: {fault['line']}")
+        for window in shown:
+            for fault in layout.faults(window):
+                self.faults.append(f"{name} at {w} x {h}: {fault['line']}")
         # each screen and size taken, and when, so a tour that stops says where
         print(f"the tour: {name} at {w} x {h}, {time.monotonic():.1f}", file=sys.stderr, flush=True)
         self._size += 1

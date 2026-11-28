@@ -180,6 +180,18 @@ def test_bars_more_than_the_first_render_had_are_drawn_in_the_items_place(view, 
     assert above == []  # none drawn at the window's top, as if the item were there
 
 
+def test_a_narrowed_waveform_draws_nothing_past_itself(view, qtbot):
+    """Narrowed after it was drawn (the mini player's Card resized, R15.2), the software
+    renderer's image is made anew at the new width: nothing is drawn past the item's edge."""
+    source = Source(np.zeros((0, 2), np.float32))
+    item = shown(view, qtbot, source, 0.0)  # at x 10, 320 wide
+    view.grabWindow()  # drawn with every bar 320 pixels hold
+    item.setWidth(100)
+    image = view.grabWindow()
+    past = [x for x in range(115, 340) if QColor(image.pixel(x, 20)).lightness() > 40]
+    assert past == []
+
+
 def nodes(node):
     """The scene-graph nodes in `node`'s subtree, itself included."""
     count, child = 1, node.firstChild()

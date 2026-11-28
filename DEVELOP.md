@@ -13,7 +13,7 @@ free software under the GPL, version 3 or later ([`LICENSE`](LICENSE)).
 | Requirements R1 to R19, architecture A1 to A7, process | Written; no open questions |
 | Mockups of every screen of the first release | Drawn ([`docs/mockups/`](docs/mockups/README.md)) |
 | Tooling, from AppKata: the documents and private-names checks, areas, skip lists, the clock harness, coverage floors, the Pages site, mutation testing, releases | Written; runs once `packaging/versions.env` and the first code exist |
-| Code and its tests, builds | Slices 1 to 6, tooling, the skeleton, the library, playback, editing and tidying, done; slice 7, files, underway ([#24](https://github.com/MojoKata/MusiKata/issues/24)) |
+| Code and its tests, builds | Slices 1 to 7, tooling, the skeleton, the library, playback, editing, tidying and files, done; slice 8, Now Playing, underway ([#25](https://github.com/MojoKata/MusiKata/issues/25)) |
 
 ## The build order
 

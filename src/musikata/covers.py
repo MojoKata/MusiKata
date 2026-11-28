@@ -16,6 +16,11 @@ layout with a gap between, and kept in the cache under a hash of its pieces' nam
 hashes of their covers' paths, sizes and modification times; so a changed cover makes a new
 mosaic, drawn when next shown.
 
+The mini player (R15.2) asks for a cover with its corners rounded, `image://covers/<name>?round=
+<share>`: the thumbnail with what lies outside a rounded square transparent, its corners' radius
+that share of its side (0.5: a disc, the Disc layout's), drawn as it is asked for and never kept,
+since a frameless window's corners have nothing behind them to hide a square cover's in.
+
 After each scan the cache is trimmed (A2.7, `trim`): a thumbnail or mosaic that no album or folder
 row points at any more is removed, with the colour kept beside it (R6.2.2, tints.py), on the scan's
 thread; a file of any other name is left."""
@@ -30,8 +35,8 @@ import sqlite3
 import tempfile
 from collections.abc import Callable, Collection
 
-from PySide6.QtCore import QByteArray, QDataStream, QRect, QSize, Qt
-from PySide6.QtGui import QImage, QImageReader, QPainter
+from PySide6.QtCore import QByteArray, QDataStream, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QBrush, QImage, QImageReader, QPainter
 from PySide6.QtQuick import QQuickImageProvider
 
 from musikata_core import art, folders, tags
@@ -40,6 +45,9 @@ log = logging.getLogger(__name__)
 
 SIZES = (256, 512)  # a thumbnail's shorter side, in pixels: the grids', the album page's
 MOSAIC = "mosaic/"  # a mosaic's address under the provider, before its pieces' names
+ROUND = (
+    "round="  # a cover's corners rounded (R15.2): after the name and a "?", their radius's share
+)
 # a cached thumbnail's or mosaic's file: its name (art.thumb_id, mosaic_name), its side, its kind;
 # or its colour (R6.2.2, tints.py)
 CACHED = re.compile(r"(m?[0-9a-f]{32})-(?:[0-9]+\.(?:jpg|png)|colour)")
@@ -147,6 +155,37 @@ def draw_mosaic(pieces: list[QImage], side: int) -> QImage:
     return image
 
 
+def rounded(image: QImage, share: float) -> QImage:
+    """`image` with its corners rounded, their radius `share` of its shorter side (0.5 and over: a
+    disc), what lies outside them transparent; an empty image stays empty. Painting holds the GIL
+    as draw_mosaic's does (coding.md, "Threads and processes")."""
+    if image.isNull():
+        return image
+    side = min(image.width(), image.height())
+    radius = max(0.0, min(0.5, share)) * side
+    out = QImage(image.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    out.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(out)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(image))
+    painter.drawRoundedRect(QRectF(0, 0, image.width(), image.height()), radius, radius)
+    painter.end()
+    return out
+
+
+def share_of(shape: str) -> float | None:
+    """The radius's share a cover's address asks for (`?round=0.05`); None when it asks for none,
+    or for what isn't a share."""
+    if not shape.startswith(ROUND):
+        return None
+    try:
+        share = float(shape[len(ROUND) :])
+    except ValueError:
+        return None
+    return share if 0 < share < float("inf") else None
+
+
 def side_for(requested: QSize) -> int:
     """The thumbnail size for an Image asking for `requested` (its sourceSize): the smallest of
     SIZES at least as large, else the largest."""
@@ -215,7 +254,10 @@ class Covers(QQuickImageProvider):
         self._root, self._read, self._cache, self._pictures = root, read, cache, pictures
 
     def requestImage(self, id: str, size: QSize, requestedSize: QSize) -> QImage:  # noqa: A002, N803
-        return self.image(id, side_for(requestedSize))
+        name, _, shape = id.partition("?")
+        image = self.image(name, side_for(requestedSize))
+        share = share_of(shape)
+        return rounded(image, share) if share is not None else image
 
     def image(self, name: str, side: int) -> QImage:
         """The thumbnail `name` at `side`, or a mosaic's (`mosaic_id`): the cached one, else made

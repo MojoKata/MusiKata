@@ -209,7 +209,9 @@ its bands, or graphic, with its ten gains (R19.1); a graphic one fitted from par
 them as `from_bands` until a slider changes (R19.6). `appearance` keeps Now Playing's visualization
 (R11.4.5), its Lyrics switch (`lyrics`, R17.3) and the 3D analyzer's bands and the seconds its
 landscape holds, set from its gear (R11.3.1): the gear offers 6, 3 and 1.5 seconds as speeds 0.5×,
-1× and 2×, and a hand-edited file may give any from 1 to 12:
+1× and 2×, and a hand-edited file may give any from 1 to 12. `mini_player` keeps the mini
+player's layout, Stay on top, and each layout's place and size as last left, in the screen's
+pixels, its rounded card without its shadow (R15.2, R15.3):
 
 ```json
 {
@@ -234,7 +236,8 @@ landscape holds, set from its gear (R11.3.1): the gear offers 6, 3 and 1.5 secon
                  "minimize_for_mini": true, "text_size": 100, "reduce_motion": "system"},
   "online": {"allowed": false, "services": {"musicbrainz": true, "coverartarchive": true,
              "lrclib": true}, "save_mbids": true, "check_updates": false},
-  "mini_player": {"layout": "card", "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582}}}
+  "mini_player": {"layout": "card", "stay_on_top": true,
+                  "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582}}}
 }
 ```
 

@@ -76,6 +76,9 @@ const STROKE = {
     eq: "M5 3V17M10 3V17M15 3V17",
     // the 3D analyzer's gear (R11.3.1)
     gear: ellipse(10, 10, 2.6, 2.6) + ellipse(10, 10, 5.2, 5.2) + spokes(10, 10, 5, 7.2, 8),
+    // the mini player's Stay on top (R15.2) and the sleep timer's moon (R7.10)
+    pin: "M7 2.5H13L12 8L15 11.5H5L8 8Z M10 11.5V17.5",
+    moon: "M8.52 3.16A7 7 0 1 0 16.84 11.48A6 6 0 0 1 8.52 3.16Z",
 }
 const FILL = {
     song: ellipse(5.8, 14.8, 2.4, 2) + ellipse(12.8, 12.8, 2.4, 2),

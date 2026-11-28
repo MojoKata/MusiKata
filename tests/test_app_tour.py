@@ -9,10 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fakes import FakeClock, fill
 from PySide6.QtCore import QUrl
+from PySide6.QtGui import QImage
 from PySide6.QtQml import QQmlComponent
 from PySide6.QtQuick import QQuickItem
 
 from musikata import app, tour
+from musikata.miniplayer import MARGIN
 
 
 @pytest.fixture
@@ -25,9 +27,9 @@ def shell(tmp_path):
     s.close()
 
 
-def run(shell, out, qtbot, only="", start=None):
+def run(shell, out, qtbot, only="", start=None, mini=None):
     codes = []
-    t = tour.Tour(shell.window, shell.library, str(out), only, codes.append)
+    t = tour.Tour(shell.window, shell.library, str(out), only, codes.append, mini=mini)
     (start or t.start)()
     qtbot.waitUntil(lambda: bool(codes), timeout=20_000)
     return t, codes[0]
@@ -44,6 +46,24 @@ def test_the_tour_saves_each_screen_and_passes_when_nothing_runs_past_its_box(
     assert os.path.getsize(t.saved[0]) > 1000
     assert (tmp_path / "tour" / "layout.txt").read_text() == ""
     assert (shell.window.width(), shell.window.height()) == tour.DESIGN
+
+
+@pytest.mark.slow
+def test_the_mini_players_screens_are_its_own_window_and_its_menu_on_a_desktop(
+    shell, tmp_path, qtbot
+):
+    """M01, M02 (R15): taken of the mini player's window at its layout's size, the menu's window
+    beside it, and their texts checked against their boxes too."""
+    fill(shell.index, [{"path": "a.flac", "title": "Signal Fires", "artist": "Lumen Drift"}])
+    t, code = run(shell, tmp_path / "tour", qtbot, only="M01-mini-1-strip,M02-mini-player-menu",
+                  mini=shell.mini)  # fmt: skip
+    assert code == 0 and t.faults == []
+    strip, menu = (QImage(p) for p in t.saved)
+    room = 2 * tour.ROOM
+    assert (strip.width(), strip.height()) == (496 + 2 * MARGIN + room, 76 + 2 * MARGIN + room)
+    assert strip.pixelColor(2, 2) == tour.DESKTOP
+    assert menu.height() > 246 + room  # the Remote, with its menu over it
+    assert tour.desktop([]).isNull()
 
 
 def test_it_waits_for_the_scan_and_fails_on_a_text_past_its_box(shell, tmp_path, qtbot):

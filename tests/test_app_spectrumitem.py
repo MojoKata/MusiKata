@@ -178,3 +178,55 @@ def test_the_spectrums_vertices_are_copied_into_its_geometry_node_as_the_scene_g
     raw = ctypes.string_at(int(geometry.vertexData()), item._vertices.nbytes)
     assert raw == item._vertices.tobytes()
     assert item._geometry_node(node) is node
+
+
+# ---------- the mini player's ten bars (R15.3) ----------
+
+
+def test_the_mini_players_ten_bars_stand_side_by_side_a_quiet_one_a_dot():
+    levels = np.array([0.0, 0.5, 1.0], np.float32)
+    rects = spectrumitem.bar_rects(levels, 13, 24, pad=0, gap=2, least=4)
+    assert rects[:, 0].tolist() == [0, 5, 10] and rects[:, 2].tolist() == [3, 3, 3]
+    assert rects[:, 3].tolist() == [4, 12, 24]  # a quiet bar is 4 high: a dot
+    assert rects[:, 1].tolist() == [20, 12, 0]
+
+
+def test_each_of_the_mini_players_bars_is_its_colour_along_the_gradient():
+    stops = [QColor("#22d3ee"), QColor("#a78bfa"), QColor("#f472b6")]
+    colours = spectrumitem.bar_colours(10, stops)
+    assert tuple(colours[0]) == (0x22, 0xD3, 0xEE, 255) and tuple(colours[-1]) == (
+        0xF4,
+        0x72,
+        0xB6,
+        255,
+    )
+    assert spectrumitem.bar_colours(3, []).shape == (3, 4)
+    rects = spectrumitem.bar_rects(np.array([0.0, 1.0], np.float32), 13, 24, 0, 2, 0)
+    v = spectrumitem.bar_vertices(
+        rects, 24, np.array([[255, 0, 0, 255], [0, 0, 255, 128]], np.uint8)
+    )
+    assert len(v) == 6  # the quiet bar, of no height, has none
+    assert all(tuple(c) == (0, 0, 128, 128) for c in v["rgba"])  # its own colour, premultiplied
+
+
+def test_the_ten_bars_shaped_in_qml_are_drawn_in_their_colours(view, qtbot):
+    player = Playing()
+    view.engine().rootContext().setContextProperty("thePlayer", player)
+    qml = (
+        "import QtQuick\nimport MusiKata\nRectangle { width: 80; height: 40; color: '#12151b'\n"
+        "  CoverSpectrum { objectName: 's'; x: 10; y: 8; width: 48; height: 24; bars: 10; pad: 0;"
+        " gap: 2; least: 4; colours: ['#22d3ee', '#a78bfa', '#f472b6']; player: thePlayer } }"
+    )
+    view.setSource(QUrl("data:text/plain," + qml))
+    view.show()
+    qtbot.waitExposed(view)
+    item = view.rootObject().findChild(spectrumitem.CoverSpectrum, "s")
+    assert item.property("bars") == 10 and len(item.property("levels")) == 10
+    assert (item.property("pad"), item.property("gap"), item.property("least")) == (0, 2, 4)
+    assert [c.name() for c in item.property("colours")] == ["#22d3ee", "#a78bfa", "#f472b6"]
+    image = view.grabWindow()
+    assert len(item._software) == 10
+    assert image.pixelColor(10 + 1, 8 + 22).name() == "#22d3ee"  # the first dot, cyan
+    assert image.pixelColor(10 + 45 + 1, 8 + 22).name() == "#f472b6"  # the last, pink
+    item.setProperty("bars", 10)  # the same: nothing
+    item.setProperty("colours", ["#22d3ee", "#a78bfa", "#f472b6"])

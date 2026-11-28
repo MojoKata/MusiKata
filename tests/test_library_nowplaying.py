@@ -584,6 +584,21 @@ def test_the_visualization_is_kept_on_the_same_thread_after_the_writes_before_it
     )
 
 
+def test_the_mini_players_layout_and_places_are_kept_on_the_same_thread(tmp_path, index):
+    """R15.2, R15.3: its writes of the shared settings never overlap the others'."""
+    recorder = Recorder()
+    where = where_in(tmp_path)
+    keeping = nowplaying.Keeping(
+        where, index.read, FakeClock(), set_appearance=recorder, set_mini_player=recorder
+    )
+    keeping.appearance(visualization="none")
+    assert keeping.mini_player(layout="disc").result() is True
+    keeping.close()
+    assert recorder.calls == [{"visualization": "none"}, {"layout": "disc"}]
+    assert len(set(recorder.threads)) == 1
+    assert nowplaying.Keeping(where, index.read, FakeClock()).mini_player(layout="disc") is None
+
+
 def test_a_write_that_breaks_is_logged_and_the_next_one_tries_again(tmp_path, caplog):
     where = where_in(tmp_path)
     keeping = nowplaying.Keeping(where, lambda: 1 / 0, FakeClock(), executor=ThreadPoolExecutor(1))

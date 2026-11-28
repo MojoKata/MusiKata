@@ -16,6 +16,7 @@ Item {
     property var history: null
     property var organize: null        // Organize files (R12.2), in Folders and on an album's page
     property var removing: null        // in Folders: Ignore this folder and Move to trash (R2.11)
+    property var mini: null            // ⋮ › Mini player (R15.1)
     property bool open: false           // the search box opened from its icon on a narrow header
     readonly property real fieldMax: 250
     readonly property real fieldMin: 180
@@ -331,7 +332,7 @@ Item {
             }
         }
 
-        Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, and Change history, R4.9, so far; Organize
+        Rectangle {  // ⋮ (R6.6; Rescan library, R2.3, Change history, R4.9, and Mini player, R15.1, so far; Organize
             // files…, R12.2, first in Folders and on an album's page; in a folder of Folders,
             // Ignore this folder and Move to trash, R2.11.1, R2.11)
             id: moreButton
@@ -398,6 +399,13 @@ Item {
             text: qsTr("Change history")
             enabled: header.history !== null
             onTriggered: header.history.show()
+        }
+        MenuItem {
+            objectName: "miniPlayerItem"
+            text: qsTr("Mini player")
+            visible: header.mini !== null
+            height: visible ? implicitHeight : 0
+            onTriggered: header.mini.open()
         }
     }
 }

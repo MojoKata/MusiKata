@@ -34,5 +34,5 @@ it that has none, shown as a list to check before saving. Saving is undoable (R4
 
 R17.5. **Editing.** **Edit…** opens the lyrics as text, timed ones with their `[mm:ss.xx]` times.
 While the song plays, **Set time** gives the line under the cursor the current position and
-moves to the next line, so plain lyrics can be timed by tapping along. **Save** keeps them as
-R17.4 does.
+moves to the next line, so plain lyrics can be timed by tapping along. **Save** keeps them as R17.4
+does.

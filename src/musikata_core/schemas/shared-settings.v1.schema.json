@@ -331,6 +331,10 @@
             "remote"
           ]
         },
+        "stay_on_top": {
+          "type": "boolean",
+          "description": "Stay on top, the pin (R15.2)"
+        },
         "places": {
           "type": "object",
           "additionalProperties": {
