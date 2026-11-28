@@ -25,7 +25,8 @@ when the user presses play (A4.6).
 Each sink is made on the GUI thread and handed to the playback thread (`Sinks`): making one takes
 Qt's connection locks, which the GUI thread may hold while it waits on the GIL, so made on the
 playback thread, which holds the GIL, it could freeze the app (docs/process/coding.md, "Threads
-and processes").
+and processes"). The devices watched are made and connected as the engine is, on the GUI thread,
+for the same reason: connecting to them takes those locks with the GIL held.
 
 The GUI thread talks to the engine by queued signals only (the `Player` bridge, bridges.py), and
 hears back the same way; each song asked for carries a ticket of the bridge's, which comes back
@@ -234,7 +235,10 @@ class Engine(QObject):
         self._outputs = outputs
         self._chosen = ""  # the device chosen in Settings, by its id; "" for the default
         self._timer: QTimer | None = None
-        self._devices: QMediaDevices | None = None
+        # the devices watched (A4.6), here where the engine is made, on the GUI thread, and moved
+        # with it: connecting to them connects them inside Qt with the GIL held (`setup`)
+        self._devices = QMediaDevices(self)
+        self._devices.audioOutputsChanged.connect(self._outputs_changed)
         self._device: QAudioDevice | None = None  # the one in use
         self._sink: QAudioSink | None = None
         self._started = False  # the sink was started (a sink opened by a move waits for play)
@@ -251,13 +255,15 @@ class Engine(QObject):
 
     @Slot()
     def setup(self) -> None:
-        """On the playback thread, as it starts: the timer that keeps the ring full, and the
-        devices watched (A4.6)."""
+        """On the playback thread, as it starts: the timer that keeps the ring full. The devices
+        are watched from the engine's making, on the GUI thread: PySide calls a sender's
+        `connectNotify` with the GIL held, and QMediaDevices' connects it to Qt's own list of
+        devices, under Qt's connection locks, so connected here it could wait on a lock the GUI
+        thread holds while that waits on the GIL (docs/process/coding.md, "Threads and
+        processes")."""
         self._timer = QTimer(self)
         self._timer.setInterval(round(stream.BLOCK_SECONDS * 1000))
         self._timer.timeout.connect(self._tick)
-        self._devices = QMediaDevices(self)
-        self._devices.audioOutputsChanged.connect(self._outputs_changed)
 
     # ---------- what the GUI asks ----------
 

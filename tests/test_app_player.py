@@ -722,6 +722,47 @@ def test_a_sink_is_made_on_the_gui_thread_so_opening_a_song_never_deadlocks():
     assert done.returncode == 0 and done.stdout.strip() == "made", done.stderr
 
 
+# PySide calls a sender's connectNotify with the GIL held, after Qt has connected without it, and
+# QMediaDevices' connects it to Qt's own list of devices, under Qt's connection locks: so the
+# engine watches the devices from its making, on the GUI thread. Here engines' threads start, and
+# run their setup, while every lock is held over and over by threads that wait on the GIL
+# (tests/locks.py, keep_holding); setup's own connects wait without the GIL, and each returns.
+# Connected in setup, as they once were, the devices' connectNotify waited on a lock with the GIL
+# held and never returned, in about half the engines: six make a pass without the fix unlikely.
+SETUP = """
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
+from musikata import player
+app = QGuiApplication([])
+engines = [player.Engine() for _ in range(6)]
+threads = [player.PlaybackThread(engine) for engine in engines]
+ready = []
+for engine in engines:
+    ready.append(threading.Event())
+    after_setup = Qt.ConnectionType.DirectConnection  # on the engine's thread, after its setup
+    engine.thread().started.connect(ready[-1].set, after_setup)
+stop, holders = keep_holding()
+for playback in threads:
+    playback.start()
+done = all(r.wait(10) for r in ready)
+stop.set()
+for h in holders:
+    h.join()
+print("set up" if done else "not set up")
+for playback in threads:
+    playback.close()
+"""
+
+
+@pytest.mark.slow
+def test_the_devices_are_watched_from_the_gui_thread_so_the_engines_setup_never_deadlocks():
+    import locks
+
+    done = locks.run(SETUP)
+    assert done is not None, "the engine's setup deadlocked with threads holding Qt's locks"
+    assert done.returncode == 0 and done.stdout.strip() == "set up", done.stderr
+
+
 def test_a_sink_asked_for_once_closed_is_none_and_one_asked_on_the_gui_thread_is_made_there(qapp):
     sinks = player.Sinks()
     device, fmt = QAudioDevice(), QAudioFormat()

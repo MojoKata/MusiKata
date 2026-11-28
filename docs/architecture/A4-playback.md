@@ -98,4 +98,7 @@ position, decodes forward to the exact sample, and replaces what is in the ring 
 sound moves within a block. Output devices are listed by `QMediaDevices`; when the device in use
 goes away (`audioOutputsChanged`), playback pauses, a new `QAudioSink` is opened on the default
 device at its rate, and the stream resumes from the same sample when the user presses play
-(R7.7).
+(R7.7). The `QMediaDevices` watched is made and connected as the engine is made, on the GUI
+thread, and moves to the playback thread with it: connecting to it connects it to Qt's own list of
+devices with Python's lock held, under Qt's connection locks (`docs/process/coding.md`, "Threads
+and processes").
