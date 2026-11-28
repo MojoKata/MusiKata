@@ -296,8 +296,15 @@ def _v13(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX song_added ON song (added)")
 
 
+def _v14(c: sqlite3.Connection) -> None:
+    """Waveforms (A2.1's waveform, A5.1, R11.1.1): each song's peaks, 2,000 pairs as a 16-bit
+    blob, kept by its audio hash (A2.3), so a retag, a move or a copy of the song finds it. Worked
+    out as songs play, so nothing needs reading again."""
+    c.execute("CREATE TABLE waveform (hash TEXT PRIMARY KEY, peaks BLOB NOT NULL)")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13, _v14,
 ]  # fmt: skip
 
 

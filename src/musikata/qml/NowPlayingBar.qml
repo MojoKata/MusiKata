@@ -1,13 +1,14 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import MusiKata
 import "."
 
 // The now-playing bar (R6.5, L01-albums), the full width along the bottom: on the left the song's
 // cover, title, artist and album and its rating, set by its stars (R10.2); in the centre
 // shuffle, previous, play/pause, next and repeat (R7.3), and under them the time played, the seek
-// bar and the length (a plain bar until R11.2's waveform; clicking or dragging it seeks there,
-// R7.4, and it never takes the focus, so ← and → seek whatever has it but a list or a box that
-// uses them); on the right the queue button, which opens Up next (R7.2), and the volume. The sleep
+// bar and the length (the song's waveform, R11.2: hovering shows the time under the pointer,
+// clicking or dragging seeks there, R7.4, and it never takes the focus, so ← and → seek whatever
+// has it but a list or a box that uses them); on the right the queue button, which opens Up next (R7.2), and the volume. The sleep
 // timer's moon (R7.10), the mini player's button (R15) and Now Playing's (R11.4) take their places
 // on the right with their slices. What each says is the player's.
 Rectangle {
@@ -15,6 +16,7 @@ Rectangle {
     required property var player
     property var ratings: null  // a star clicked rates the song shown (R10.2)
     property var dragging: null  // songs dropped on the queue button play next (R6.10, R7.2)
+    property var waveforms: null  // the song's waveform (R11.1.1, waveforms.Waveforms)
     readonly property bool hasSong: player.path !== ""
     height: 88
     color: Theme.bar
@@ -192,47 +194,70 @@ Rectangle {
         color: Theme.muted
         font { family: Theme.sans; pixelSize: 11; features: { "tnum": 1 } }
     }
-    Slider {
+    // the waveform as the seek bar (R11.2, R11.1): the played part in the gradient, the rest grey,
+    // the play head over it; hovering shows the time under the pointer, and clicking or dragging
+    // seeks there (R7.4)
+    Item {
         id: seek
         objectName: "seekBar"
         anchors.horizontalCenter: parent.horizontalCenter
-        y: 56
+        y: 51
         width: Math.min(460, Math.max(160, bar.width - 2 * 400))
-        height: 16
-        padding: 0
-        from: 0
-        to: 1
-        value: bar.player.progress
+        height: 26
         enabled: bar.player.seekable
-        focusPolicy: Qt.NoFocus
-        onMoved: bar.player.seekTo(value)
+        // worked out still: a flat line filling in (R11.1.1); the tour waits for it
+        readonly property bool loading: bar.waveforms !== null && bar.waveforms.loading
+        Accessible.role: Accessible.Slider
         Accessible.name: bar.player.timeName
-        background: Item {
-            width: seek.width
-            height: seek.height
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width
-                height: 4
-                radius: 2
-                color: Theme.borderStrong
-            }
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: seek.visualPosition * parent.width
-                height: 4
-                radius: 2
-                color: Theme.cell
-            }
+        Waveform {
+            objectName: "waveform"
+            y: 3
+            width: parent.width
+            height: 20
+            source: bar.waveforms
+            progress: bar.player.progress
+            barWidth: 2
+            gap: 1.3
+            playedFrom: Theme.cyan
+            playedMid: Theme.accent
+            playedTo: Theme.pink
+            rest: Theme.borderStrong
         }
-        handle: Rectangle {
-            x: seek.visualPosition * (seek.width - width)
-            anchors.verticalCenter: parent.verticalCenter
-            width: 12
-            height: 12
-            radius: 6
+        Rectangle {  // the play head
+            objectName: "playHead"
+            visible: bar.hasSong
+            x: Math.round(bar.player.progress * (seek.width - width))
+            width: 2
+            height: seek.height
+            radius: 1
             color: Theme.text
-            visible: seek.enabled && (seek.hovered || seek.pressed)
+        }
+        MouseArea {
+            id: pointer
+            anchors.fill: parent
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: seek.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onPressed: (mouse) => bar.player.seekTo(mouse.x / width)
+            onPositionChanged: (mouse) => { if (pressed) bar.player.seekTo(mouse.x / width) }
+        }
+        Rectangle {  // the time under the pointer
+            objectName: "hoverTime"
+            visible: pointer.containsMouse && hoverText.text !== ""
+            x: Math.max(-20, Math.min(seek.width + 20 - width, pointer.mouseX - width / 2))
+            y: -height - 4
+            width: hoverText.implicitWidth + 12
+            height: 18
+            radius: 4
+            color: Theme.raised
+            border.color: Theme.borderStrong
+            Text {
+                id: hoverText
+                anchors.centerIn: parent
+                text: bar.player.timeAt(pointer.mouseX / seek.width)
+                color: Theme.text
+                font { family: Theme.sans; pixelSize: 11; features: { "tnum": 1 } }
+            }
         }
     }
     Text {

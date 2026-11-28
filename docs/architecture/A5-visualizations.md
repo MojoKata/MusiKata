@@ -18,8 +18,12 @@ A5.3. **Drawing.** Both are custom Qt Quick items that build their geometry for 
 (`QSGGeometryNode`) instead of painting with `QPainter`, so drawing is done on the GPU and 60
 frames a second costs the CPU little more than the arithmetic of A5.2.
 
-- The waveform is one triangle-strip node per colour (played and to come), rebuilt only when the
-  size or the play head's bar changes.
+- The waveform is one triangle-strip node, its vertices coloured (the played bars in the gradient,
+  the rest grey), rebuilt only when the size, the peaks or the play head's bar changes. One node,
+  not one per colour: PySide hands Qt only the node `updatePaintNode` returns, and a child node
+  made in Python stays Python's to delete, behind the render thread's back. Qt Quick's software
+  renderer (offscreen, and where there is no GPU) draws no custom geometry, so there the bars are
+  rectangle nodes in their colours, square-ended.
 - The analyzer keeps the last N spectra (the speed of R11.3.1 sets N). Each frame it projects them
   into a perspective landscape: depth scales a slice's width and height towards a vanishing
   point and moves it up towards the horizon. Slices are drawn back to front, each as a filled

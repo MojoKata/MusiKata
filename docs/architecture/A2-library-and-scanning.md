@@ -16,7 +16,7 @@ SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's 
 | `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/<computer id>/plays.json`, a file per computer (A2.8) |
 | `rating` | The ratings kept beside the files (R10.3), from `.musikata/ratings.json` (A2.8), each linked to its song; the song's own row holds its file's rating apart from the one it shows, which is its entry here when ratings.json keeps its rating (`ratings`) |
 | `change` / `change_file` | The change history (R4.9), indexed from `.musikata/history/` (A3.5) |
-| `waveform` | Song, the audio's hash, the peaks as a blob (A5.1) |
+| `waveform` | The audio's hash and the peaks as a blob (A5.1): a song's by its hash, so a copy, a retag or a move finds it |
 | `ignored` | Needs attention entries the user dismissed, with the file's modification time (R2.8), from `.musikata/ignored.json` |
 | `lookup` | Answers from the online services, by request, with when they were fetched (A7.7) |
 | `song_fts` | FTS5 over title, artist, album, album artist, genre, year and file name (R2.7) |

@@ -141,7 +141,7 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata_core.organize` | files | Moving and renaming files (R12): Organize files' plan of the moves under the layout, its conflicts, the files beside the songs and the folders left empty; the move, a batch's writer; what follows it in the index, the playlists and the folders; files from outside the root read and brought in (R12.5); the plan made once and checked over, a checkbox recounting only what it touches (`Checking`); a `.cue` sheet's FILE lines following the files it names; Needs attention's dismissals about an album's folder following it; and removing songs to the trash: what goes (a folder whole, the files beside an album's songs with them) and the trash as a batch's writer (R2.11) |
 | `musikata_core.history` | files | The change history and Undo (A3.5, R4.9) |
 | `musikata_core.audio` | playback | `decode`, `join`, `seam`, `gain`, `eq` (with the limiter), `queue`, `sleep`, `stream`, `played` (when a song counts as played, R7.9) (A4, R7, R19) |
-| `musikata_core.analysis` | analysis | `peaks` and `spectrum` (A5.1, A5.2) |
+| `musikata_core.analysis` | analysis | `peaks` (a waveform's peak pairs, a view's bars, the blob kept) and `waveform` (a song worked out a part at a time on the worker processes, and kept by its audio hash) (A5.1); `spectrum` (A5.2) |
 | `musikata_core.online` | online | `http`, `musicbrainz`, `coverart`, `lrclib` (A7) |
 | `musikata_core.update` | online | Checking for, fetching and checking a release (R1.9) |
 | `musikata.app` | app | Starting, one MusiKata at a time, opening files (R1.6, R1.7) |
@@ -154,6 +154,8 @@ on a module this table doesn't name, or one whose area isn't the table's.
 | `musikata.covers` | app | Covers' thumbnails and folders' mosaics, made off the GUI thread and cached, as QML loads them (R5.1, R5.8, A2.1, A2.7), and how an image is decoded off the GUI thread (`decoded`, which the Album art dialog uses too), Qt's image threads started on the GUI thread (`start_image_threads`) |
 | `musikata.player` | app | The playback thread and the sound device, its sinks made on the GUI thread (A4.1, A4.6) |
 | `musikata.nowplaying` | app | The now-playing bar's words and Up next's list (R6.5, R7.2) |
+| `musikata.waveforms` | app | Waveforms in the running app: the shown song's and the next one's, found in the index or worked out on the worker processes off the GUI thread, a flat line filling in as the parts come, kept once whole (R11.1.1, A5.1) |
+| `musikata.waveitem` | app | The waveform's Qt Quick item: its bars as scene-graph geometry, the played part in the gradient, rectangle nodes where Qt Quick renders in software (R11.1, A5.3) |
 | `musikata.edittags` | app | The Edit tags panel in the running app: what it edits and follows, its fields, suggestions, saving through the batch with progress, Cancel and Retry, and one song's file (R4.2 to R4.4, R4.6 to R4.8) |
 | `musikata.albumart` | app | The Album art dialog in the running app: the album's art read, images decoded, converted and shrunk with Qt, dropped, chosen and pasted, saving through the batch with progress, Cancel and Retry, and Save cover to folder (R5.2 to R5.5) |
 | `musikata.bulktools` | app | The Edit tags panel's bulk tools: the ⋯ menu, and a tool's dialog with its options and its preview, saved through the panel (R4.5) |

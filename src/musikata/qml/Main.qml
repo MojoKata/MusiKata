@@ -56,6 +56,7 @@ Window {
     required property var smart
     required property var organize
     required property var removing
+    required property var waveforms
     width: 1280
     height: 800
     minimumWidth: 960
@@ -241,6 +242,7 @@ Window {
         player: win.player
         ratings: win.ratings
         dragging: win.dragging
+        waveforms: win.waveforms
     }
     ToolDialog {
         objectName: "toolOverlay"

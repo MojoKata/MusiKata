@@ -363,7 +363,7 @@ A table row is traced whole, its cells as written.
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
-| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #25 |
+| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #25 |
 
 ## 7.5. ReplayGain
 
@@ -522,6 +522,22 @@ A table row is traced whole, its cells as written.
 | R10.4.1 | Reading, MusiKata accepts a POPM from any user, preferring the one above, and maps its 0–255 value to stars by the ranges the common players use (1–31: 1, 32–95: 2, 96–159: 3, 160–223: 4, 224–255: 5) | test_popm_from_windows_media_player_musicbee_and_foobar2000, test_popm_ranges_are_the_common_players |
 | R10.4.1 | A setting (R13) chooses MusiKata's own scale for POPM instead, written under the user MusiKata | test_musikatas_own_popm_scale_is_written_under_its_name_and_reads_back, test_the_roots_own_settings_give_where_ratings_are_kept_and_their_scale, test_the_ratings_settings_broken_or_in_another_form, later: #26 |
 | R10.5 | Every song list can sort by rating; search takes rating:>=4 (R2.7); smart playlists take a minimum rating (R8.9) | test_the_songs_list_sorts_by_each_column_either_way_with_missing_values_last, test_the_songs_list_sorts_by_the_ratings_kept_beside_the_files, test_ratings_compare_and_a_song_not_rated_is_zero, test_search_and_the_rating_order_take_the_ratings_kept_beside_the_files, test_each_condition_picks_its_songs_and_every_condition_must_hold, test_the_dialogs_values_make_the_rule_and_say_why_when_they_dont |
+
+## 11.1. The waveform
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R11.1 | The waveform is the loudness of the whole song from start to end | test_a_sine_is_2000_pairs_at_its_amplitude_either_way, test_a_song_of_three_hours_is_2000_pairs_its_end_included, test_each_bar_is_the_largest_peak_of_its_slices_as_a_share_of_the_loudest, test_each_bar_is_a_capsule_mirrored_about_the_centre_line, test_the_bars_are_drawn_anew_when_the_waveform_or_the_size_changes, tier 3: on each platform the now-playing bar's waveform is drawn by the GPU as thin rounded bars mirrored about its centre line |
+| R11.1 | The part already played is drawn in the gradient, the rest in grey | test_the_bars_follow_the_play_head_and_draw_in_their_colours, test_the_gradient_runs_from_cyan_through_violet_to_pink, test_the_vertices_are_copied_into_the_geometry_node_as_the_scene_graph_reads_them, tier 3: on each platform the played bars are in the gradient up to the play head and the rest grey while the song plays |
+| R11.1.1 | A song's waveform is worked out from its audio the first time it is played | test_the_shown_song_is_a_flat_line_filling_in_then_whole_and_kept, test_the_next_song_is_worked_out_ahead_and_found_at_once_when_shown, test_the_player_says_which_song_comes_next_as_the_queue_changes, test_a_song_kept_is_shown_without_decoding, test_a_waveform_is_kept_by_its_audio_hash_so_a_moved_song_finds_it, test_a_sine_decoded_in_parts_is_the_waveform_of_the_whole |
+| R11.1.1 | Until it is ready a flat line is shown, filling in as the decoding goes | test_the_shown_song_is_a_flat_line_filling_in_then_whole_and_kept, test_a_song_of_three_hours_fills_in_every_30_seconds_and_ends_where_it_ends, test_nothing_decoded_yet_is_a_flat_line, test_a_song_that_cant_be_decoded_keeps_its_flat_line_and_is_tried_once |
+
+## 11.2. As the seek bar
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R11.2 | The now-playing bar's seek bar is the song's waveform (R6.5) | test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer |
+| R11.2 | Hovering shows the time under the pointer; clicking or dragging seeks (R7.4) | test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer, test_the_seek_bar_seeks_where_it_is_clicked_and_dragged |
 
 ## 12. Organizing files
 
