@@ -226,8 +226,9 @@ them as `from_bands` until a slider changes (R19.6):
     ],
     "genres": {"Classical": "Classical", "Jazz": "Jazz", "Electronic": "Late night"}
   },
-  "appearance": {"theme": "system", "analyzer_bands": 96, "analyzer_seconds": 4, "tint": true,
-                 "minimize_for_mini": true, "text_size": 100, "reduce_motion": "system"},
+  "appearance": {"theme": "system", "visualization": "waveform", "analyzer_bands": 96,
+                 "analyzer_seconds": 4, "tint": true, "minimize_for_mini": true, "text_size": 100,
+                 "reduce_motion": "system"},
   "online": {"allowed": false, "services": {"musicbrainz": true, "coverartarchive": true,
              "lrclib": true}, "save_mbids": true, "check_updates": false},
   "mini_player": {"layout": "card", "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582}}}

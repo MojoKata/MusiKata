@@ -249,6 +249,14 @@
             "light"
           ]
         },
+        "visualization": {
+          "enum": [
+            "waveform",
+            "analyzer",
+            "none"
+          ],
+          "description": "Now Playing's visualization (R11.4.5)"
+        },
         "analyzer_bands": {
           "enum": [
             48,

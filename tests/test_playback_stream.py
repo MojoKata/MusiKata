@@ -104,3 +104,43 @@ def test_the_song_is_drained_once_the_decoder_finished_and_the_device_took_the_l
     assert s.wants() == 0 and not s.drained
     assert len(s.take(64)) == 10 and s.short == 0  # short at the end is the end, not a shortfall
     assert s.drained and s.taken == 10
+
+
+# ---------- the analyzer's ring (A4.3) ----------
+
+
+def test_the_analyzer_ring_gives_what_the_device_played_last_by_its_place():
+    recent = stream.Recent(seconds=0.01)  # 10 frames at 1 kHz
+    recent.start(1000, 2)
+    assert recent.rate == 1000 and recent.newest(4) is None  # nothing held
+    recent.add(frames(0, 6), 0)
+    assert recent.newest(4) is None  # wanted by no view: nothing copied (A5.5)
+    view = object()
+    recent.want(view, True)
+    assert recent.on
+    recent.add(frames(0, 6), 0)
+    recent.add(frames(6, 6), 6)  # past its ten frames: the oldest two gone
+    recent.hear(9)  # the device has played up to frame 9
+    assert recent.newest(4)[:, 0].tolist() == [5, 6, 7, 8]
+    assert recent.newest(12)[:, 0].tolist() == [0] * 5 + [2, 3, 4, 5, 6, 7, 8]  # silence before
+    recent.hear(50)  # past what was copied: up to the newest held
+    assert recent.newest(2)[:, 0].tolist() == [10, 11]
+    recent.add(frames(0, 3, channels=1), 12)  # another stream's: not taken
+    recent.add(frames(0, 0), 12)
+    assert recent.newest(1)[:, 0].tolist() == [11]
+    recent.want(view, False)
+    assert not recent.on
+
+
+def test_after_a_gap_the_analyzer_ring_holds_only_what_came_after_it():
+    recent = stream.Recent(seconds=0.01)
+    recent.start(1000, 2)
+    recent.want("cover", True)
+    recent.add(frames(0, 8), 0)
+    recent.add(frames(20, 4), 20)  # nothing copied from 8 to 20 (no view wanted it)
+    recent.hear(24)
+    assert recent.newest(6)[:, 0].tolist() == [0, 0, 20, 21, 22, 23]
+    recent.hear(10)  # a place it no longer holds
+    assert recent.newest(2) is None
+    recent.start(1000, 2)  # a new song: nothing held, still wanted
+    assert recent.on and recent.newest(2) is None

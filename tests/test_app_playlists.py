@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fakes import FakeClock, FakeEngine, fill
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from musikata import app, bridges, layout, tour
@@ -337,6 +337,36 @@ def test_new_playlist_from_selection_holds_the_selection_and_add_to_playlist_add
     lists.createFrom(None, -1)
     assert len(lists.said) == n
     assert [m["count"] for m in library.property("playlists").items()] == ["1", "3", "8"]
+
+
+class Queued(QObject):
+    """A player's queue, as Save as playlist… reads it."""
+
+    def __init__(self, songs, source):
+        super().__init__()
+        self.songs, self.queue = songs, type("Q", (), {"source": source})()
+
+    def queue_songs(self):
+        return list(self.songs)
+
+
+def test_save_as_playlist_holds_the_queue_named_for_its_source_and_opens_it(lists, root, qtbot):
+    """R11.4.3's Save as playlist… (R8.3): the queue's songs in the order they play, named for
+    where the queue comes from (else New playlist), opened, its name selected for editing."""
+    music, index, library = root
+    songs = [r[0] for r in index.read().execute("SELECT id FROM song ORDER BY id DESC")]
+    lists.saveQueue(Queued(songs, "Glass Harbor"))
+    assert done(lists, qtbot, 0) == f"Made Glass Harbor with {len(songs)} songs"
+    assert lists.property("editing") >= 0 and library.property("view") == "playlist"
+    assert library.property("playlistPage").property("name") == "Glass Harbor"
+    with open(os.path.join(music, "Playlists", "Glass Harbor.m3u8"), encoding="utf-8") as f:
+        assert f.read().count("#EXTINF:") == len(songs)
+    lists.saveQueue(Queued(songs[:1], " "))
+    assert done(lists, qtbot) == "Made New playlist with 1 song"
+    n = len(lists.said)
+    lists.saveQueue(Queued([], "Glass Harbor"))  # an empty queue: nothing to save
+    lists.saveQueue(QObject())
+    assert len(lists.said) == n
 
 
 def test_duplicate_and_delete_asked_first_and_its_file_to_the_trash(lists, root, qtbot):

@@ -37,6 +37,10 @@ import "."
 // page, the selection bars and the right-click menus, and for files dropped from outside. Move to
 // trash (R2.11), from the right-click menus, an album's ⋯ menu, Folders' ⋮ menu and Delete in the
 // library views, asks first over the window; Ignore this folder (R2.11.1) doesn't.
+// Now Playing (R11.4) opens from the bar's Now Playing button or its cover over everything above the
+// bar, the sidebar and the header included; while it is open, the shortcuts of the view under it
+// (`/`, Ctrl+E) don't act on it, and Esc closes it (R11.4.4). An album's page and Folders' Cards are
+// tinted with their covers' colours (R6.2.2, `tints`).
 Window {
     id: win
     required property var library
@@ -57,6 +61,8 @@ Window {
     required property var organize
     required property var removing
     required property var waveforms
+    required property var nowPlaying
+    required property var tints
     width: 1280
     height: 800
     minimumWidth: 960
@@ -87,6 +93,20 @@ Window {
         Accessible.ignored: true  // a picture for the platform's drag, never seen in the window
         card: win.dragging.card
         Component.onCompleted: win.dragging.setCard(dragCard)
+    }
+    Rectangle {  // an album's page tinted with its cover's colour, behind its header (R6.2.2, L02)
+        id: albumTint
+        objectName: "albumTint"
+        readonly property string tint: win.library.view === "album"
+                                       ? (win.tints.revision, win.tints.of(win.library.album.cover)) : ""
+        readonly property color shade: tint !== "" ? tint : Theme.bg
+        anchors { left: sidebar.right; right: dock.left; top: parent.top }
+        height: 380
+        visible: tint !== ""
+        gradient: Gradient {
+            GradientStop { position: 0; color: Qt.rgba(albumTint.shade.r, albumTint.shade.g, albumTint.shade.b, 0.75) }
+            GradientStop { position: 1; color: "transparent" }
+        }
     }
     Sidebar {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -188,7 +208,7 @@ Window {
     }
     Shortcut {
         sequence: "/"
-        enabled: win.library.searchable && !win.modal
+        enabled: win.library.searchable && !win.modal && !win.nowPlaying.opened
         onActivated: header.openSearch()
     }
     Loader {
@@ -207,16 +227,30 @@ Window {
         })[win.library.view]
     }
     Component { id: albums; AlbumsView { library: win.library; player: win.player; art: win.art; dragging: win.dragging } }
-    Component { id: album; AlbumPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; removing: win.removing } }
+    Component { id: album; AlbumPage { tints: win.tints; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; removing: win.removing } }
     Component { id: artists; ArtistsView { library: win.library; dragging: win.dragging } }
     Component { id: artist; ArtistPage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; playlists: win.playlists; dragging: win.dragging; removing: win.removing } }
     Component { id: genreList; GenresView { library: win.library; player: win.player; genres: win.genres; dragging: win.dragging } }
     Component { id: genre; GenrePage { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; genres: win.genres; playlists: win.playlists; dragging: win.dragging; removing: win.removing } }
     Component { id: songs; SongsView { library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; removing: win.removing } }
     Component { id: needs; AttentionView { library: win.library; attention: win.attention; copies: win.copies } }
-    Component { id: folders; FoldersView { objectName: "foldersView"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; attention: win.attention; removing: win.removing } }
+    Component { id: folders; FoldersView { objectName: "foldersView"; tints: win.tints; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; art: win.art; infer: win.infer; playlists: win.playlists; dragging: win.dragging; organize: win.organize; attention: win.attention; removing: win.removing } }
     Component { id: playlist; PlaylistPage { objectName: "playlistPage"; library: win.library; player: win.player; edit: win.edit; ratings: win.ratings; infer: win.infer; playlists: win.playlists; dragging: win.dragging; smart: win.smart; removing: win.removing } }
 
+    NowPlayingView {  // over everything above the bar (R11.4)
+        enabled: !win.modal  // nothing behind a dialog takes a click
+        objectName: "nowPlaying"
+        anchors { left: parent.left; right: parent.right; top: parent.top; bottom: bar.top }
+        visible: win.nowPlaying.opened
+        onVisibleChanged: if (visible) forceActiveFocus()
+        now: win.nowPlaying
+        player: win.player
+        tints: win.tints
+        waveforms: win.waveforms
+        ratings: win.ratings
+        playlists: win.playlists
+        dragging: win.dragging
+    }
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
         objectName: "upNext"
@@ -243,6 +277,7 @@ Window {
         ratings: win.ratings
         dragging: win.dragging
         waveforms: win.waveforms
+        now: win.nowPlaying
     }
     ToolDialog {
         objectName: "toolOverlay"
@@ -306,7 +341,7 @@ Window {
     }
     Shortcut {
         sequence: "Ctrl+E"
-        enabled: !win.modal
+        enabled: !win.modal && !win.nowPlaying.opened
         onActivated: win.edit.editCurrent(win.library)
     }
     Repeater {  // Ctrl+0 to Ctrl+5 (⌘ on macOS) rate the selection, Ctrl+0 clearing it (R10.2)

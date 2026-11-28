@@ -418,8 +418,8 @@ class Song:
     mtime_ns: int
 
 
-ROW = ("kind", "audio_hash", "length", "bitrate", "sample_rate", "channels", "size", "mtime_ns",
-       *db.FIELDS)  # fmt: skip
+ROW = ("kind", "audio_hash", "length", "bitrate", "sample_rate", "channels", "bits", "size",
+       "mtime_ns", *db.FIELDS)  # fmt: skip
 
 
 def song_of(c: sqlite3.Connection, path: str) -> Song | None:
@@ -437,7 +437,7 @@ def song_of(c: sqlite3.Connection, path: str) -> Song | None:
     tags = Tags(**fields, genres=genres)
     info = AudioInfo(
         values["kind"] or "", values["length"] or 0.0, values["bitrate"] or 0,
-        values["sample_rate"] or 0, values["channels"] or 0,
+        values["sample_rate"] or 0, values["channels"] or 0, values["bits"] or 0,
     )  # fmt: skip
     return Song(
         values["kind"], values["audio_hash"], tags.rating or 0, tags, info, values["size"],

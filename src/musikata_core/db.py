@@ -303,8 +303,16 @@ def _v14(c: sqlite3.Connection) -> None:
     c.execute("CREATE TABLE waveform (hash TEXT PRIMARY KEY, peaks BLOB NOT NULL)")
 
 
+def _v15(c: sqlite3.Connection) -> None:
+    """Each song's bit depth (`song.bits`), where its format has one (FLAC, WAV, AIFF, ALAC,
+    WavPack), for Now Playing's chips (R11.4.1); null for a lossy one. Every song is read again by
+    the next scan to fill it (its modification time marked unknown)."""
+    c.execute("ALTER TABLE song ADD COLUMN bits INTEGER")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13, _v14,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13, _v14, _v15,
 ]  # fmt: skip
 
 

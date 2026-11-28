@@ -161,3 +161,81 @@ class Stream:
     def drained(self) -> bool:
         """The decoder has finished and the device has taken every frame."""
         return self.finished and self.ring.held == 0
+
+
+RECENT_SECONDS = 1.0  # what the analyzer's ring holds (A4.3): the device's buffer and a frame's
+# 4,096 samples behind what it has played, with room to spare
+
+
+class Recent:
+    """The analyzer's ring buffer (A4.3, A5.2): the last second of samples the device took, each
+    at its place in the stream, written by the playback thread as the device takes them (`add`)
+    and read by the GUI thread as a view draws (`newest`), up to the place the device has played
+    (`hear`), so what is drawn is what is heard. A lock keeps each step whole.
+
+    It is written only while a view that draws the spectrum is shown and playing (A5.5): each
+    view says so (`want`), and while none does the playback thread copies nothing."""
+
+    def __init__(self, seconds: float = RECENT_SECONDS) -> None:
+        self._seconds = seconds
+        self._lock = threading.Lock()
+        self._data = silence(1, 1)
+        self.rate = 0
+        self._start = self._end = 0  # the places of the oldest frame held and after the newest
+        self._heard = 0  # the place the device has played up to
+        self._wanting: set[object] = set()
+        self.on = False  # a view wants it: the playback thread copies into it
+
+    def start(self, rate: int, channels: int) -> None:
+        """A new stream (a song asked for, or the device changed): nothing held, at `rate`."""
+        with self._lock:
+            self.rate = rate
+            self._data = silence(frames_of(self._seconds, rate), channels)
+            self._start = self._end = self._heard = 0
+
+    def want(self, view: object, wanted: bool) -> None:
+        """`view` draws the spectrum now (`wanted`), or no longer does: copying runs while any
+        view does (A5.5)."""
+        with self._lock:
+            if wanted:
+                self._wanting.add(view)
+            else:
+                self._wanting.discard(view)
+            self.on = bool(self._wanting)
+
+    def add(self, block: Block, place: int) -> None:
+        """The frames the device took, the first at `place` in the stream; skipped while no view
+        wants them, or when they aren't of the stream this was started for."""
+        if not self.on or not len(block):
+            return
+        with self._lock:
+            data = self._data
+            if block.ndim != 2 or block.shape[1] != data.shape[1]:
+                return
+            if place != self._end:  # after a gap (nothing copied for a while): what was is stale
+                self._start = place
+            end = place + len(block)
+            block = block[-len(data) :]
+            data[np.arange(end - len(block), end) % len(data)] = block
+            self._end = end
+
+    def hear(self, place: int) -> None:
+        """The device has played up to `place` in the stream."""
+        with self._lock:
+            self._heard = place
+
+    def newest(self, frames: int) -> Block | None:
+        """The `frames` frames the device played last, silence where none is held; None when
+        nothing is."""
+        with self._lock:
+            data = self._data
+            capacity = len(data)
+            oldest = max(self._start, self._end - capacity)
+            end = min(self._heard, self._end)
+            if end <= oldest:
+                return None
+            start = end - frames
+            out = silence(frames, data.shape[1])
+            held_from = max(start, oldest)
+            out[held_from - start :] = data[np.arange(held_from, end) % capacity]
+            return out

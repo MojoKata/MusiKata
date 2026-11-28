@@ -41,13 +41,16 @@ class Tags:
 
 @dataclass(frozen=True)
 class AudioInfo:
-    """What the audio is: its kind (R2.2), length, bit rate, sample rate and channels."""
+    """What the audio is: its kind (R2.2), length, bit rate, sample rate and channels, and its
+    bit depth where the format has one (FLAC, WAV, AIFF, ALAC, WavPack; 0 for a lossy one: Now
+    Playing's chips, R11.4.1)."""
 
     kind: str
     length: float
     bitrate: int
     sample_rate: int
     channels: int
+    bits: int = 0
 
 
 @dataclass(frozen=True)

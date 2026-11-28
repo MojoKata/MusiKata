@@ -8,15 +8,18 @@ import "."
 // shuffle, previous, play/pause, next and repeat (R7.3), and under them the time played, the seek
 // bar and the length (the song's waveform, R11.2: hovering shows the time under the pointer,
 // clicking or dragging seeks there, R7.4, and it never takes the focus, so ← and → seek whatever
-// has it but a list or a box that uses them); on the right the queue button, which opens Up next (R7.2), and the volume. The sleep
-// timer's moon (R7.10), the mini player's button (R15) and Now Playing's (R11.4) take their places
-// on the right with their slices. What each says is the player's.
+// has it but a list or a box that uses them); on the right the queue button, which opens Up next (R7.2), and the volume;
+// and at the far end the Now Playing button (R11.4), which opens Now Playing over the window, is
+// lit while it is open, and closes it again (R6.5). A click on the cover opens Now Playing too. The
+// sleep timer's moon (R7.10) and the mini player's button (R15) take their places on the right
+// with their slices. What each says is the player's.
 Rectangle {
     id: bar
     required property var player
     property var ratings: null  // a star clicked rates the song shown (R10.2)
     property var dragging: null  // songs dropped on the queue button play next (R6.10, R7.2)
     property var waveforms: null  // the song's waveform (R11.1.1, waveforms.Waveforms)
+    property var now: null  // Now Playing (R11.4, nowplayingview.NowPlayingView)
     readonly property bool hasSong: player.path !== ""
     height: 88
     color: Theme.bar
@@ -71,6 +74,10 @@ Rectangle {
         visible: bar.hasSong
         source: bar.player.cover
         sourceSide: 128
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Open Now Playing")
+        HoverHandler { enabled: bar.now !== null; cursorShape: Qt.PointingHandCursor }
+        TapHandler { enabled: bar.now !== null; onTapped: bar.now.open() }  // R11.4
     }
     Column {
         x: art.x + art.width + 14
@@ -348,5 +355,31 @@ Rectangle {
                 color: Theme.text
             }
         }
+    }
+
+    // Now Playing (R11.4, R6.5): at the far end, lit while it is open; again, it closes
+    Rectangle {
+        objectName: "nowPlayingButton"
+        anchors.right: parent.right
+        anchors.rightMargin: 16
+        y: 24
+        width: 40
+        height: 40
+        radius: 10
+        visible: bar.now !== null
+        color: bar.now !== null && bar.now.opened ? Theme.accentSoft : (npHover.hovered ? Theme.hover : "transparent")
+        Accessible.role: Accessible.Button
+        Accessible.name: bar.now !== null && bar.now.opened ? qsTr("Close Now Playing") : qsTr("Now Playing")
+        Icon {
+            anchors.centerIn: parent
+            name: "expand"
+            size: 17
+            color: bar.now !== null && bar.now.opened ? Theme.accentHi : Theme.muted
+        }
+        HoverHandler { id: npHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: bar.now.toggle() }
+        ToolTip.visible: npHover.hovered
+        ToolTip.text: qsTr("Now Playing")
+        ToolTip.delay: 600
     }
 }

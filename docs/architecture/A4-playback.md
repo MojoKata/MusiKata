@@ -50,10 +50,14 @@ current one in the same stream, so there is no gap:
   it as they decode, so MusiKata trims nothing again.
 - A change of ReplayGain or equalizer preset at the join (R7.6.1) is ramped over 50 ms.
 
-A4.3. **The analyzer's audio.** Each block handed to the ring buffer is also copied, with its
-position, into the analyzer's ring buffer of the last few seconds (A5.2). The analyzer reads it
-delayed by the device's reported latency and the limiter's look-ahead (A4.4), so what is drawn is
-what is heard.
+A4.3. **The analyzer's audio.** Each block the device takes from the ring buffer is also copied,
+with its place in the stream and before the volume, into the analyzer's ring buffer of the last
+second (A5.2; `musikata_core.audio.stream.Recent`), while a view that draws the spectrum wants it
+(A5.5). The analyzer reads it up to the place the device reports it has played (its processed
+time, which holds the device's own latency) and, once the limiter is there, delayed by its
+look-ahead (A4.4), so what is drawn is what is heard. A view keeps the spectra it draws itself (the
+landscape's last few seconds, A5.3), so the ring needs only the device's buffer and a frame's
+samples behind what was played.
 
 A4.4. **Gain and the equalizer.**
 

@@ -56,7 +56,7 @@ from shiboken6 import Shiboken
 from musikata_core.audio import gain, stream
 from musikata_core.audio.decode import DecodeError, Decoder
 from musikata_core.audio.join import Feed, Playing, Song
-from musikata_core.audio.stream import Stream
+from musikata_core.audio.stream import Recent, Stream
 
 log = logging.getLogger(__name__)
 
@@ -122,18 +122,27 @@ def output_format(device: QAudioDevice) -> QAudioFormat:
 
 class RingDevice(QIODevice):
     """What the sink reads: the stream's samples as bytes, at the volume (A4.4: last, ramped).
-    Only copies them out, multiplied. Open as it is made, unbuffered: QIODevice's own buffer would
-    take from the ring ahead of the device."""
+    Only copies them out, multiplied, and, while a view draws the spectrum, into the analyzer's
+    ring (`recent`, A4.3), before the volume: the spectrum is the music's, whatever the volume.
+    Open as it is made, unbuffered: QIODevice's own buffer would take from the ring ahead of the
+    device."""
 
-    def __init__(self, source: Stream, volume: gain.Volume | None = None) -> None:
+    def __init__(
+        self, source: Stream, volume: gain.Volume | None = None, recent: Recent | None = None
+    ) -> None:
         super().__init__()
         self._stream = source
         self._volume = volume if volume is not None else gain.Volume()
+        self._recent = recent
         self._frame = 4 * source.channels
         self.open(QIODevice.OpenModeFlag.ReadOnly | QIODevice.OpenModeFlag.Unbuffered)
 
     def readData(self, maxlen: int) -> bytes:
-        return stream.to_bytes(self._volume.apply(self._stream.take(maxlen // self._frame)))
+        place = self._stream.taken
+        block = self._stream.take(maxlen // self._frame)
+        if self._recent is not None:
+            self._recent.add(block, place)
+        return stream.to_bytes(self._volume.apply(block))
 
     def writeData(self, data: bytes | bytearray | memoryview, size: int) -> int:
         return -1
@@ -237,6 +246,8 @@ class Engine(QObject):
         self._volume: gain.Volume | None = None  # applied to what the device takes (A4.4)
         # what makes a sink: on the GUI thread, once on the playback thread (Sinks.make)
         self.make_sink: SinkMaker = QAudioSink
+        # the analyzer's ring (A4.3): what the device took, for the spectrum's views (A5.2)
+        self.analyzer = Recent()
 
     @Slot()
     def setup(self) -> None:
@@ -274,6 +285,7 @@ class Engine(QObject):
             self._failed(ticket, path, str(e))
             return
         ring = Stream(rate, channels)
+        self.analyzer.start(rate, channels)
         self._feed = Feed(ring, lambda p: self._opener(p, rate, channels))
         self._feed.start(ticket, path, song, level, round(max(0.0, at) * rate))
         if not self._fill(ring.ring.capacity):  # the whole ring before the first pull
@@ -298,7 +310,7 @@ class Engine(QObject):
         self._sink = made
         self._sink.setBufferSize(stream.frames_of(stream.DEVICE_SECONDS, rate) * 4 * channels)
         self._volume = gain.Volume(self._level, stream.frames_of(gain.RAMP_SECONDS, rate))
-        self._io = RingDevice(ring, self._volume)
+        self._io = RingDevice(ring, self._volume, self.analyzer)
         self._started = start
         if start:
             self._sink.start(self._io)
@@ -423,6 +435,7 @@ class Engine(QObject):
     def _report(self, frame: int) -> None:
         """Says each song the device has reached by place `frame`, and where it is."""
         assert self._feed is not None
+        self.analyzer.hear(frame)
         reached: list[Playing] = self._feed.hear(frame)
         for playing in reached:
             self.joined.emit(playing.ticket, playing.path, self._length(playing.song))
@@ -473,6 +486,7 @@ class Engine(QObject):
         fmt = output_format(device)
         rate, channels = fmt.sampleRate(), fmt.channelCount()
         ring = Stream(rate, channels)
+        self.analyzer.start(rate, channels)
         failure = self._feed.move(ring, lambda p: self._opener(p, rate, channels), place)
         if failure is not None:
             self._fail(failure.why, failure.ticket)

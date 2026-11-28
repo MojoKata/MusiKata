@@ -114,7 +114,7 @@ A table row is traced whole, its cells as written.
 | R2.9.4 | In the three image modes the folder's own files follow the folders | test_a_folder_lists_its_folders_then_its_files_with_their_crumbs_and_count, test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, test_folders_and_files_carry_their_path_match_and_the_strip_its_chip_and_line, test_a_files_chip_says_whether_its_tags_match_its_path_and_how_they_dont, tier 3: L05's screen looked at in the tour |
 | R2.9.4 | \| Large images \| Covers about 220 px wide | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes |
 | R2.9.4 | \| Small images (default) \| Covers the size of Albums' | test_folders_in_the_header_its_crumbs_count_modes_sort_and_search_hint, test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes |
-| R2.9.4 | \| Cards \| Wide cards like the Genres view's | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, test_a_folders_state_is_a_dot_and_a_chip_and_a_folder_of_songs_says_how_many_match, test_folders_and_files_carry_their_path_match_and_the_strip_its_chip_and_line, later: #25 |
+| R2.9.4 | \| Cards \| Wide cards like the Genres view's | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, test_a_folders_state_is_a_dot_and_a_chip_and_a_folder_of_songs_says_how_many_match, test_folders_and_files_carry_their_path_match_and_the_strip_its_chip_and_line, test_the_cover_of_now_playing_an_album_and_a_folders_card_tint_what_is_behind_them, tier 3: L06's screen looked at in the tour with each card tinted by its cover's colour |
 | R2.9.4 | \| List \| One table with Songs' columns | test_folders_loads_in_every_mode_with_no_warning_and_its_text_in_its_boxes, test_a_folders_list_row_shows_what_its_songs_share_and_their_total_time |
 | R2.9.5 | Each folder carries the worst path-match state | test_a_write_keeps_each_songs_path_match_and_each_folders_worst_beneath, test_one_song_written_again_brings_its_folders_states_up_to_date, test_a_folders_state_is_a_dot_and_a_chip_and_a_folder_of_songs_says_how_many_match, test_folders_and_files_carry_their_path_match_and_the_strip_its_chip_and_line, tier 3: L04's and L06's screens looked at in the tour |
 | R2.9.5 | A folder whose files all match shows nothing | test_a_folders_state_is_a_dot_and_a_chip_and_a_folder_of_songs_says_how_many_match, test_a_write_keeps_each_songs_path_match_and_each_folders_worst_beneath |
@@ -326,6 +326,12 @@ A table row is traced whole, its cells as written.
 | R5.8 | A folder with no picture anywhere beneath it shows the dashed tile of R5.7 | test_loose_songs_whose_covers_differ_make_a_mosaic_and_no_art_anywhere_makes_none, test_a_folders_mosaic_and_cover_are_shown_and_one_with_no_art_its_dashed_tile |
 | R5.8 | Mosaics change as the covers beneath them change, and are cached like thumbnails | test_a_cover_added_beside_unchanged_songs_becomes_the_folders_and_its_parents_mosaic, test_a_mosaic_is_drawn_from_its_pieces_thumbnails_and_kept_under_a_hash_of_them, test_the_cache_is_trimmed_of_what_no_row_points_at_and_keeps_every_other_file |
 
+## 6.2.2. The cover's colour
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R6.2.2 | Large views (the album page, Now Playing) tint their background with the cover's dominant colour | test_the_cover_of_now_playing_an_album_and_a_folders_card_tint_what_is_behind_them, test_the_dominant_colour_is_the_hue_holding_most_colour_not_most_pixels, test_a_cover_of_greys_black_and_white_has_no_colour, test_a_tint_keeps_its_covers_hue, test_every_tint_keeps_the_faintest_text_readable_over_it, test_a_colour_is_picked_off_the_gui_thread_kept_in_the_cache_and_read_from_there, test_greys_are_kept_as_none_and_a_cover_not_shown_or_broken_as_nothing, tier 3: L02's and N01's screens looked at in the tour tinted by their covers' colours |
+
 ## 6.10. Drag and drop
 
 | Item | Sentence starts | Shown by |
@@ -363,7 +369,7 @@ A table row is traced whole, its cells as written.
 
 | Item | Sentence starts | Shown by |
 |---|---|---|
-| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, later: #25 |
+| R7.4 | Clicking or dragging on the waveform in the now-playing bar or in Now Playing seeks there (R11.2) | test_the_seek_bar_seeks_where_it_is_clicked_and_dragged, test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer, test_a_seek_shows_the_place_at_once_and_holds_it_until_the_engine_is_there, test_a_seek_moves_the_sound_and_the_position_follows_from_there, test_a_seek_replaces_what_the_ring_holds_with_the_song_from_there, test_a_seek_lands_on_the_exact_sample, test_left_and_right_seek_five_seconds_unless_a_list_or_box_uses_them, test_clicking_and_dragging_on_the_large_waveform_seeks_there |
 
 ## 7.5. ReplayGain
 
@@ -538,6 +544,24 @@ A table row is traced whole, its cells as written.
 |---|---|---|
 | R11.2 | The now-playing bar's seek bar is the song's waveform (R6.5) | test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer |
 | R11.2 | Hovering shows the time under the pointer; clicking or dragging seeks (R7.4) | test_the_seek_bar_is_the_songs_waveform_and_shows_the_time_under_the_pointer, test_the_seek_bar_seeks_where_it_is_clicked_and_dragged |
+
+## 11.4. Now Playing
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R11.4 | Now Playing opens from the Now Playing button at the right end of the now-playing bar | test_the_bars_button_and_cover_open_it_and_the_button_esc_and_library_close_it |
+| R11.4 | It takes over everything above the now-playing bar, the sidebar and the view's header included | test_each_mode_loads_with_no_warning_and_its_text_in_its_boxes, test_the_pickers_menu_chooses_a_visualization_and_the_later_ones_say_so, later: #25, later: #26, tier 3: on each platform Now Playing covers the window above the bar and its window buttons sit where the rest of the window has them |
+| R11.4.1 | With Waveform (N01-now-playing-waveform): the cover large on the left | test_the_song_playing_its_words_chips_and_up_next_as_the_queue_moves, test_the_line_over_the_title_names_the_track_of_its_album, test_the_album_line_and_the_chips_say_each_part_known, test_replaygains_chip_is_the_gain_its_mode_plays_at, test_a_lossless_songs_bit_depth_is_read_and_a_lossy_ones_is_none, test_an_index_of_slice_8_2_gains_each_songs_bit_depth_and_its_songs_are_read_again, test_each_mode_loads_with_no_warning_and_its_text_in_its_boxes, tier 3: N01's screen looked at in the tour |
+| R11.4.1 | Up next on the right; and across the bottom the song's waveform, large | test_the_song_playing_its_words_chips_and_up_next_as_the_queue_moves, test_the_minute_marks_fall_every_minute_or_every_few_on_a_long_song, test_clicking_and_dragging_on_the_large_waveform_seeks_there, test_each_mode_loads_with_no_warning_and_its_text_in_its_boxes, tier 3: N01's screen looked at in the tour |
+| R11.4.2 | With 3D analyzer: the analyzer fills the view | later: #25 |
+| R11.4.3 | With No visualization (N03-now-playing-queue): the playing song on the left and the queue on the right | test_a_tone_lands_in_its_band_and_bands_far_from_it_stay_low, test_the_covers_32_bars_are_the_bands_gathered_each_the_loudest_of_its_group, test_playing_it_draws_the_tone_heard_and_paused_it_settles_then_stops, test_the_bars_stand_side_by_side_on_the_foot_each_its_share_of_the_height, test_each_bar_is_two_triangles_fading_from_faint_at_the_top_to_stronger_at_the_foot, test_the_spectrums_vertices_are_copied_into_its_geometry_node_as_the_scene_graph_reads_them, test_what_the_device_plays_reaches_the_analyzer_only_while_a_view_wants_it, test_the_analyzer_ring_gives_what_the_device_played_last_by_its_place, test_each_mode_loads_with_no_warning_and_its_text_in_its_boxes, tier 3: on each platform the cover's bars drawn by the GPU rise and fall with the music and the green line along the cover's foot follows the song |
+| R11.4.3 | Paused, the bars settle to nothing and the line stays | test_playing_it_draws_the_tone_heard_and_paused_it_settles_then_stops, test_each_band_rises_at_once_and_falls_at_its_set_rate, test_it_draws_while_shown_and_playing_or_settling_and_never_minimized |
+| R11.4.3 | "Now playing · Track 4 of 10", the title, artist, album, year and genre, the rating, and the format | test_the_song_playing_its_words_chips_and_up_next_as_the_queue_moves, test_the_format_under_n03s_cover_is_its_depth_and_rate_or_its_bit_rate, test_now_playings_queue_puts_the_song_played_last_above_the_one_playing, test_each_mode_loads_with_no_warning_and_its_text_in_its_boxes, tier 3: N03's screen looked at in the tour |
+| R11.4.3 | Above it, where the queue comes from, how many songs are left and how long they take | test_the_queues_clear_and_save_as_playlist_act_on_the_queue, test_clear_takes_every_song_out_but_the_one_playing, test_save_as_playlist_holds_the_queue_named_for_its_source_and_opens_it |
+| R11.4.3 | A row under the pointer shows its drag handle and × | test_now_playings_queue_puts_the_song_played_last_above_the_one_playing, tier 3: on each platform a song dragged within Now Playing's queue and songs dragged onto it from a view land where the drag showed |
+| R11.4.4 | Esc, ‹ Library, or the Now Playing button again goes back to the view it was opened from | test_the_bars_button_and_cover_open_it_and_the_button_esc_and_library_close_it |
+| R11.4.5 | The visualization picker is a drop-down showing the current choice with its icon | test_the_pickers_menu_chooses_a_visualization_and_the_later_ones_say_so, test_the_picker_lists_its_three_choices_the_current_one_checked_and_kept |
+| R11.4.5 | Its menu lists Waveform, 3D analyzer and No visualization, each with its icon | test_the_picker_lists_its_three_choices_the_current_one_checked_and_kept, test_the_choice_is_kept_in_the_shared_settings_on_the_keepers_thread, test_the_visualization_is_kept_on_the_same_thread_after_the_writes_before_it, test_the_visualization_set_keeps_the_rest_of_the_file_valid_under_its_schema, test_the_visualization_is_read_from_appearance_waveform_by_default |
 
 ## 12. Organizing files
 

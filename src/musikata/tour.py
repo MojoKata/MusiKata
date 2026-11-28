@@ -34,9 +34,11 @@ from .encodings import FixEncoding
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .nowplayingview import NowPlayingView
 from .organize import OrganizeFiles
 from .removing import Removing
 from .smart import SmartPlaylists
+from .tints import Tints
 
 # the mockups' size, the smallest the layout is checked at, and the screenshots'; the design point,
 # MusiKata maximized on a 1920 x 1080 screen (R6.2.1), less what a panel or taskbar takes
@@ -50,9 +52,12 @@ SIZES = (SHOT, DESIGN)
 # is L10; a search being typed, R2.7, is L12; Up next, R7.2, is N08). L03 and L07 show the Edit tags
 # panel (R4.2) as their mockups do, open on the songs selected with fields typed into it ("edit");
 # an album's page and an artist's show a search typed into the header over them, as their mockups do
-# (L02, L11, R2.7); Folders' screens (R2.9) leave out what later slices draw (the tint by a cover's
-# colour). T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03
-# is Organize files (R12) over Your music folders, on the whole library, as its mockup draws it. The
+# (L02, L11, R2.7); an album's page and Folders' Cards are tinted by their covers' colours (R6.2.2),
+# which are waited for as the covers are. N01 and N03 are Now Playing (R11.4) over Glass Harbor's
+# page, cued at Signal Fires with two songs added, with Waveform (R11.4.1) and No visualization
+# (R11.4.3): paused, as every screen is, so the cover's spectrum has settled to nothing. T01 is
+# Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03 is Organize
+# files (R12) over Your music folders, on the whole library, as its mockup draws it. The
 # first queues Glass Harbor, paused at its first song, so every screen after it shows the
 # now-playing bar (R6.5) and the playing album and song marked, with no sound to wait on
 # (Player.go). X03 has no mockup: the Change history panel (R4.9) over Songs, listing the demo
@@ -145,6 +150,28 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "upNext": True,
         },
     ),
+    (
+        "N01-now-playing-waveform",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "waveform",
+        },
+    ),
+    (
+        "N03-now-playing-queue",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "none",
+        },
+    ),
     ("T02-album-art", {"view": "album", "album": "Glass Harbor", "art": True}),
     ("G01-genres", {"view": "genres", "genreMenu": "Electronic"}),
     ("L09-needs-attention", {"view": "attention", "attention": "copies"}),
@@ -218,6 +245,8 @@ class Tour(QObject):
         smart: SmartPlaylists | None = None,
         organize: OrganizeFiles | None = None,
         removing: Removing | None = None,
+        now: NowPlayingView | None = None,
+        tints: Tints | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -231,6 +260,7 @@ class Tour(QObject):
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
         self.smart, self.organize, self.removing = smart, organize, removing
+        self.now, self.tints = now, tints
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -286,6 +316,8 @@ class Tour(QObject):
             self.organize.go(step)
         if self.removing is not None and "view" in step:
             self.removing.go(step)
+        if self.now is not None and "view" in step:
+            self.now.go(step)
         self._size = 0
         self._at_size()
 
@@ -318,7 +350,7 @@ class Tour(QObject):
 
     def _settle(self) -> None:
         name = self.steps[self._i][0]
-        if loading(self.win.contentItem()):
+        if loading(self.win.contentItem()) or (self.tints is not None and self.tints.busy):
             if self._waited < PATIENCE:
                 self._waited += POLL
                 QTimer.singleShot(POLL, self._settle)

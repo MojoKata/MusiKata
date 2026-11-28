@@ -301,6 +301,52 @@ def test_shuffle_and_repeat_never_go_into_a_newer_or_unreadable_file(tmp_path, c
     assert "newer MusiKata" in caplog.text and "left as it is" in caplog.text
 
 
+def test_the_visualization_is_read_from_appearance_waveform_by_default():
+    got = parse({"format": 1, "appearance": {"theme": "dark", "visualization": "none"}})
+    assert got.appearance == settings.Appearance("none") and got.problems == ()
+    assert parse({"format": 1}).appearance.visualization == "waveform"
+
+
+@pytest.mark.parametrize(
+    "appearance, want, problem",
+    [
+        ({"visualization": " Analyzer "}, "analyzer", ""),
+        ({"visualization": "NONE"}, "none", ""),
+        ({"visualization": "3d"}, "waveform", "isn't waveform, analyzer or none"),
+        ({"visualization": 2}, "waveform", "isn't waveform, analyzer or none"),
+        ({"visualization": None}, "waveform", "isn't waveform, analyzer or none"),
+        ([], "waveform", "appearance isn't a group"),
+    ],
+)
+def test_the_visualization_broken_in_another_case_or_type(appearance, want, problem):
+    got = parse({"format": 1, "appearance": appearance})
+    assert got.appearance.visualization == want
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_visualization_set_keeps_the_rest_of_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({
+        "format": 1, "computer": {"id": "b2c4", "name": "Studio-PC"},
+        "appearance": {"theme": "dark", "tint": False, "later": 1},
+    }))  # fmt: skip
+    assert settings.set_appearance(str(path), HOME, "Other", visualization="none")
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {
+        "theme": "dark",
+        "tint": False,
+        "later": 1,
+        "visualization": "none",
+    }
+    assert doc["computer"] == {"id": "b2c4", "name": "Studio-PC"}
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).appearance.visualization == "none"
+    newer = tmp_path / "newer.json"
+    newer.write_text(json.dumps({"format": 2}))
+    assert not settings.set_appearance(str(newer), HOME, "PC", visualization="none")
+
+
 def test_this_computers_id_is_the_files_else_made_once_and_kept(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"format": 1, "library": {"root": "/m"}, "later": 1}))

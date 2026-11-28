@@ -169,6 +169,18 @@ def test_the_device_reads_the_ring_at_the_volume_ramped_to():
     assert np.allclose(got, [0.375, 0.25, 0.125, 0.0, 0.0, 0.0])
 
 
+def test_what_the_device_takes_is_copied_into_the_analyzers_ring_before_the_volume():
+    s = stream.Stream(1000, 1, ahead=0.1)
+    s.feed(np.full((6, 1), 0.5, np.float32))
+    recent = stream.Recent()
+    recent.start(1000, 1)
+    recent.want("cover", True)
+    io = player.RingDevice(s, gain.Volume(0.0), recent)
+    assert np.frombuffer(io.read(16).data(), "<f4").tolist() == [0.0] * 4  # silent: volume 0
+    recent.hear(4)
+    assert recent.newest(4)[:, 0].tolist() == [0.5] * 4  # the music, whatever the volume
+
+
 def test_asking_an_engine_with_nothing_playing_to_pause_resume_or_stop_does_nothing(qtbot):
     engine = player.Engine(Tone())
     said = []
@@ -235,6 +247,27 @@ def test_a_paused_song_stays_where_it_is_until_it_resumes(make, qtbot):
     p.resume()
     qtbot.waitUntil(lambda: p.property("playing"), timeout=WAIT)
     qtbot.waitUntil(lambda: p.property("position") > at, timeout=WAIT)
+    qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
+
+
+@pytest.mark.slow
+def test_what_the_device_plays_reaches_the_analyzer_only_while_a_view_wants_it(make, qtbot):
+    """A4.3, A5.5: the samples the device took, up to the place it has played, for the
+    spectrum; none copied while no view draws it."""
+    p = make(Tone(1.0))
+    recent = p.analyzer
+    p.play("a.flac")
+    qtbot.waitUntil(lambda: p.property("position") > 0.1, timeout=WAIT)
+    assert recent.newest(64) is None  # no view: nothing copied
+    recent.want("cover", True)
+
+    def sounding():
+        got = recent.newest(4096)
+        return got is not None and float(np.abs(got).max()) > 0.05
+
+    qtbot.waitUntil(sounding, timeout=WAIT)
+    assert recent.newest(4096).shape[0] == 4096 and recent.rate > 0
+    recent.want("cover", False)
     qtbot.waitUntil(lambda: p.last == "ended", timeout=WAIT)
 
 

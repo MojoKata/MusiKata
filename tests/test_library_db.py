@@ -275,7 +275,7 @@ def test_an_index_of_slice_7_1_gains_the_playlists_and_reads_nothing_again(tmp_p
         step(c)
     c.execute("PRAGMA user_version = 11")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.mp3', 10, 5)")
-    assert db.migrate(c) == len(db.MIGRATIONS)
+    db.MIGRATIONS[11](c)  # version 12 alone: a later one reads the songs again (version 15)
     assert c.execute("SELECT mtime_ns FROM song").fetchall() == [(5,)]
     c.execute(
         "INSERT INTO playlist (path, name, name_key, kind, size, mtime_ns, encoding)"
@@ -312,10 +312,11 @@ def test_an_index_of_slice_7_3_gains_when_each_song_was_added_from_its_files_tim
     c.execute("PRAGMA user_version = 12")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 1, 1700000000000000000)")
     c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('b.flac', 1, -1)")
-    assert db.migrate(c) == len(db.MIGRATIONS)
+    db.MIGRATIONS[12](c)  # version 13 alone: a later one reads the songs again (version 15)
     assert c.execute("SELECT path, mtime_ns, added FROM song ORDER BY path").fetchall() == [
         ("a.flac", 1700000000000000000, 1_700_000_000.0), ("b.flac", -1, None)
     ]  # fmt: skip
+    db.MIGRATIONS[14](c)
     info = AudioInfo("flac", 1.0, 900, 44100, 2)
     read = scanner.Read(scanner.Seen("b.flac", 1, 1_600_000_000 * 10**9), Tags(), info, "h")
     c.execute("BEGIN")
@@ -324,4 +325,33 @@ def test_an_index_of_slice_7_3_gains_when_each_song_was_added_from_its_files_tim
     assert c.execute("SELECT added FROM song WHERE path = 'b.flac'").fetchone() == (1.6e9,)
     plan = c.execute("EXPLAIN QUERY PLAN SELECT id FROM song WHERE added >= 5").fetchall()
     assert any("song_added" in str(row) for row in plan), plan
+    c.close()
+
+
+def test_an_index_of_slice_8_2_gains_each_songs_bit_depth_and_its_songs_are_read_again(tmp_path):
+    """Version 15 (R11.4.1): `song.bits`, the bit depth Now Playing's chips show, filled as each
+    song is read again by the next scan; a lossy song's is null."""
+    from musikata_core import scanner
+    from musikata_core.tags import AudioInfo, Tags
+
+    c = db.connect(str(tmp_path / "musikata.db"))
+    for step in db.MIGRATIONS[:14]:
+        step(c)
+    c.execute("PRAGMA user_version = 14")
+    c.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 1, 5)")
+    assert db.migrate(c) == len(db.MIGRATIONS)
+    assert c.execute("SELECT mtime_ns, bits FROM song").fetchall() == [(-1, None)]
+    c.execute("BEGIN")
+    lossless, lossy = (
+        AudioInfo("flac", 1.0, 900, 44100, 2, 24),
+        AudioInfo("mp3", 1.0, 320, 44100, 2),
+    )
+    scanner.write_batch(c, [
+        scanner.Read(scanner.Seen("a.flac", 1, 7), Tags(), lossless, "h"),
+        scanner.Read(scanner.Seen("b.mp3", 1, 7), Tags(), lossy, "i"),
+    ], {})  # fmt: skip
+    c.execute("COMMIT")
+    assert c.execute("SELECT path, bits FROM song ORDER BY path").fetchall() == [
+        ("a.flac", 24), ("b.mp3", None)
+    ]  # fmt: skip
     c.close()

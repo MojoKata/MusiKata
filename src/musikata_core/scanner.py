@@ -511,7 +511,8 @@ def _values(r: Read) -> dict[str, object]:
         "path": r.seen.path, "size": r.seen.size, "mtime_ns": r.seen.mtime_ns,
         "kind": i.kind if i else None, "length": i.length if i else None,
         "bitrate": i.bitrate if i else None, "sample_rate": i.sample_rate if i else None,
-        "channels": i.channels if i else None, "audio_hash": r.audio_hash, "error": r.error,
+        "channels": i.channels if i else None, "bits": i.bits or None if i else None,
+        "audio_hash": r.audio_hash, "error": r.error,
         **_place(r.seen.path),
     }  # fmt: skip
     row.update({name: getattr(t, name) for name in db.FIELDS})
@@ -614,9 +615,10 @@ def wrote(c: sqlite3.Connection, root: str, written: Iterable[Written]) -> Resul
 
 
 # a song's row but its id and path: what a take-over (`take_over`) copies from the copy's row
-ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "audio_hash",
-       "error", *db.FIELDS, "file_rating", "artist_nk", "albumartist_nk", "album_nk", "cover_key",
-       "cover_width", "cover_height", "cue", "copy_key", "latin1", "encoding")  # fmt: skip
+ROW = ("size", "mtime_ns", "kind", "length", "bitrate", "sample_rate", "channels", "bits",
+       "audio_hash", "error", *db.FIELDS, "file_rating", "artist_nk", "albumartist_nk",
+       "album_nk", "cover_key", "cover_width", "cover_height", "cue", "copy_key", "latin1",
+       "encoding")  # fmt: skip
 
 
 def take_over(c: sqlite3.Connection, old: str, new: str, touched: albums.Touched) -> bool:

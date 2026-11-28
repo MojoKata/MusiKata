@@ -725,6 +725,65 @@ def test_a_row_of_up_next_plays_moves_or_goes_at_a_click(made, index, qtbot):
     assert len(engine.played()) == 2
 
 
+def test_now_playings_queue_puts_the_song_played_last_above_the_one_playing(made, qtbot):
+    """R11.4.3, N03: what played last, dimmed, then the playing song and the songs to come; its
+    rows played, moved, taken out and selected through the slots that name it."""
+    p, engine, songs = made
+    p.playFrom(songs, 0)
+    wait_playing(qtbot, p, engine, 1)
+    p.next()
+    p.next()  # 03 plays; Tidewater and Glass Harbor played
+    wait_playing(qtbot, p, engine, 3)
+    full = p.property("queueList")
+    assert full is not p.property("upNext")
+
+    def rows():
+        return [(full.row_of(i)["kind"], full.row_of(i)["title"]) for i in range(full.rowCount())]
+
+    assert rows() == [("played", "Glass Harbor"), ("now", "03"), ("next", "Kindling")]
+    assert full.row_of(0)["section"] == "Played" and full.row_of(1)["section"] == "Now playing"
+    assert full.first_next() == 2
+    p.addToQueue(songs, 0)  # Tidewater again: added, so before the rest of the list (R7.2)
+    assert [r[1] for r in rows()] == ["Glass Harbor", "03", "Tidewater", "Kindling"]
+    p.moveRowOf(full, 3, 2)  # Kindling dropped above Tidewater
+    assert [r[1] for r in rows()] == ["Glass Harbor", "03", "Kindling", "Tidewater"]
+    p.moveRowOf(full, 3, 0)  # dropped above the song played: first of the songs to come
+    assert [r[1] for r in rows()] == ["Glass Harbor", "03", "Tidewater", "Kindling"]
+    p.moveRowOf(full, 0, 3)  # a song played doesn't move
+    p.removeRowOf(full, 3)
+    assert [r[1] for r in rows()] == ["Glass Harbor", "03", "Tidewater"]
+    full.click(0, False, False)
+    p.removeSelectedOf(full)  # the song played out of the queue: the one before it shows
+    assert [r[1] for r in rows()] == ["Tidewater", "03", "Tidewater"]
+    full.click(2, False, False)
+    p.playSelectedOf(full)
+    wait_playing(qtbot, p, engine, 4)
+    assert [r[0] for r in rows()] == ["played", "now"]
+    p.playRowOf(full, 99)
+    assert len(engine.played()) == 4
+
+
+def test_clear_takes_every_song_out_but_the_one_playing(made, qtbot):
+    p, engine, songs = made
+    p.playFrom(songs, 1)
+    wait_playing(qtbot, p, engine, 1)
+    p.next()
+    wait_playing(qtbot, p, engine, 2)
+    assert [e.song for e in p.queue.order] == p.queue_songs() and len(p.queue_songs()) == 3
+    p.clearQueue()
+    assert len(p.queue) == 1 and p.queue.current is not None and p.property("playing")
+    assert p.property("upNext").rowCount() == 1
+    changed = []
+    p.queueChanged.connect(lambda: changed.append(1))
+    p.clearQueue()  # nothing more to take out
+    assert changed == []
+
+
+def test_a_player_whose_engine_has_no_analyzer_has_one_never_fed(made):
+    p, _, _ = made
+    assert p.analyzer.newest(16) is None and not p.analyzer.on
+
+
 def test_an_empty_up_next_says_so_and_a_song_gone_says_that(made, index):
     p, engine, _ = made
     up = p.property("upNext")
