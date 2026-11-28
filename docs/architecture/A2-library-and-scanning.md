@@ -10,7 +10,7 @@ SQLite in WAL mode. It is an index: everything in it is rebuilt from the root's 
 | `song_genre` | Song and genre, one row per genre (R9.2) |
 | `album` | Album artist and title (R2.5.2), its cover's source and thumbnail, cached counts |
 | `artist` | Each artist, names that differ only in case as one (R2.5.4): the name shown, its sort key (R2.13), cached counts |
-| `folder` | One row per folder under the root that has audio beneath it: path, parent, counts of subfolders and songs (direct and beneath), its own cover's source, the mosaic's sources, the worst path-match state beneath it (A2.7) |
+| `folder` | One row per folder under the root that has audio beneath it: path, parent, counts of subfolders and songs (direct and beneath), its own cover's source, the mosaic's sources, the worst path-match state beneath it and whether it groups albums (R3.9) (A2.7) |
 | `playlist` | One row per playlist file: path, modification time, smart rule (R8.9) |
 | `playlist_entry` | Playlist, position, the path as written, the path under the root it resolves to (none: outside the root), and its `#EXTINF`; its song is the one at that path, found by the index on `song.path` as it is read, so a scan that adds, moves or removes songs needs no pass over the entries (none: missing, R8.7) |
 | `play` | Play counts and last played (R7.9), loaded from and saved to `.musikata/<computer id>/plays.json`, a file per computer (A2.8) |
@@ -83,7 +83,9 @@ of a large library is one indexed query on `parent`, not a walk of the disk.
 - **Kept current with the scan.** When a scan or a watched change touches a folder, that folder's
   row and each of its ancestors' rows are recomputed, bottom up, in the batch's transaction:
   counts, the worst state (R2.9.5), its own cover (R5.8 step 1) and, when it has none, the
-  mosaic's sources (step 2), chosen from its children's rows without reading any file.
+  mosaic's sources (step 2), chosen from its children's rows without reading any file. Whether it
+  groups albums (R3.9) is worked out from the songs beneath it; when a write turns it, the songs
+  of every folder beneath it are matched to their paths again.
 - **Mosaic images.** A mosaic is drawn on the thread pool with `QImage` and `QPainter` from its
   sources' thumbnails, at the two sizes the views use, and kept in the cache folder (R1.5) under
   a hash of its sources' identities and modification times. A changed cover changes the hash of

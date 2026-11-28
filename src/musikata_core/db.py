@@ -311,8 +311,18 @@ def _v15(c: sqlite3.Connection) -> None:
     c.execute("UPDATE song SET mtime_ns = -1")
 
 
+def _v16(c: sqlite3.Connection) -> None:
+    """Tags match path judges less (R3.9): a path's shorter name of the album or artist agrees, and
+    a folder that groups albums gives no album artist or artist. Whether a folder groups albums is
+    kept on its row (`folder.grouping`, 1 or 0; NULL: not yet worked out), so a write that turns it
+    works out again the songs beneath it (folders.refresh). Every song's state is worked out again
+    by the next scan, which reads every song again, as for version 2."""
+    c.execute("ALTER TABLE folder ADD COLUMN grouping INTEGER")
+    c.execute("UPDATE song SET mtime_ns = -1")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
-    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13, _v14, _v15,
+    _v1, _v2, _v3, _v4, _v5, _v6, _v7, _v8, _v9, _v10, _v11, _v12, _v13, _v14, _v15, _v16,
 ]  # fmt: skip
 
 
