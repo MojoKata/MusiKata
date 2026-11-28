@@ -304,6 +304,23 @@ def popups(skip: list[QWindow]) -> list[QQuickWindow]:
     ]
 
 
+def _waiting_on(item: QQuickItem, tints: bool) -> None:
+    """Says on stderr what a step waits on: whether the cover colours are busy, and which items
+    are loading, so a screen that runs out of patience says why."""
+    found = []
+
+    def walk(at: QQuickItem) -> None:
+        if not at.isVisible():
+            return
+        if at.property("loading") is True:
+            found.append(f"{type(at).__name__} {at.objectName()!r} {at.property('source')!s:.80}")
+        for child in at.childItems():
+            walk(child)
+
+    walk(item)
+    print(f"the tour waits: tints {tints}, loading {found}", file=sys.stderr, flush=True)
+
+
 def _quit(code: int) -> None:
     QGuiApplication.exit(code)
 
@@ -466,6 +483,10 @@ class Tour(QObject):
         name = self.steps[self._i][0]
         if loading(self._target().contentItem()) or (self.tints is not None and self.tints.busy):
             if self._waited < PATIENCE:
+                if self._waited % 2000 == 0:
+                    _waiting_on(
+                        self._target().contentItem(), self.tints is not None and self.tints.busy
+                    )
                 self._waited += POLL
                 QTimer.singleShot(POLL, self._settle)
                 return
