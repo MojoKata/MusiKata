@@ -387,7 +387,7 @@ A table row is traced whole, its cells as written.
 | R7.6 | Playback is gapless | test_a_song_runs_into_the_next_with_no_frame_lost_or_added, test_any_songs_join_frame_for_frame_whatever_the_device_reads, test_songs_of_one_rate_join_as_if_they_were_one_song, test_songs_of_the_queue_join_in_one_stream_the_sink_never_stopped, test_a_next_song_changed_before_the_device_reached_it_is_replaced_with_no_gap, test_a_seek_into_the_last_seconds_opens_the_next_song_and_joins_it, test_an_mp3s_start_delay_and_end_padding_from_its_lame_header_are_left_out, test_an_aac_files_priming_and_padding_from_its_itunsmpb_tag_are_left_out, test_an_aac_files_priming_and_padding_from_its_edit_list_are_left_out |
 | R7.6 | This holds across songs of different sample rates and kinds | test_songs_of_other_rates_and_channels_join_each_at_its_exact_length, test_a_tone_going_on_across_songs_of_other_rates_doesnt_click_at_the_seam, test_each_kind_decodes_to_its_length_and_pitch_at_the_devices_rate, test_an_opus_files_pre_skip_and_end_are_left_out |
 | R7.6 | Crossfading is | statement |
-| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join, test_a_change_of_gain_across_rates_ramps_from_the_seam_too, test_no_frame_of_a_ramp_steps_more_than_its_slope_allows, test_a_join_with_no_change_of_gain_isnt_ramped_and_a_song_alone_has_its_gain, test_a_song_shorter_than_the_ramp_hands_on_the_gain_it_reached, later: #26 |
+| R7.6.1 | The equalizer (R19) and ReplayGain (R7.5) apply to the same stream | test_each_song_plays_at_its_gain_and_a_change_ramps_over_50_ms_from_the_join, test_a_change_of_gain_across_rates_ramps_from_the_seam_too, test_no_frame_of_a_ramp_steps_more_than_its_slope_allows, test_a_join_with_no_change_of_gain_isnt_ramped_and_a_song_alone_has_its_gain, test_a_song_shorter_than_the_ramp_hands_on_the_gain_it_reached, test_a_song_plays_at_its_tone_from_its_first_frame_and_the_next_at_its_own_from_its_join, test_a_join_between_songs_of_one_tone_changes_nothing, test_a_change_is_crossfaded_over_50_ms_with_each_filter_whole_on_either_side |
 
 ## 7.7. Output
 
@@ -652,3 +652,66 @@ A table row is traced whole, its cells as written.
 | R17.5 | Edit… opens the lyrics as text, timed ones with their [mm:ss.xx] times | test_add_saves_an_lrc_beside_the_song_and_edit_saves_into_the_lrc_it_has, test_edit_saves_one_history_entry_whose_undo_puts_the_lyrics_back, test_saving_into_the_tags_as_the_setting_says_and_an_empty_text_removes_them, test_saving_no_text_removes_them_from_where_they_are, test_a_save_that_fails_says_why_and_save_tries_again, test_nothing_is_saved_while_the_root_isnt_there_or_for_a_song_outside_it, test_the_editor_says_what_it_edits_and_where_save_keeps_them, test_saves_are_described_for_the_change_history_and_save_says_why_it_cant, test_each_kind_holds_lyrics_written_timed_or_plain_and_none_once_removed, test_a_change_of_lyrics_is_text_or_none_to_remove_them |
 | R17.5 | While the song plays, Set time gives the line under the cursor the current position | later: #7 |
 | R17.5 | Save keeps them as R17.4 does | test_add_saves_an_lrc_beside_the_song_and_edit_saves_into_the_lrc_it_has, test_saving_into_the_tags_as_the_setting_says_and_an_empty_text_removes_them, test_edit_saves_one_history_entry_whose_undo_puts_the_lyrics_back |
+
+## 19.1. The bands
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R19.1 | Each preset is one of two kinds | test_a_preset_kept_is_read_back_as_it_was_and_its_unknown_fields_are_kept, test_the_equalizer_is_read_from_its_group_as_a2_10s_example_has_it, test_the_equalizer_broken_in_another_case_type_or_shape |
+| R19.1 | Each band has a type | test_each_band_types_response_is_the_cookbooks_at_known_points, test_each_band_types_response_is_the_cookbooks_transfer_function_everywhere, test_a_filter_of_each_band_type_at_its_extremes_has_its_curve, test_each_built_in_presets_filter_has_its_curve_with_its_preamp, test_the_filter_measured_with_sines_through_the_equalizer_gives_each_presets_curve, test_a_curve_is_its_bands_responses_summed_and_none_is_flat, test_bands_set_are_heard_wherever_that_preset_plays_until_another_is_chosen, test_values_out_of_r19_1s_ranges_are_brought_in_and_listed |
+| R19.1 | A new parametric preset starts with Flat's five bands | test_a_new_parametric_preset_starts_with_flats_five_bands_at_0_db, later: #26 |
+| R19.1 | A graphic preset is ten bells at those frequencies | test_a_graphic_preset_is_ten_one_octave_bells_and_plays_as_that_parametric_preset_would, test_graphic_to_parametric_loses_nothing_the_ten_sliders_become_ten_bells |
+| R19.1 | Both kinds have a preamp | test_bands_set_are_heard_wherever_that_preset_plays_until_another_is_chosen, test_each_built_in_presets_filter_has_its_curve_with_its_preamp, test_the_equalizer_broken_in_another_case_type_or_shape |
+| R19.1 | The equalizer is on or off as a whole | test_off_gives_back_what_it_is_given_untouched_and_holds_nothing, test_turned_on_and_off_it_crossfades_in_and_out_and_off_again_holds_nothing, test_the_equalizer_turned_on_and_off_while_a_song_plays_crossfades_and_off_is_untouched, test_switched_on_and_off_while_playing_the_engine_is_told_at_once_and_it_is_kept, test_each_song_is_told_its_tone_before_it_is_asked_for_none_while_off, test_the_engine_plays_the_tone_told_and_a_change_while_it_plays_is_built_and_heard |
+| R19.1 | It works after ReplayGain (R7.5) and before the volume, and never clips | test_a_song_plays_at_its_tone_from_its_first_frame_and_the_next_at_its_own_from_its_join, test_nothing_comes_out_past_full_scale_whatever_goes_in, test_the_level_held_down_is_the_preamp_plus_the_largest_boost_when_over_0_db, test_the_level_held_down_follows_the_preamp_and_the_largest_boost, test_the_largest_boost_is_a_bells_peak_a_shelfs_plateau_or_where_bells_add_up, test_the_limiters_gain_comes_down_before_a_peak_and_back_up_after_without_a_step, test_the_limiter_leaves_alone_what_is_under_full_scale, test_bands_set_are_heard_at_once_not_kept_and_the_headroom_follows, later: #26 |
+
+## 19.3.1. The built-in presets' bands
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R19.3.1 | The built-in presets' bands | statement |
+| R19.3.1 | LS is a low shelf and HS a high shelf, both with Q 0.7 | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | Each bell's Q is given | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | Each preamp keeps the loudest boost under full scale | test_each_built_in_presets_preamp_keeps_its_loudest_boost_under_full_scale, test_each_built_in_presets_filter_has_its_curve_with_its_preamp |
+| R19.3.1 | \| Flat \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row, test_flat_is_transparent_to_within_float_rounding |
+| R19.3.1 | \| Bass boost \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Treble boost \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Vocal \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Rock \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Pop \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Jazz \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Classical \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Electronic \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+| R19.3.1 | \| Loudness \| | test_the_built_in_presets_are_r19_3_1s_table_row_for_row |
+
+## 19.4. By genre
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R19.4 | A table matches genres to presets | test_the_built_in_genres_are_matched_to_the_built_in_presets_of_the_same_name, test_the_equalizer_is_off_at_flat_by_default_with_the_built_in_genres_matched, test_genres_are_matched_by_the_key_given_and_a_chosen_preset_gone_is_flat, later: #26 |
+| R19.4 | With Choose by genre on, each song takes the preset of its first genre that has one | test_a_song_takes_its_first_genres_preset_else_the_one_chosen, test_by_genre_each_song_takes_its_first_genres_preset_else_the_one_chosen, later: #26 |
+| R19.4 | A preset chosen by hand while Choose by genre is on plays for the song that is playing | test_a_preset_chosen_by_hand_while_by_genre_plays_for_that_song_and_the_next_takes_its_own, test_a_preset_chosen_by_hand_while_by_genre_plays_for_this_song_alone, later: #26 |
+
+## 19.5. What is kept
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R19.5 | Whether it is on, the preset chosen, the custom presets and the genre table are kept | test_the_equalizer_is_read_from_its_group_as_a2_10s_example_has_it, test_the_equalizer_set_keeps_the_rest_of_the_file_and_what_it_doesnt_know, test_the_equalizer_is_kept_on_the_same_thread, test_switched_on_and_off_while_playing_the_engine_is_told_at_once_and_it_is_kept |
+
+## 19.6. Changing a preset's kind
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R19.6 | Changing a preset's kind | statement |
+| R19.6 | The Parametric / Graphic switch turns the preset chosen into the other kind | test_parametric_to_graphic_fits_the_curve_and_says_how_close_it_comes, test_graphic_to_parametric_loses_nothing_the_ten_sliders_become_ten_bells, later: #26 |
+| R19.6 | A built-in preset can't be changed, so switching one makes a custom copy | test_parametric_to_graphic_fits_the_curve_and_says_how_close_it_comes, test_graphic_to_parametric_loses_nothing_the_ten_sliders_become_ten_bells, test_the_fit_is_the_least_squares_one, test_the_fit_is_compared_every_twelfth_of_an_octave_from_20_hz_to_20_khz, test_a_bell_on_a_sliders_frequency_an_octave_wide_is_fitted_exactly, test_sliders_are_held_to_12_db_and_the_rest_fit_around_them, later: #26 |
+| R19.6 | Switching back to parametric before any slider is changed gives back the bands exactly | test_switching_back_before_a_slider_changes_gives_the_bands_exactly, test_a_preset_kept_is_read_back_as_it_was_and_its_unknown_fields_are_kept |
+
+## 19.7. Import and export
+
+| Item | Sentence starts | Shown by |
+|---|---|---|
+| R19.7 | Import… reads a preset from a text file in Equalizer APO's format | test_autoeqs_file_is_a_custom_parametric_preset_named_after_the_file, test_each_filter_line_is_read_in_the_shapes_it_is_written, test_a_files_bytes_are_read_in_its_encoding, later: #26 |
+| R19.7 | ON PK Fc 105 Hz Gain -3.2 dB Q 0.70), the format the AutoEq project publishes | test_autoeqs_file_is_a_custom_parametric_preset_named_after_the_file, test_comments_blank_lines_crlf_and_a_bom_are_passed_by, test_preamps_add_up_and_one_missing_is_0_db |
+| R19.7 | Peak, low shelf, high shelf, low pass and high pass filters are read | test_each_filter_line_is_read_in_the_shapes_it_is_written, test_a_shelf_given_a_slope_takes_the_q_that_slope_is, test_other_lines_and_filters_past_the_tenth_are_listed_as_skipped, test_a_file_with_no_filter_it_reads_is_its_own_error, test_any_text_at_all_reads_as_a_preset_or_its_own_error, test_any_bytes_at_all_read_as_text |
+| R19.7 | Export… writes the preset chosen in the same format, a graphic one as its ten bells | test_a_preset_written_is_equalizer_apos_text_a_graphic_one_as_its_ten_bells, test_any_preset_written_then_read_gives_back_its_bands_and_preamp, later: #26 |

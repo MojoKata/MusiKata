@@ -9,7 +9,9 @@ shuffle and repeat (R7.3), written when the user changes them; and Now Playing's
 (R11.4.5), written when the picker changes it, and the 3D analyzer's bands and speed (R11.3.1),
 written when its gear changes them; whether opening the mini player minimizes the main window
 (R13.8, R15.1), read only until Settings writes it; and the mini player's layout, Stay on top and
-each layout's place and size (R15.2, R15.3), written when they change. Of the root's own
+each layout's place and size (R15.2, R15.3), written when they change; and the equalizer's
+group (R19.5): whether it is on, the preset chosen, Choose by genre, the custom presets and the
+genre table, each written when it changes. Of the root's own
 `settings.json`,
 the Tags settings that writing tags needs (R13.3: R4.7.1, R4.7.2, and the change history's, R4.9)
 are read (`root_tags`), with the genre list and the genres the user has said are the same (R9.5,
@@ -28,6 +30,8 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+
+from .audio.presets import BUILT_IN_NAMES, FLAT, GENRES, Preset, preset_data, preset_of
 
 log = logging.getLogger(__name__)
 FORMAT = 1  # the shared settings.json's format (A2.10)
@@ -109,12 +113,27 @@ class MiniPlayer:
 
 
 @dataclass(frozen=True)
+class Equalizer:
+    """The equalizer as kept (R19.5): whether it is on (off by default), the preset chosen, by
+    name (Flat by default), Choose by genre (off), the custom presets (R19.3), and the genre table
+    (R19.4: a genre's name to a preset's), the built-in genres matched to the built-in presets of
+    the same name until one is kept."""
+
+    on: bool = False
+    preset: str = FLAT
+    by_genre: bool = False
+    presets: tuple[Preset, ...] = ()
+    genres: Mapping[str, str] = field(default_factory=lambda: dict(GENRES))
+
+
+@dataclass(frozen=True)
 class Shared:
     """The shared settings as read: the configured root (None: none yet, the first start, R2.1),
     Watch for changes (R13.2), this computer's id and name (A2.8); `data`, the file as read, which
     a rewrite keeps; `newer`, a newer MusiKata's format, never written; and what couldn't be used,
     for the log. `playback` is R13.7's (`Playback`), `appearance` R13.8's (`Appearance`),
-    `mini_player` the mini player's (`MiniPlayer`, R15)."""
+    `mini_player` the mini player's (`MiniPlayer`, R15), `equalizer` the equalizer's (`Equalizer`,
+    R19.5)."""
 
     root: str | None = None
     watch: bool = True
@@ -123,6 +142,7 @@ class Shared:
     playback: Playback = field(default_factory=Playback)
     appearance: Appearance = field(default_factory=Appearance)
     mini_player: MiniPlayer = field(default_factory=MiniPlayer)
+    equalizer: Equalizer = field(default_factory=Equalizer)
     data: Mapping[str, object] = field(default_factory=dict)
     newer: bool = False
     problems: tuple[str, ...] = ()
@@ -248,6 +268,68 @@ def _mini_player(value: object, problems: list[str]) -> MiniPlayer:
     return MiniPlayer(layout, on_top, places)
 
 
+def _switch(group: Mapping[str, object], key: str, default: bool, problems: list[str]) -> bool:
+    value = group.get(key, default)
+    if isinstance(value, bool):
+        return value
+    problems.append(f"equalizer.{key} isn't true or false: {value!r}; {'on' if default else 'off'}")
+    return default
+
+
+def _preset_named(value: object, custom: tuple[Preset, ...]) -> str | None:
+    """The preset `value` names, built-in or custom, its case and the spaces around it aside, by
+    its own name; None when none is named so."""
+    if not isinstance(value, str):
+        return None
+    wanted = value.strip().casefold()
+    return next((n for n in (*BUILT_IN_NAMES, *(p.name for p in custom))
+                 if n.casefold() == wanted), None)  # fmt: skip
+
+
+def _equalizer(value: object, problems: list[str]) -> Equalizer:
+    """equalizer (R19.5): what of it can be used, the rest its defaults (R13.9). A custom preset
+    that can't be used, or is named as a preset before it is (a built-in's name included), is
+    left out; a genre whose preset isn't there is left out of the table."""
+    if not isinstance(value, dict):
+        problems.append(f"equalizer isn't a group: {value!r}")
+        return Equalizer()
+    default = Equalizer()
+    on = _switch(value, "on", default.on, problems)
+    by_genre = _switch(value, "by_genre", default.by_genre, problems)
+    found = value.get("presets", [])
+    custom: list[Preset] = []
+    if not isinstance(found, list):
+        problems.append(f"equalizer.presets isn't a list of presets: {found!r}; none")
+        found = []
+    for i, item in enumerate(found):
+        preset = preset_of(item, f"equalizer.presets[{i}]", problems)
+        if preset is None:
+            continue
+        if _preset_named(preset.name, tuple(custom)) is not None:
+            problems.append(f"equalizer.presets[{i}] is named as one before it: {preset.name!r}")
+            continue
+        custom.append(preset)
+    kept = tuple(custom)
+    chosen = _preset_named(value.get("preset", default.preset), kept)
+    if chosen is None:
+        problems.append(f"equalizer.preset isn't a preset there is: {value.get('preset')!r}; Flat")
+        chosen = default.preset
+    table = dict(default.genres)
+    if "genres" in value:
+        given = value["genres"]
+        if not isinstance(given, dict):
+            problems.append(f"equalizer.genres isn't a group of genres: {given!r}; the built-in")
+        else:
+            table = {}
+            for genre, name in given.items():
+                preset_name = _preset_named(name, kept)
+                if not genre.strip() or preset_name is None:
+                    problems.append(f"equalizer.genres.{genre} isn't a preset there is: {name!r}")
+                    continue
+                table[genre.strip()] = preset_name
+    return Equalizer(on, chosen, by_genre, kept, table)
+
+
 def _place(value: object) -> Place | None:
     """A place and size, {"x", "y", "w", "h"} in whole pixels (a number written as text, or a
     whole fraction, as a hand edit leaves it); None when one is missing or not a number, or the
@@ -331,6 +413,7 @@ def parse(text: str, home: str) -> Shared:
     playback = _playback(data.get("playback", {}), problems)
     appearance = _appearance(data.get("appearance", {}), problems)
     mini_player = _mini_player(data.get("mini_player", {}), problems)
+    equalizer = _equalizer(data.get("equalizer", {}), problems)
     return Shared(
         root=root,
         watch=watch,
@@ -339,6 +422,7 @@ def parse(text: str, home: str) -> Shared:
         playback=playback,
         appearance=appearance,
         mini_player=mini_player,
+        equalizer=equalizer,
         data=data,
         newer=newer,
         problems=tuple(problems),
@@ -418,6 +502,30 @@ def with_mini_player(
     if isinstance(given, dict):
         fields = {**fields, "places": {**(places if isinstance(places, dict) else {}), **given}}
     return _with_group(shared, computer_name, "mini_player", fields, new_id)
+
+
+def with_equalizer(
+    shared: Shared,
+    computer_name: str,
+    fields: Mapping[str, object],
+    new_id: Callable[[], str] = _new_id,
+) -> dict[str, object]:
+    """The file's content with `fields` set in its `equalizer` group (R19.5: `on`, `preset`,
+    `by_genre`, `genres`, and `presets`, given as Presets): the rest as it was read, fields it
+    doesn't know included (A2.10), a custom preset's too, and this computer's id made when it has
+    none (A2.8)."""
+    given = fields.get("presets")
+    if isinstance(given, list | tuple):
+        group = shared.data.get("equalizer")
+        found = group.get("presets") if isinstance(group, dict) else None
+        old = {
+            o["name"]: o
+            for o in (found if isinstance(found, list) else [])
+            if isinstance(o, dict) and isinstance(o.get("name"), str)
+        }
+        presets = [preset_data(p, old.get(p.name)) for p in given if isinstance(p, Preset)]
+        fields = {**fields, "presets": presets}
+    return _with_group(shared, computer_name, "equalizer", fields, new_id)
 
 
 def _with_group(
@@ -505,6 +613,15 @@ def set_mini_player(path: str, home: str, computer_name: str, **fields: object) 
     what = "the mini player's " + ", ".join(fields)
     shared = _writable(path, home, what)
     return shared is not None and save(path, with_mini_player(shared, computer_name, fields))
+
+
+def set_equalizer(path: str, home: str, computer_name: str, **fields: object) -> bool:
+    """Keeps `fields` (on, preset, by_genre, presets, genres: R19.5) in the equalizer group of the
+    shared settings at `path`, the rest as it was; False, logged, when they can't be written
+    (`_writable`)."""
+    what = "the equalizer's " + ", ".join(fields)
+    shared = _writable(path, home, what)
+    return shared is not None and save(path, with_equalizer(shared, computer_name, fields))
 
 
 def computer_id(path: str, home: str, computer_name: str) -> str | None:

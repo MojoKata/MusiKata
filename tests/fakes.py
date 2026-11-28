@@ -102,6 +102,7 @@ class FakeEngine(QObject):
         self.device = None  # the device chosen, as told
         self.holding = False
         self.at = 0.0
+        self.tones = []  # (ticket, tone) of each song's equalizer, as told (R19)
 
     @Slot()
     def setup(self):
@@ -110,6 +111,10 @@ class FakeEngine(QObject):
     @Slot(str)
     def choose_device(self, chosen):
         self.device = chosen
+
+    @Slot(int, object)
+    def equalize(self, ticket, tone):
+        self.tones.append((ticket, tone))
 
     @Slot(str, int, float, float)
     def play(self, path, ticket, level, at=0.0):

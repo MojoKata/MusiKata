@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from musikata_core.audio import decode, gain, join, seam, stream
+from musikata_core.audio import decode, eq, gain, join, presets, seam, stream
 from musikata_core.audio.decode import DecodeError
 
 RATE = 100  # the device's and the numbered songs' rate: a frame a hundredth of a second
@@ -85,10 +85,10 @@ class Device:
     and keeps what it read and the songs it heard begin. `opened` lists each song opened, with
     the frame the song before it had reached."""
 
-    def __init__(self, songs, rate=RATE, step=7, lag=0):
+    def __init__(self, songs, rate=RATE, step=7, lag=0, designs=None):
         self.songs, self.step, self.lag = songs, step, lag
         self.stream = stream.Stream(rate, 2)
-        self.feed = join.Feed(self.stream, self.open)
+        self.feed = join.Feed(self.stream, self.open, designs=designs)
         self.read, self.began, self.opened, self.made = [], [], [], {}
 
     def open(self, path):
@@ -101,11 +101,11 @@ class Device:
         self.made.setdefault(path, []).append(song)
         return song
 
-    def start(self, path, ticket=1, gain=1.0):
+    def start(self, path, ticket=1, gain=1.0, tone=None):
         song = self.songs[path]
         song = song() if callable(song) else song
         self.made.setdefault(path, []).append(song)
-        self.feed.start(ticket, path, song, gain)
+        self.feed.start(ticket, path, song, gain, tone=tone)
         return self
 
     def fill(self):
@@ -687,3 +687,132 @@ def test_a_song_started_at_a_frame_plays_from_there_and_says_its_place():
     d.run()
     assert np.array_equal(d.out(), played((0, 700, 800)))
     assert d.feed.position(d.stream.taken) == 15.0
+
+
+# ---------- the equalizer in the stream (A4.4, R7.6.1, R19) ----------
+
+EQ_RATE = 48_000
+DESIGNS = eq.Designs()
+
+
+def tone_of(name):
+    return presets.tone(presets.find(name, ()))
+
+
+def design_of(name):
+    return DESIGNS(tone_of(name), EQ_RATE)
+
+
+def noise_song(n, seed):
+    rng = np.random.default_rng(seed)
+    return Wave(rng.standard_normal((n, 2)) * 0.1, EQ_RATE)
+
+
+def equalized(x, *steps):
+    """`x` through an equalizer with `steps` (place, preset name or None, ramped)."""
+    e = eq.Equalizer(EQ_RATE, 2)
+    for place, name, ramped in steps:
+        e.schedule(place, None if name is None else design_of(name), ramped)
+    out = [e.push(x[i : i + 1000]) for i in range(0, len(x), 1000)]
+    return np.concatenate([*out, e.flush()])
+
+
+def eq_device(songs, step=480):
+    return Device(songs, rate=EQ_RATE, step=step, designs=DESIGNS)
+
+
+def test_a_song_plays_at_its_tone_from_its_first_frame_and_the_next_at_its_own_from_its_join():
+    """R7.6.1: the equalizer changes at the join, crossfaded from there; and the limiter's
+    look-ahead moves no place: the next song is heard at its first frame."""
+    a, b = noise_song(20_000, 1), noise_song(15_000, 2)
+    d = eq_device({"a": a, "b": b}).start("a", tone=tone_of("Rock"))
+    d.feed.retone(2, tone_of("Pop"))
+    follow(d, 1, 2, "b")
+    d.fill()
+    assert d.feed.flight[1].mark == 20_000
+    assert d.feed.hear(19_999) == [] and [p.ticket for p in d.feed.hear(20_000)] == [2]
+    d.run()
+    both = np.concatenate([a.samples, b.samples])
+    want = equalized(both, (0, "Rock", False), (20_000, "Pop", True))
+    assert len(d.out()) == 35_000 and np.abs(d.out() - want).max() < 1e-6
+    assert d.stream.short == 0
+
+
+def test_a_join_between_songs_of_one_tone_changes_nothing():
+    a, b = noise_song(10_000, 1), noise_song(10_000, 2)
+    d = eq_device({"a": a, "b": b}).start("a", tone=tone_of("Jazz"))
+    d.feed.retone(2, tone_of("Jazz"))
+    follow(d, 1, 2, "b")
+    d.run()
+    want = equalized(np.concatenate([a.samples, b.samples]), (0, "Jazz", False))
+    assert np.abs(d.out() - want).max() < 1e-6
+
+
+def test_a_tone_changed_while_its_song_plays_is_heard_from_where_the_device_has_got_to():
+    a = noise_song(40_000, 3)
+    d = eq_device({"a": a}).start("a", tone=tone_of("Rock"))
+    d.run(until=lambda: d.stream.taken >= 9_600)
+    taken = d.stream.taken
+    assert d.stream.written > taken + 20_000  # the ring held what is filtered again
+    assert d.feed.retone(1, tone_of("Loudness"))
+    assert not d.feed.retone(1, tone_of("Loudness"))  # the same again: nothing to do
+    d.run()
+    want = equalized(a.samples, (0, "Rock", False), (taken, "Loudness", True))
+    assert len(d.out()) == 40_000 and np.abs(d.out() - want).max() < 1e-6
+    assert d.stream.short == 0
+
+
+def test_the_equalizer_turned_on_and_off_while_a_song_plays_crossfades_and_off_is_untouched():
+    a = noise_song(40_000, 4)
+    d = eq_device({"a": a}).start("a")
+    d.run(until=lambda: d.stream.taken >= 4_800)
+    on = d.stream.taken
+    d.feed.retone(1, tone_of("Bass boost"))
+    d.run(until=lambda: d.stream.taken >= 19_200)
+    off = d.stream.taken
+    d.feed.retone(1, None)
+    d.run()
+    want = equalized(a.samples, (on, "Bass boost", True), (off, None, True))
+    out = d.out()
+    assert np.abs(out - want).max() < 1e-6
+    assert np.array_equal(out[:on], a.samples[:on])
+    assert np.array_equal(out[off + 2400 :], a.samples[off + 2400 :])
+
+
+def test_a_tone_changed_for_the_song_to_follow_is_heard_from_its_join():
+    a, b = noise_song(20_000, 5), noise_song(20_000, 6)
+    d = eq_device({"a": a, "b": b}).start("a", tone=tone_of("Rock"))
+    assert not d.feed.retone(2, tone_of("Pop"))  # not in the stream: it plays it when it joins
+    follow(d, 1, 2, "b")
+    d.run(until=lambda: d.stream.written > 21_000 and d.stream.taken >= 4_800)
+    assert d.feed.retone(2, tone_of("Classical"))
+    d.run()
+    both = np.concatenate([a.samples, b.samples])
+    want = equalized(both, (0, "Rock", False), (20_000, "Classical", True))
+    assert np.abs(d.out() - want).max() < 1e-6
+    assert not d.feed.retone(1, tone_of("Jazz"))  # played out: nothing changes
+
+
+def test_a_seek_with_the_equalizer_on_goes_on_from_the_sound_heard_before_it():
+    a = noise_song(48_000, 7)
+    d = eq_device({"a": a}).start("a", tone=tone_of("Vocal"))
+    d.run(until=lambda: d.stream.taken >= 9_600)
+    taken = d.stream.taken
+    assert d.feed.seek(1, 30_000)
+    d.run()
+    heard = np.concatenate([a.samples[:taken], a.samples[30_000:]])
+    assert np.abs(d.out() - equalized(heard, (0, "Vocal", False))).max() < 1e-6
+
+
+def test_a_tone_changed_for_a_song_the_device_has_taken_to_its_end_changes_nothing():
+    a, b = noise_song(5_000, 8), noise_song(5_000, 9)
+    d = Device({"a": a, "b": b}, rate=EQ_RATE, step=480, lag=2_000, designs=DESIGNS)
+    d.start("a", tone=tone_of("Rock"))
+    d.feed.retone(2, tone_of("Rock"))
+    follow(d, 1, 2, "b")
+    d.run(until=lambda: d.stream.taken > 5_500)
+    assert d.feed.heard.ticket == 1  # not yet heard to its end: the device's buffer holds it
+    assert not d.feed.retone(1, tone_of("Pop"))
+    d.run()
+    want = equalized(np.concatenate([a.samples, b.samples]), (0, "Rock", False))
+    assert np.abs(d.out() - want).max() < 1e-6

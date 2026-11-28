@@ -463,8 +463,9 @@ class Keeping:
     thread never waits on a file. `read` gives that thread its connection to the index, where a
     song's id becomes its path and hash; `computer` gives this computer's id, made and kept in the
     shared settings the first time it is needed (`settings.computer_id`); `set_playback` and
-    `set_appearance` write the shared settings' playback and appearance fields, and
-    `set_mini_player` the mini player's (R15.2, R15.3). `kept` is the
+    `set_appearance` write the shared settings' playback and appearance fields,
+    `set_mini_player` the mini player's (R15.2, R15.3), and `set_equalizer` the equalizer's
+    (R19.5). `kept` is the
     file as read at start: a newer format is never written, and the fields it doesn't know are
     kept."""
 
@@ -479,9 +480,10 @@ class Keeping:
         executor: Executor | None = None,
         set_appearance: Callable[..., bool] | None = None,
         set_mini_player: Callable[..., bool] | None = None,
+        set_equalizer: Callable[..., bool] | None = None,
     ) -> None:
         self._where, self._read, self._clock = where, read, clock
-        self._set_mini_player = set_mini_player
+        self._set_mini_player, self._set_equalizer = set_mini_player, set_equalizer
         self._kept = kept
         self._computer, self._made_computer = where.computer, computer
         self._set_playback, self._set_appearance = set_playback, set_appearance
@@ -549,6 +551,14 @@ class Keeping:
             return None
         set_mini_player = self._set_mini_player
         return self._submit(lambda: set_mini_player(**fields))
+
+    def equalizer(self, **fields: object) -> Future[object] | None:
+        """Keeps `fields` (the equalizer's on, preset, by_genre, presets, genres: R19.5) in the
+        shared settings, off this thread; None when there is nowhere to."""
+        if self._set_equalizer is None:
+            return None
+        set_equalizer = self._set_equalizer
+        return self._submit(lambda: set_equalizer(**fields))
 
     def close(self) -> None:
         """Waits for the writes asked for, then ends the thread: for quitting."""

@@ -22,7 +22,15 @@ go into the ring; where it differs from the song before's, it is ramped there ov
 join (R7.6.1, A4.4). Where songs of different rates meet, each resampler is primed with its song
 continued past the seam (seam.py), so the join doesn't click (R7.6). When the device changes
 (A4.6, R7.7), `move` goes on into a stream at the new device's rate from the same instant of the
-song."""
+song.
+
+After ReplayGain comes the equalizer (eq.py, A4.4), before the ring: each song comes with the tone
+it plays (R19.4 may give each its own; None, off), and where it differs from the song before's the
+filter is crossfaded there over 50 ms from the join (R7.6.1). A tone changed for a song while it
+plays (`retone`) is heard at once: the stream is taken back to where the device has got to and
+what was given from there is filtered again, as the ring has room for it. While the equalizer is
+on, its limiter holds back its look-ahead, given out when what follows is known or the stream
+ends, so every place in the stream stays where it was."""
 
 from __future__ import annotations
 
@@ -38,6 +46,7 @@ from numpy.typing import NDArray
 
 from . import gain, seam
 from .decode import DecodeError, Resampler, seek_plan
+from .eq import Design, Designs, Equalizer, Tone
 from .stream import BLOCK_SECONDS, STEP_BLOCKS, Block, Stream, frames_of
 
 log = logging.getLogger(__name__)
@@ -65,6 +74,8 @@ class Song(Protocol):
 
 Opener = Callable[[str], Song]  # a song's path to it, open; raises DecodeError
 Resampling = Callable[[int, int, int], Resampler]  # (rate, device, channels) to a resampler
+Designing = Callable[[Tone, int], Design]  # a tone and the device's rate to its filter
+KEEP_MORE = 0.5  # seconds kept for the equalizer past the ring's: the blocks waiting for room
 
 
 @dataclass
@@ -115,9 +126,18 @@ class Feed:
     into the stream, `hear` says where the device has got to, `follow` and `seek` change what
     comes. Everything here runs on one thread, the device's pulls included."""
 
-    def __init__(self, stream: Stream, opener: Opener, resampling: Resampling = Resampler) -> None:
+    def __init__(
+        self,
+        stream: Stream,
+        opener: Opener,
+        resampling: Resampling = Resampler,
+        designs: Designing | None = None,
+    ) -> None:
         self.stream = stream
         self._opener, self._resampling = opener, resampling
+        self._designs: Designing = designs if designs is not None else Designs()
+        self._tones: dict[int, Tone | None] = {}  # each song's tone, by ticket (None: off)
+        self._eq = self._equalizer(stream)
         self.flight: list[Playing] = []  # the first is heard; the last is being decoded
         self._ahead: Playing | None = None  # opened to follow the last, not yet gone in
         self._followers: dict[int, tuple[int, str, float]] = {}  # a ticket to the ticket, path
@@ -132,18 +152,42 @@ class Feed:
         self._made = 0  # the frames it has given, those dropped included
         self._history = np.zeros((0, stream.channels), np.float32)  # the last samples given it
 
+    def _equalizer(self, stream: Stream) -> Equalizer:
+        keep = stream.ring.capacity + frames_of(KEEP_MORE, stream.rate)
+        return Equalizer(stream.rate, stream.channels, stream.written, keep)
+
+    def _design(self, ticket: int) -> Design | None:
+        """The filter of the song with `ticket` at the stream's rate; None when it plays none."""
+        tone = self._tones.get(ticket)
+        return None if tone is None else self._designs(tone, self.stream.rate)
+
+    @property
+    def equalizer(self) -> Equalizer:
+        """The equalizer on the stream."""
+        return self._eq
+
     @property
     def heard(self) -> Playing | None:
         """The song the device plays."""
         return self.flight[0] if self.flight else None
 
-    def start(self, ticket: int, path: str, song: Song, gain: float = 1.0, frame: int = 0) -> None:
+    def start(
+        self,
+        ticket: int,
+        path: str,
+        song: Song,
+        gain: float = 1.0,
+        frame: int = 0,
+        tone: Tone | None = None,
+    ) -> None:
         """`song` plays from its frame `frame` (at the device's rate; 0, its start: a queue kept
         across a restart starts where it was, R1.8), first in an empty stream, its frames
-        multiplied by `gain`."""
+        multiplied by `gain` and through the equalizer at `tone` (None: off)."""
         frame = max(0, frame)
         playing = Playing(ticket, path, song, mark=self.stream.written, offset=frame, gain=gain)
         self.flight = [playing]
+        self._tones[ticket] = tone
+        self._eq.schedule(playing.mark, self._design(ticket), ramped=False)
         self._decode(playing, frame)
 
     def close(self) -> None:
@@ -185,7 +229,15 @@ class Feed:
             self._feed_pending()
             if self._pending or steps >= step or self.stream.ring.free < self.stream.block:
                 break
+            if self._eq.redoing:  # a tone changed: what was given, filtered again first
+                steps += 1
+                self._put(self._eq.redo(self.stream.block))
+                continue
             if self._done:
+                tail = self._eq.flush()  # what the limiter's look-ahead held
+                if len(tail):
+                    self._put(tail)
+                    continue
                 self.stream.finish()
                 break
             last = self.flight[-1]
@@ -219,8 +271,12 @@ class Feed:
             cut = min(self._drop, len(frames))
             frames, self._drop = frames[cut:], self._drop - cut
         if len(frames):
-            place = self.stream.written + sum(len(f) for f in self._pending)
-            self._pending.append(gain.apply(frames, self._gains(place, len(frames))))
+            place = self._eq.given
+            self._put(self._eq.push(gain.apply(frames, self._gains(place, len(frames)))))
+
+    def _put(self, frames: Block) -> None:
+        if len(frames):
+            self._pending.append(frames)
 
     def _steps(self) -> list[gain.Step]:
         return [gain.Step(p.mark, p.gain, p.ramp_from) for p in self.flight]
@@ -279,6 +335,7 @@ class Feed:
         self._pending, self._done = [], False
         self.stream.cut(taken)
         self.stream.reopen()
+        self._eq.rewind(taken)
         playing = self.flight[at]
         self._decode(playing, taken - playing.mark + playing.offset)
 
@@ -345,12 +402,13 @@ class Feed:
             return
         else:
             self._end_primed()
-            following.mark = self.stream.written + sum(len(f) for f in self._pending)
+            following.mark = self._eq.given
             self._start_primed(following)
         at = gain.gain_at(following.mark - 1, self._steps(), self._ramp())
         following.ramp_from = None if at == following.gain else at
         self.flight.append(following)
         self._ahead = None
+        self._eq.schedule(following.mark, self._design(following.ticket))  # R7.6.1
 
     def _ramp(self) -> int:
         return frames_of(gain.RAMP_SECONDS, self.stream.rate)
@@ -464,6 +522,7 @@ class Feed:
         self._drop_ahead()
         self.stream, self._opener = stream, opener
         self._pending, self._done = [], False
+        self._eq = self._equalizer(stream)
         if playing is None:
             return None
         self._followers = {k: v for k, v in self._followers.items() if k == playing.ticket}
@@ -478,5 +537,31 @@ class Feed:
             return Failure(playing.ticket, why_of(e))
         playing.mark, playing.offset = stream.written, at * stream.rate // old
         playing.ramp_from = None
+        self._eq.schedule(playing.mark, self._design(playing.ticket), ramped=False)
         self._decode(playing, playing.offset)
         return None
+
+    def retone(self, ticket: int, tone: Tone | None) -> bool:
+        """The song with `ticket` plays `tone` from now on (None: the equalizer off), the songs
+        before and after it as they were. Heard at once when it is in the stream: from where the
+        device has got to, or from its first frame when the device hasn't reached it, what was
+        given is filtered again, crossfaded over 50 ms (A4.4). False when it isn't in the stream
+        (a song to follow, which plays it when it joins), has been played out, or played `tone`
+        already."""
+        if ticket in self._tones and self._tones[ticket] == tone:
+            return False
+        self._tones[ticket] = tone
+        at = next((i for i, p in enumerate(self.flight) if p.ticket == ticket), None)
+        if at is None:
+            return False
+        until = self.flight[at + 1].mark if at + 1 < len(self.flight) else None
+        taken = self.stream.taken
+        if until is not None and until <= taken:
+            return False
+        place = max(self.flight[at].mark, taken)
+        back = max(taken, min(place, self.stream.written))
+        self._pending = []
+        self.stream.cut(back)
+        self.stream.reopen()
+        self._eq.retune(back, place, self._design(ticket), until)
+        return True

@@ -347,6 +347,7 @@ def load(
         read=index.read,
         playback=shared.playback,
         clock=clock,
+        equalizer=shared.equalizer,
     )
     player.nowPlaying.connect(library.show_playing)
     # the waveforms of the song shown and the next, on the worker processes (R11.1.1, A5.1)
@@ -638,6 +639,7 @@ def keep_playing(
             set_playback=functools.partial(settings.set_playback, path, home, name),
             set_appearance=functools.partial(settings.set_appearance, path, home, name),
             set_mini_player=functools.partial(settings.set_mini_player, path, home, name),
+            set_equalizer=functools.partial(settings.set_equalizer, path, home, name),
         )
     )
 

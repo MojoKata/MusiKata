@@ -54,8 +54,9 @@ A4.3. **The analyzer's audio.** Each block the device takes from the ring buffer
 with its place in the stream and before the volume, into the analyzer's ring buffer of the last
 second (A5.2; `musikata_core.audio.stream.Recent`), while a view that draws the spectrum wants it
 (A5.5). The analyzer reads it up to the place the device reports it has played (its processed
-time, which holds the device's own latency) and, once the limiter is there, delayed by its
-look-ahead (A4.4), so what is drawn is what is heard. A view keeps the spectra it draws itself (the
+time, which holds the device's own latency), so what is drawn is what is heard. The limiter's
+look-ahead (A4.4) moves nothing: its frames are held back as the ring is filled, not delayed in
+it, so a place in the stream is the same before and after the equalizer. A view keeps the spectra it draws itself (the
 landscape's last few seconds, A5.3), so the ring needs only the device's buffer and a frame's
 samples behind what was played.
 
@@ -68,8 +69,13 @@ A4.4. **Gain and the equalizer.**
   responses are added on a fine frequency grid, and the sum is turned into one minimum-phase
   filter (by its cepstrum, so it adds no delay), long enough that the lowest and narrowest band
   is still right: 16,384 samples at 44.1 and 48 kHz, more at higher rates. It is rebuilt when a
-  band changes, crossfaded over 50 ms, and applied block by block with NumPy's FFT
-  (overlap-add). No SciPy is needed, and it costs a few percent of one core.
+  band changes, crossfaded over 50 ms, and applied block by block with NumPy's FFT: cut into
+  sixteen parts, each block's spectrum kept for the parts after it (uniformly partitioned
+  overlap-save), so a block of 20 ms costs two FFTs of 2,048. No SciPy is needed, and it costs
+  about 1 % of one core. The filter is built and applied on the playback thread, where the
+  samples are made. A change is heard at once, not two seconds on: the ring is taken back to what
+  the device has taken, and what the equalizer was given from there, which it keeps, is filtered
+  again with the new filter crossfaded in.
 - **Parametric to graphic** (R19.6): the ten slider gains are the least-squares fit of the ten
   bells to the parametric curve, in dB, sampled every twelfth of an octave and held to ±12 dB; how
   close they come is the largest difference between the two curves.
@@ -77,7 +83,9 @@ A4.4. **Gain and the equalizer.**
   preamp plus that boost is above 0 dB, the level is lowered by the difference, ramped with the
   filter's 50 ms crossfade, and the panel shows by how much. A look-ahead peak limiter of 5 ms then
   catches the few peaks the filter's phase still pushes over full scale; on ordinary music it seldom
-  acts. Its look-ahead delays the sound by 5 ms, which the analyzer allows for (A4.3).
+  acts. Its look-ahead is taken from what is decoded ahead: the last 5 ms given are held until what
+  follows them is known, or the stream ends, so the sound and the analyzer (A4.3) are not delayed.
+  Off, the equalizer holds nothing and leaves the samples untouched.
 - **Volume** is applied last, so the equalizer works at full resolution.
 
 A4.5. **The system's media controls** (R7.8):
