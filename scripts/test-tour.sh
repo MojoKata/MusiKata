@@ -12,6 +12,7 @@
 # container, so the screens show ~/Music, as on a new user's computer. The tour runs three times,
 # once in each state it has screens for (src/musikata/tour.py): the library; the same root
 # unmounted (X02, R2.10); a first start with nothing configured (X01, R2.1).
+# A crash prints every thread's stack (PYTHONFAULTHANDLER).
 #   scripts/test-tour.sh [--tour-only NAMES]
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -43,7 +44,7 @@ tour() {   # MUSIC DATA OUT ARGS...: one run, the demo library at MUSIC, DATA as
     music=$1 data=$2 out=$3
     shift 3
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e MUSIKATA_DATA=/tmp/data \
-        -e QT_QPA_PLATFORM=offscreen -e PYTHONDONTWRITEBYTECODE=1 \
+        -e QT_QPA_PLATFORM=offscreen -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONFAULTHANDLER=1 \
         -v "$HERE:/src:ro" -v "$SITE:/site:ro" -v "$DEMO/Music:$music:ro" -v "$data:/tmp/data" \
         -v "$out:/out" "$IMG" sh -c \
         'cd /src && PYTHONPATH=/src/src:/site exec "$@"' sh "$CPY" -m musikata --tour /out "$@"
