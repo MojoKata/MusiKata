@@ -165,6 +165,7 @@ Rectangle {
                     visible: (panel.edit.artChip.text || "") !== ""
                     label: panel.edit.artChip.text || ""
                     tone: panel.edit.artChip.tone || "ok"
+                    tip: panel.edit.artChip.tip || ""
                 }
             }
 

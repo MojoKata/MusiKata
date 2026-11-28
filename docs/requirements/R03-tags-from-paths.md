@@ -84,6 +84,16 @@ R3.8. **Saving.** The footer counts the files and changes, and **Save N files** 
 (R4.7). The old values go into the change history, so **Undo** puts them back (R4.9).
 
 R3.9. **Tags match path.** For each file MusiKata keeps whether its tags agree with its path under
-the pattern detected for its folder. Folders shows each folder's worst state beneath it (green:
-match, amber: can be fixed, red: no tags; R2.9.5) and a chip per file ("Match", "Genre differs",
-"Year missing"), and the mismatches are listed in Needs attention (R2.8).
+the pattern detected for its folder. A shorter name of the album, album artist or artist agrees:
+the path's "Night Ferry" agrees with a tag of "Night Ferry (Original Soundtrack)", and "Glass
+Harbor" with "Glass Harbor Remixed", as the tag starts with the path's text before a space, or is
+it with a part in brackets added, compared as Infer from path compares (runs of spaces, and case
+where the tag already has mixed case). A folder that holds two or more album folders, whose songs
+carry an album artist or artist but none its name, groups albums (`Soundtracks`,
+`Lumen Drift/Remixes`) and gives the songs beneath it no album artist or artist to agree with;
+their album, track and title are still judged from their own folder and file; songs with neither
+tag say nothing either way, so a folder of untagged albums is still read as their artist's.
+Folders shows each folder's worst state beneath it (green: match, amber: can be fixed, red: no
+tags; R2.9.5) and a chip per file ("Match", "Fixable" or
+"Untagged", its tooltip saying what differs, a line each, as "Genre differs: the path says Ambient,
+the tags Electronic"), and the mismatches are listed in Needs attention (R2.8).

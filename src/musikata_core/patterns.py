@@ -18,7 +18,10 @@
 - **Tags match path** (R3.9): `states` says, for a folder's songs, whether each one's tags agree
   with its path under the pattern detected for the folder, as Infer from path's defaults would
   read it: MATCH, FIX (and how: `Difference`), or BARE (no tags at all); None when no pattern fits
-  it.
+  it. It judges less than Infer from path writes (`judged`): an album, album artist or artist the
+  path shortens agrees (`shortens`: the tag starts with it, or is it with a part in brackets), and
+  a folder that groups albums (`grouping`: two or more album folders beneath it, whose songs
+  carry an album artist or artist but none its name) gives no album artist or artist.
 - **The layout** (R12.1, R12.1.1, A3.3): the same language run the other way, a path made from a
   song's tags for Organize files. `parse(text, naming=True)` takes R12.1's naming forms too
   (`{track:02}`, `{disc-}`, the sort names) and refuses `{*}`, which names nothing; `values_for`
@@ -36,10 +39,11 @@ Plain functions over strings and tags.Tags: no file, index or Qt."""
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from . import sortnames
@@ -77,6 +81,12 @@ PRESETS = (
 DOESNT_FIT = "Doesn't fit the pattern"  # R3.4
 # R3.9's states, worst last
 MATCH, FIX, BARE = 0, 1, 2
+# R3.9: the fields a path's shorter name of the tag agrees with, and the tokens a folder that
+# groups albums doesn't give
+SHORTENED = ("album", "albumartist", "artist")
+ARTIST_TOKENS = ("albumartist", "artist")
+_BRACKETED = re.compile(r"[(\[][^()\[\]]*[)\]]")
+_ENDS = " ,;:-–—"  # what a shorter name drops at its end ("Glass Harbor:" is "Glass Harbor")
 _TOKEN = re.compile(r"\{([^{}]*)\}")
 # R12.1's naming forms, which only a layout (parse's `naming`) takes: a number padded with zeros
 # ({track:02}), the disc and "-" when the album has more than one ({disc-}), the sort names
@@ -128,6 +138,17 @@ class Pattern:
     def fields(self) -> tuple[str, ...]:
         """The fields of tags.Tags it fills, in its tokens' order."""
         return tuple(TOKENS[t] for t in self.tokens)
+
+    def place(self, token: str) -> int | None:
+        """Which of its parts (0: the first folder it describes; depth - 1: the file's name) the
+        first `token` of that name is in; None when it has none."""
+        at = 0
+        for kind, value in self.parts:
+            if kind == "text":
+                at += value.count("/")
+            elif value == token:
+                return at
+        return None
 
 
 def _naming_form(name: str) -> bool:
@@ -475,11 +496,13 @@ def plan(
 @dataclass(frozen=True)
 class Difference:
     """How a song's tag differs from its path (R3.9): the field, how ("missing", "case": only in
-    case, "differs"), and the path's value as the preview shows it."""
+    case, "differs"), and the path's value as the preview shows it; and the tag's own (`old`, ""
+    for none, or unknown), which says how but not whether they differ, so is left out of `==`."""
 
     field: str
     how: str
     value: str
+    old: str = dataclasses.field(default="", compare=False)
 
 
 def has_tags(tags: Tags) -> bool:
@@ -498,25 +521,103 @@ def differences(old: Tags, new: Tags) -> tuple[Difference, ...]:
             continue
         how = "missing" if not before else "case" if before.casefold() == after.casefold() else (
             "differs")  # fmt: skip
-        out.append(Difference(field, how, after))
+        out.append(Difference(field, how, after, before))
     return tuple(out)
 
 
 State = tuple[int | None, tuple[Difference, ...]]
 
 
+def short_forms(tag: str) -> list[str]:
+    """The shorter names a tag goes by (R3.9): each start of it that ends before a space, without
+    the marks it ends with ("Night Ferry" of "Night Ferry (Original Soundtrack)", "Glass Harbor"
+    of "Glass Harbor: Remixed"), and the tag with its parts in brackets taken out ("Glass Harbor
+    Live" of "Glass Harbor (Deluxe) Live"), with that one's starts."""
+    out: list[str] = []
+    bare = " ".join(_BRACKETED.sub(" ", tag).split())
+    for text in dict.fromkeys((tag, bare)):
+        if text != tag and text:
+            out.append(text)
+        for i in range(1, len(text)):
+            if text[i].isspace() and not text[i - 1].isspace():
+                start = text[:i].rstrip(_ENDS)
+                if start:
+                    out.append(start)
+    return list(dict.fromkeys(out))
+
+
+def shortens(tag: str, raw: str) -> bool:
+    """Whether the path's `raw` text, tidied as Infer from path's defaults tidy it, is a shorter
+    name of `tag` (`short_forms`), compared as the rest of R3.9 compares (spaces, the marks a
+    file's name can't hold, and case when the tag already has mixed case)."""
+    new = tidy_case(raw)
+    return any(_kept(form, raw, new) for form in short_forms(tag))
+
+
+def carries(tag: str, name: str) -> bool:
+    """Whether a song's album artist or artist `tag` carries a folder's `name` (R3.9's grouping
+    folder), case aside: the same once spelled as a file's name could, or a shorter name of it."""
+    want = spelled(name).casefold()
+    return bool(want) and any(spelled(form).casefold() == want for form in (tag, *short_forms(tag)))
+
+
+def grouping(name: str, albums: int, names: Iterable[str | None]) -> bool:
+    """R3.9: whether a folder named `name` groups albums rather than naming their artist: it holds
+    two or more album folders (`albums`, the folders beneath it holding songs of their own), and
+    of the songs beneath it (`names`: their album artists and artists) at least one carries an
+    album artist or artist and none carries its name. A song with neither tag is no evidence
+    either way, so a folder of untagged albums is still read as their artist's."""
+    tagged = [n for n in names if n]
+    return albums >= 2 and bool(tagged) and not any(carries(n, name) for n in tagged)
+
+
+def token_folder(pattern: Pattern, path: str, token: str) -> str | None:
+    """The folder (its path under the root, with `/`) that `token` of `pattern` reads in `path`;
+    None when the token is in the file's name, or the pattern has none."""
+    place = pattern.place(token)
+    if place is None or place >= pattern.depth - 1:
+        return None
+    parts = [p for p in path.replace("\\", "/").split("/") if p]
+    return "/".join(parts[: len(parts) - pattern.depth + place + 1])
+
+
+def judged(
+    pattern: Pattern,
+    path: str,
+    tags: Tags,
+    values: Mapping[str, object],
+    groups: Container[str] = frozenset(),
+) -> dict[str, object]:
+    """The values (`given`'s) R3.9 judges a song's `tags` by: all but the album artist or artist
+    read from a folder of `groups` (those that group albums, `grouping`), and an album, album
+    artist or artist the path's text shortens (`shortens`)."""
+    out = dict(values)
+    for token in ARTIST_TOKENS:
+        if TOKENS[token] in out and token_folder(pattern, path, token) in groups:
+            del out[TOKENS[token]]
+    for field in SHORTENED:
+        old, raw = getattr(tags, field), out.get(field)
+        if old and isinstance(raw, str) and shortens(old, raw):
+            del out[field]
+    return out
+
+
 def states(
     songs: Sequence[tuple[str, Tags]],
     patterns: Sequence[Pattern],
+    groups: Container[str] = frozenset(),
 ) -> list[State]:
     """R3.9 for a folder's songs (each its path under the root and tags), in their order: under
-    the pattern detected for them (`detect`, as Infer from path reads it by default), MATCH and
-    no differences, or FIX and how the tags differ; BARE for a song with no tags at all (and how,
-    when a pattern fits it); (None, ()) when no pattern fits a song that has tags."""
+    the pattern detected for them (`detect`, as Infer from path reads it by default), and judged
+    as `judged` says (`groups`: the folders that group albums), MATCH and no differences, or FIX
+    and how the tags differ; BARE for a song with no tags at all (and how, when a pattern fits
+    it); (None, ()) when no pattern fits a song that has tags."""
     chosen = detected(detect(patterns, [p for p, _ in songs])) if songs else None
     out: list[State] = []
     for path, tags in songs:
         values = given(chosen, path) if chosen is not None else None
+        if chosen is not None and values is not None:
+            values = judged(chosen, path, tags, values, groups)
         diffs = differences(tags, infer(tags, values)) if values is not None else ()
         if not has_tags(tags):
             out.append((BARE, diffs))

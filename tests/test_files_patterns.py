@@ -438,6 +438,7 @@ def test_each_files_tags_match_its_path_can_be_fixed_or_it_has_none():
                 Difference("title", "missing", "Ebb"))),
         (None, ()),
     ]  # fmt: skip
+    assert got[1][1][0].old == "lumen drift" and got[2][1][0].old == ""  # the tag's own value
     assert patterns.states([], patterns.patterns_of()) == []
     assert patterns.states([("x.flac", Tags())], patterns.patterns_of()) == [(BARE, ())]
 
@@ -462,6 +463,126 @@ def test_a_year_the_folder_gives_is_part_of_the_match():
     assert patterns.has_tags(Tags(genres=("Rock",))) and not patterns.has_tags(Tags(rating=4))
 
 
+def test_a_shorter_name_the_path_gives_of_the_album_or_an_artist_agrees():
+    """R3.9: the tag starts with the path's text, before a space, or is it with a part in
+    brackets; compared as the rest of R3.9 compares (spaces, the marks a name can't hold, case
+    when the tag has mixed case)."""
+    ferry = "Night Ferry (Original Soundtrack)"
+    assert patterns.short_forms(ferry) == ["Night", "Night Ferry", "Night Ferry (Original"]
+    assert "Glass Harbor Live" in patterns.short_forms("Glass Harbor (Deluxe) Live")
+    for tag, raw in (
+        (ferry, "Night Ferry"),
+        ("Glass Harbor Remixed", "Glass Harbor"),
+        ("Glass Harbor [Deluxe]", "Glass Harbor"),
+        ("Glass Harbor: Remixed", "Glass Harbor"),
+        ("Glass Harbor, Vol. 2", "Glass Harbor"),
+        ("Glass Harbor (Deluxe) Live", "Glass Harbor Live"),
+        ("Glass Harbor(Deluxe)", "Glass Harbor"),
+        ("Glass Harbor Remixed", "glass  harbor"),  # tidied, its spaces single
+        ("Glass Harbor Remixed", "GLASS HARBOR"),
+        ("AC/DC Live", "AC DC"),  # what a file's name can't hold
+    ):
+        assert patterns.shortens(tag, raw), (tag, raw)
+    for tag, raw in (
+        ("Glassworks", "Glass"),  # not before a space
+        ("Glass Harbor", "Glass Harbor Remixed"),  # the path's the longer
+        ("Harbor Lights", "Glass Harbor"),
+        ("glass harbor remixed", "Glass Harbor"),  # all lower case, tidied as Infer would
+        ("Night Ferry (Original Soundtrack)", "Night Ferry Soundtrack"),
+        ("Glass Harbor", "Glass Harbor"),  # the same isn't shorter: infer judges it
+    ):
+        assert not patterns.shortens(tag, raw), (tag, raw)
+
+
+def test_the_album_and_its_artists_agree_when_shortened_but_the_title_year_and_track_dont():
+    """R3.9: only the album, the album artist and the artist; a file's name that shortens the
+    title, or a year, track or disc that differs, still differs."""
+    folder = "Lumen Drift/Glass Harbor"
+    songs = [
+        (f"{folder}/01 - Atlas.flac", Tags(albumartist="Lumen Drift feat. Ora", album="Glass Harbor"
+                                           " Remixed", track=1, title="Atlas")),
+        (f"{folder}/02 - Signal.flac", Tags(albumartist=LD, album="Glass Harbor", track=2,
+                                            title="Signal Fires")),
+        (f"{folder}/03 - Ebb.flac", Tags(albumartist=LD, album="Glass Harbor", track=31,
+                                         title="Ebb")),
+    ]  # fmt: skip
+    got = patterns.states(songs, patterns.patterns_of())
+    assert got == [
+        (MATCH, ()),
+        (FIX, (Difference("title", "differs", "Signal"),)),
+        (FIX, (Difference("track", "differs", "3"),)),
+    ]
+    artist = [("A/Kindling/01 - Embers.flac", Tags(artist="Mara Okafor & Band", album="Kindling",
+                                                  track=1, title="Embers"))]  # fmt: skip
+    user = patterns.patterns_of(["{artist}/{album}/{track} - {title}"])
+    assert patterns.states([(p.replace("A/", "Mara Okafor/"), t) for p, t in artist], user) == [
+        (MATCH, ())
+    ]
+
+
+def test_a_folder_that_groups_albums_is_one_with_two_or_more_none_of_whose_songs_carry_its_name():
+    """R3.9: two or more album folders beneath it, and songs beneath it tagged with an album
+    artist or artist, none of them its name, as R3.9 compares names, case aside; songs with
+    neither tag are no evidence, so a folder of untagged albums is an artist's."""
+    various = ["Various Artists", "Arc Drift", None, "Cinder Fern"]
+    assert patterns.grouping("Soundtracks", 5, various)
+    assert patterns.grouping("Remixes", 2, ["Lumen Drift"])
+    assert not patterns.grouping("Soundtracks", 1, various)  # one album: an artist's
+    assert not patterns.grouping("Lumen Drift", 4, ["Lumen Drift", None])
+    assert not patterns.grouping("Lumen Drift", 2, [None, "lumen drift"])  # as the artist
+    assert not patterns.grouping("Lumen_Drift", 2, ["Lumen Drift feat. Ora"])  # a shorter name
+    assert not patterns.grouping("Rock", 3, [None, None, ""])  # untagged: still an artist's
+    assert patterns.grouping("Rock", 3, [None, "Ada Kerr", None])
+    assert patterns.carries("AC/DC", "AC_DC") and not patterns.carries("Lumen", "Lumen Drift")
+    assert not patterns.carries("Lumen Drift", "")
+
+
+def test_a_folder_that_groups_albums_gives_no_album_artist_or_artist_but_the_rest_is_judged():
+    """R3.9: a pattern reading such a folder as the album artist (or artist) doesn't judge that
+    field for the songs beneath it; the album from the album's folder, the track and title from
+    the file's name still are."""
+
+    def ost(name, n, title, **kw):
+        tags = {"album": f"{name} (Original Soundtrack)", "track": n, "title": title, **kw}
+        return (f"Soundtracks/{name}/0{n} - {title}.ogg", Tags(**tags))
+
+    songs = [
+        ost("Night Ferry", 1, "Tide Lantern", artist="Cinder Fern"),
+        ost("Night Ferry", 2, "North Hollow", albumartist="Various Artists"),
+        ost("Night Ferry", 3, "Lantern Iron", album=None),
+        ost("Night Ferry", 4, "Arc Salt", track=9),
+    ]
+    tried = patterns.patterns_of()
+    got = patterns.states(songs, tried, {"Soundtracks"})
+    assert got == [
+        (MATCH, ()),
+        (MATCH, ()),
+        (FIX, (Difference("album", "missing", "Night Ferry"),)),
+        (FIX, (Difference("track", "differs", "4"),)),
+    ]
+    assert patterns.states(songs[:2], tried) == [
+        (FIX, (Difference("albumartist", "missing", "Soundtracks"),)),
+        (FIX, (Difference("albumartist", "differs", "Soundtracks"),)),
+    ]  # judged when it isn't one
+    user = patterns.patterns_of(["{artist}/{album}/{track} - {title}"])
+    assert patterns.states(songs[:1], user, {"Soundtracks"}) == [(MATCH, ())]
+
+
+def test_where_a_patterns_token_sits_and_the_folder_it_reads():
+    preset = parse(PRESETS[0])
+    assert [preset.place(t) for t in ("albumartist", "year", "album", "title", "genre")] == [
+        0, 1, 1, 2, None
+    ]  # fmt: skip
+    path = "Rock/Lumen Drift/2019 - Glass Harbor/01 - Tidewater.flac"
+    assert patterns.token_folder(preset, path, "albumartist") == "Rock/Lumen Drift"
+    assert patterns.token_folder(preset, path, "album") == "Rock/Lumen Drift/2019 - Glass Harbor"
+    assert patterns.token_folder(preset, path, "title") is None  # in the file's name
+    assert patterns.token_folder(preset, path, "artist") is None  # not in the pattern
+    loose = parse("{artist} - {title}")
+    assert patterns.token_folder(loose, "Lumen Drift - Ebb.mp3", "artist") is None
+    assert patterns.token_folder(preset, "A\\B\\01 - T.flac", "albumartist") == "A"
+
+
 TAGS = st.builds(
     Tags,
     title=st.none() | st.text(max_size=12),
@@ -476,7 +597,8 @@ TAGS = st.builds(
 @given(st.lists(st.tuples(PATHS, TAGS), max_size=5), st.lists(PATTERN_TEXT, max_size=2))
 def test_any_folder_of_any_songs_has_a_state_for_each_and_never_fails(songs, user):
     """R3.9 over anything: a state for each song, and a song that MATCHes is one Infer from path
-    wouldn't change."""
+    wouldn't change in what R3.9 judges (`judged`: a shorter name of the album or an artist
+    agrees)."""
     tried = patterns.patterns_of(user)
     got = patterns.states(songs, tried)
     assert len(got) == len(songs)
@@ -485,7 +607,8 @@ def test_any_folder_of_any_songs_has_a_state_for_each_and_never_fails(songs, use
         assert state in (None, MATCH, FIX, BARE)
         if state == MATCH:
             assert chosen is not None
-            assert patterns.infer(tags, patterns.given(chosen, path)) == tags
+            values = patterns.judged(chosen, path, tags, patterns.given(chosen, path))
+            assert patterns.infer(tags, values) == tags
         assert (state == MATCH) <= (diffs == ())
         assert (state == FIX) <= bool(diffs) and (state is None) <= (diffs == ())
 

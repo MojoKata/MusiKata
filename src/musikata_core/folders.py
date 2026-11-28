@@ -15,7 +15,11 @@ fixed or have no tags (R2.9.5).
 Tags match path (R3.9) is kept here too: when a folder is summarized again, its own songs' states
 are worked out again first (`match_folder`, patterns.states over their paths and tags, with the
 user's own patterns of the root's settings, kept in `user_pattern`), as a folder's pattern is
-detected from all its songs, so one song changed may change the state of the rest.
+detected from all its songs, so one song changed may change the state of the rest. Whether a folder
+groups albums (`grouping`: two or more album folders beneath it, and songs beneath it tagged with
+an album artist or artist, none of them its name), so gives the songs beneath it no album artist
+or artist, is worked out from the songs beneath it and kept on its row (`grouping`); a write that
+turns it, somewhere beneath, works out every folder of songs beneath it again.
 
 Which picture a folder shows and what its songs share are plain functions (`picture`, `shared`),
 tested without an index; `refresh` reads and writes the rows. Names sort as people read them
@@ -151,7 +155,7 @@ def shared(values: Iterable[object]) -> object:
 COLUMNS = (
     "parent", "name", "name_key", "fold", "folders", "songs", "folders_beneath", "songs_beneath",
     "length", "artist", "album", "year", "image", "image_size", "image_mtime", "cover_kind",
-    "cover", "thumb", "mosaic", "path_state", "path_fix",
+    "cover", "thumb", "mosaic", "path_state", "path_fix", "grouping",
 )  # fmt: skip
 
 
@@ -164,14 +168,17 @@ MATCH_COLUMNS = ("title", "artist", "album", "albumartist", "track", "tracktotal
 
 def diff_text(diffs: Sequence[patterns.Difference]) -> str | None:
     """How a song's tags differ from its path, as `song.path_diff` keeps it: JSON, a [field,
-    how, value] each; None for no difference."""
+    how, the path's value, the tag's] each, the tag's left out when it has none; None for no
+    difference."""
     if not diffs:
         return None
-    return json.dumps([[d.field, d.how, d.value] for d in diffs], ensure_ascii=False)
+    return json.dumps([[d.field, d.how, d.value, *([d.old] if d.old else [])] for d in diffs],
+                      ensure_ascii=False)  # fmt: skip
 
 
 def diffs_of(text: object) -> tuple[patterns.Difference, ...]:
-    """`song.path_diff` read back (`diff_text`); none for NULL or what isn't one."""
+    """`song.path_diff` read back (`diff_text`), the tag's value "" where it was kept without
+    one (as it was before the tag's value was kept too); none for NULL or what isn't one."""
     try:
         found = json.loads(str(text)) if text else []
     except ValueError:
@@ -179,9 +186,9 @@ def diffs_of(text: object) -> tuple[patterns.Difference, ...]:
     if not isinstance(found, list):
         return ()
     return tuple(
-        patterns.Difference(str(d[0]), str(d[1]), str(d[2]))
+        patterns.Difference(*(str(v) for v in d))
         for d in found
-        if isinstance(d, list) and len(d) == 3
+        if isinstance(d, list) and len(d) in (3, 4)
     )
 
 
@@ -251,17 +258,57 @@ def counts_of(c: sqlite3.Connection, folders: Iterable[str]) -> dict[str, int]:
     return out
 
 
+def grouping(c: sqlite3.Connection, path: str) -> bool:
+    """Whether the folder `path` groups albums rather than naming their artist (R3.9,
+    patterns.grouping): two or more folders beneath it hold songs of their own, and songs beneath
+    it carry an album artist or artist, none of them its name. Never the root ("")."""
+    if not path:
+        return False
+    where, params = beneath("path", path)
+    (albums,) = c.execute(
+        f"SELECT COUNT(DISTINCT folder) FROM song WHERE {where} AND folder != ?", (*params, path)
+    ).fetchone()
+    if albums < 2:
+        return False
+    names = c.execute(f"SELECT DISTINCT albumartist, artist FROM song WHERE {where}", params)
+    return patterns.grouping(name_of(path), int(albums), [n for row in names for n in row])
+
+
+class Groupings:
+    """Which folders group albums (`grouping`), each worked out once from the index as it is
+    asked about."""
+
+    def __init__(self, c: sqlite3.Connection) -> None:
+        self._c = c
+        self.known: dict[str, bool] = {}
+
+    def __call__(self, path: str) -> bool:
+        if path not in self.known:
+            self.known[path] = grouping(self._c, path)
+        return self.known[path]
+
+    def around(self, folder: str) -> set[str]:
+        """Those of a folder and the folders it is in that group albums: what its songs'
+        patterns may read an album artist or artist from."""
+        return {p for p in [folder, *ancestors(folder)] if p and self(p)}
+
+
 def match_folder(
-    c: sqlite3.Connection, folder: str, tried: Sequence[patterns.Pattern] | None = None
+    c: sqlite3.Connection,
+    folder: str,
+    tried: Sequence[patterns.Pattern] | None = None,
+    groupings: Groupings | None = None,
 ) -> None:
     """Works out again whether each of a folder's own songs' tags match its path (R3.9), under
     the pattern detected for the folder (`tried`: the patterns, the user's own first; else those
-    the index keeps and the presets)."""
+    the index keeps and the presets), the folders that group albums (`groupings`) giving no album
+    artist or artist."""
     songs = tags_in(c, folder)
     if not songs:
         return
     tried = patterns.patterns_of(user_patterns(c)) if tried is None else tried
-    found = patterns.states([(p, t) for _, p, t in songs], tried)
+    groups = (groupings or Groupings(c)).around(folder)
+    found = patterns.states([(p, t) for _, p, t in songs], tried, groups)
     c.executemany(
         "UPDATE song SET path_state = ?, path_diff = ? WHERE id = ?",
         [(state, diff_text(diffs), song) for (song, _, _), (state, diffs) in zip(songs, found,
@@ -331,7 +378,10 @@ def loose_cover(c: sqlite3.Connection, thumb: str) -> str | None:
 
 
 def refresh_one(
-    c: sqlite3.Connection, path: str, images: Mapping[str, Sequence[art.Image]] | None = None
+    c: sqlite3.Connection,
+    path: str,
+    images: Mapping[str, Sequence[art.Image]] | None = None,
+    groupings: Groupings | None = None,
 ) -> None:
     """Summarizes one folder's row again from its own songs and its subfolders' rows (which must
     be current), or removes it when nothing with audio is left beneath it."""
@@ -376,6 +426,7 @@ def refresh_one(
         "mosaic": " ".join(shown.mosaic) or None,
         "path_state": worst([s[4] for s in songs] + [r[10] for r in children]),
         "path_fix": sum(1 for s in songs if (s[4] or 0) > 0) + sum(r[11] for r in children),
+        "grouping": int((groupings or Groupings(c))(path)),
     }
     sets = ", ".join(f"{k} = excluded.{k}" for k in COLUMNS)
     c.execute(
@@ -395,14 +446,32 @@ def refresh(
     of its ancestors, the deepest first, so every folder is summarized from current subfolders
     (A2.7). `images`: each folder's images as the walk found them; a folder it has no key for keeps
     its row's cover image."""
-    every: set[str] = set()
     tried = patterns.patterns_of(user_patterns(c))
-    for path in set(touched):
-        match_folder(c, path, tried)  # R3.9: its songs' states, before it is summarized
-        every.add(path)
-        every.update(ancestors(path))
-    for path in sorted(every, key=lambda p: (-(p.count("/") + bool(p)), p)):
-        refresh_one(c, path, images)
+    groupings = Groupings(c)
+    touched = set(touched)
+    every = touched | {a for path in touched for a in ancestors(path)}
+    again = turned(c, every, groupings) - touched
+    every |= {a for path in again for a in ancestors(path)}
+    for path in touched | again:
+        match_folder(c, path, tried, groupings)  # R3.9: its songs' states, before it is summarized
+    for path in sorted(every | again, key=lambda p: (-(p.count("/") + bool(p)), p)):
+        refresh_one(c, path, images, groupings)
+
+
+def turned(c: sqlite3.Connection, folders: Iterable[str], groupings: Groupings) -> set[str]:
+    """The folders of songs beneath each of `folders` whose row says other than `groupings` now
+    does of whether it groups albums (R3.9): the folders whose songs' states it changes."""
+    out: set[str] = set()
+    for path in folders:
+        if not path:
+            continue
+        row = c.execute("SELECT grouping FROM folder WHERE path = ?", (path,)).fetchone()
+        if row is None or row[0] == int(groupings(path)):
+            continue
+        where, params = beneath("folder", path)
+        out.update(str(f) for (f,) in c.execute(
+            f"SELECT DISTINCT folder FROM song WHERE {where}", params))  # fmt: skip
+    return out
 
 
 def stale_images(c: sqlite3.Connection, images: Mapping[str, Sequence[art.Image]]) -> list[str]:

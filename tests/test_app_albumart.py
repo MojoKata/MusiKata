@@ -309,7 +309,8 @@ def test_the_dialog_shows_the_current_cover_and_the_covers_found_and_says_no_cha
     assert dialog.property("title") == "Album art · Glass Harbor"
     current = dialog.property("current")
     assert current["line"].startswith("Current · 64 × 64 JPEG · ")
-    assert (current["where"], current["tone"]) == ("Embedded in 6 of 6", "ok")
+    assert (current["word"], current["where"], current["tone"]) == (
+        "Embedded", "Embedded in 6 of 6", "ok")  # fmt: skip
     assert current["source"].startswith("image://albumart/large-")
     assert titles(dialog) == [
         ("cover.jpg in the folder", "64 × 64 · same as embedded", True),

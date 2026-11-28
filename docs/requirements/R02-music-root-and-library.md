@@ -135,8 +135,9 @@ this folder" (`L05-folders-large`), with the file name, title, album, rating, ti
 chip; in List they are one-row entries of the same table, after the folders.
 
 R2.9.5. **State.** Each folder carries the worst path-match state of the files beneath it
-(R3.9): a dot on its cover in the image modes, and a chip ("3 to fix", "No tags") on cards and
-in List. A folder whose files all match shows nothing.
+(R3.9): a dot on its cover in the image modes, and a chip ("Fixable", "Untagged", its tooltip
+saying how many files, as "3 files can be fixed from the path") on cards and in List. A folder
+whose files all match shows nothing.
 
 R2.9.6. **Acting on a selection.** Folders and files are selected together, with a click,
 Ctrl/⌘-click, Shift-click, a drag box in the image modes, or the checkbox that appears on a cover
@@ -156,7 +157,9 @@ Folders and files are dragged as R6.10 says.
 
 R2.9.7. **A folder of songs.** When the open folder holds audio files and no subfolders (an
 album's folder, most often), a strip like an album's page (R2.6) heads them: its cover, its name,
-its files' count, size and where its art comes from; chips for its state (art, tags match path);
+its files' count, size and where its art comes from; chips for its state, a word each with the
+detail in its tooltip (art, as "Embedded"; tags match path, as "Match", "Fixable" or "Untagged",
+with "Tags match path for 7 of 9 files");
 **Edit tags**, **Album art** and **Infer from path**; and, when files differ from their path, one
 line saying how ("The path says the album is from 2022, but 1 file has no year"). Its files follow
 as a table: file name, track and title from the tags, artist, genre and year, values that differ

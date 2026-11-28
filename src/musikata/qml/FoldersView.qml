@@ -164,6 +164,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         label: modelData.text
                         tone: modelData.tone
+                        tip: modelData.tip || ""
                     }
                 }
             }

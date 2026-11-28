@@ -4,8 +4,8 @@ import "."
 // A row of Folders' List mode (R2.9.4, L07-folders-list): its checkbox; a folder two rows tall,
 // its cover the row's full height, its name over its counts, then the artist, album and year its
 // songs share and their total time; a file one row tall with its icon, its name, artist, album,
-// year, rating and time. Selected, it is highlighted. A folder's state chip (R2.9.5: "3 to fix",
-// "No tags") follows its counts.
+// year, rating and time. Selected, it is highlighted. A folder's state chip (R2.9.5: "Fixable" or
+// "Untagged", how many files in its tooltip) follows its counts.
 Rectangle {
     id: row
     signal tapped(int modifiers)
@@ -25,7 +25,7 @@ Rectangle {
     required property string time
     required property bool playing
     required property bool selected
-    property var pathChip: ({})        // R2.9.5: a folder's chip's text and tone, {} for none
+    property var pathChip: ({})        // R2.9.5: a folder's chip's text, tone and tip, {} for none
     property alias loading: art.loading
     height: isFolder ? 64 : 36
     radius: 8
@@ -114,6 +114,7 @@ Rectangle {
         visible: row.isFolder && row.pathChip.text !== undefined
         label: row.pathChip.text || ""
         tone: row.pathChip.tone || "info"
+        tip: row.pathChip.tip || ""
     }
     Cell { column: 2; text: row.artist || "—"; color: row.artist ? Theme.cell : Theme.faint }
     Cell { column: 3; text: row.album || "—"; color: row.album ? Theme.cell : Theme.faint }

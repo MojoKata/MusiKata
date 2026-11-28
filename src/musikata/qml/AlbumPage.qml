@@ -200,6 +200,7 @@ Item {
                     required property var modelData
                     label: modelData.text
                     tone: modelData.tone
+                    tip: modelData.tip || ""
                 }
             }
         }
