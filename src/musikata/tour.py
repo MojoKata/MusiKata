@@ -16,6 +16,8 @@ loads off the GUI thread is polled for until nothing on the screen says it is `l
 from __future__ import annotations
 
 import os
+import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -412,6 +414,8 @@ class Tour(QObject):
             self.saved.append(path)
         for fault in layout.faults(self.win):
             self.faults.append(f"{name} at {w} x {h}: {fault['line']}")
+        # each screen and size taken, and when, so a tour that stops says where
+        print(f"the tour: {name} at {w} x {h}, {time.monotonic():.1f}", file=sys.stderr, flush=True)
         self._size += 1
         if self._size < len(SIZES):
             self._at_size()

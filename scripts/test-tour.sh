@@ -12,7 +12,7 @@
 # container, so the screens show ~/Music, as on a new user's computer. The tour runs three times,
 # once in each state it has screens for (src/musikata/tour.py): the library; the same root
 # unmounted (X02, R2.10); a first start with nothing configured (X01, R2.1).
-# A crash prints every thread's stack (PYTHONFAULTHANDLER).
+# A crash prints every thread's stack (PYTHONFAULTHANDLER), and a run that fails its exit code.
 #   scripts/test-tour.sh [--tour-only NAMES]
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -51,11 +51,11 @@ tour() {   # MUSIC DATA OUT ARGS...: one run, the demo library at MUSIC, DATA as
 }
 status=0
 # the library: the demo library is ~/Music, given for the run; its index kept in $DATA/library
-tour /tmp/home/Music "$DATA/library" "$OUT" --root /tmp/home/Music "$@" || status=1
+tour /tmp/home/Music "$DATA/library" "$OUT" --root /tmp/home/Music "$@" || { echo "the tour's run ended with $?" >&2; status=1; }
 # X02: the same root, its folder not there (R2.10), shown from the index the first run made
-tour /tmp/elsewhere "$DATA/library" "$OUT/x02" --root /tmp/home/Music "$@" || status=1
+tour /tmp/elsewhere "$DATA/library" "$OUT/x02" --root /tmp/home/Music "$@" || { echo "the tour's run ended with $?" >&2; status=1; }
 # X01: a first start (R2.1): no root given, and an empty data folder, so nothing configured
-tour /tmp/elsewhere "$DATA/first" "$OUT/x01" "$@" || status=1
+tour /tmp/elsewhere "$DATA/first" "$OUT/x01" "$@" || { echo "the tour's run ended with $?" >&2; status=1; }
 for run in x02 x01; do
     for png in "$OUT/$run"/*.png; do
         if [ -e "$png" ]; then mv "$png" "$OUT/"; fi
