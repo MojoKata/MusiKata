@@ -207,9 +207,9 @@ merge whatever its spellings, as names that differ only in case are; both are ed
 The shared `settings.json` (`shared-settings.v1.schema.json`). A custom preset is parametric, with
 its bands, or graphic, with its ten gains (R19.1); a graphic one fitted from parametric bands keeps
 them as `from_bands` until a slider changes (R19.6). `appearance` keeps Now Playing's visualization
-(R11.4.5) and the 3D analyzer's bands and the seconds its landscape holds, set from its gear
-(R11.3.1): the gear offers 6, 3 and 1.5 seconds as speeds 0.5×, 1× and 2×, and a hand-edited file
-may give any from 1 to 12:
+(R11.4.5), its Lyrics switch (`lyrics`, R17.3) and the 3D analyzer's bands and the seconds its
+landscape holds, set from its gear (R11.3.1): the gear offers 6, 3 and 1.5 seconds as speeds 0.5×,
+1× and 2×, and a hand-edited file may give any from 1 to 12:
 
 ```json
 {
@@ -229,9 +229,9 @@ may give any from 1 to 12:
     ],
     "genres": {"Classical": "Classical", "Jazz": "Jazz", "Electronic": "Late night"}
   },
-  "appearance": {"theme": "system", "visualization": "waveform", "analyzer_bands": 96,
-                 "analyzer_seconds": 3, "tint": true, "minimize_for_mini": true, "text_size": 100,
-                 "reduce_motion": "system"},
+  "appearance": {"theme": "system", "visualization": "waveform", "lyrics": false,
+                 "analyzer_bands": 96, "analyzer_seconds": 3, "tint": true,
+                 "minimize_for_mini": true, "text_size": 100, "reduce_motion": "system"},
   "online": {"allowed": false, "services": {"musicbrainz": true, "coverartarchive": true,
              "lrclib": true}, "save_mbids": true, "check_updates": false},
   "mini_player": {"layout": "card", "places": {"card": {"x": 1600, "y": 80, "w": 300, "h": 582}}}
@@ -370,5 +370,6 @@ A save of album art (R5.3) adds to a song whose other pictures it removed each p
 its front cover, with its type, MIME type and description and its bytes by hash (`pictures`), and
 the hashes of those written (`new_pictures`, none when removed); and the `cover.jpg` it wrote
 beside the songs is a file of the entry with its old bytes' hash (`image`, `null` when there was
-none) and its new one's (`new_image`). Old pictures and images are kept in `history/images/` as old
-covers are.
+none) and its new one's (`new_image`), as is a song's `.lrc` that a save of its lyrics wrote
+(R17.5), whose lyrics in its tags are its field `lyrics`. Old pictures, images and lyrics are kept in
+`history/images/` as old covers are.

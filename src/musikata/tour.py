@@ -35,6 +35,7 @@ from .encodings import FixEncoding
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .lyrics import Lyrics
 from .nowplayingview import NowPlayingView
 from .organize import OrganizeFiles
 from .removing import Removing
@@ -58,9 +59,11 @@ SIZES = (SHOT, DESIGN)
 # Harbor's page, cued at Signal Fires with two songs added, with Waveform (R11.4.1), 3D analyzer
 # (R11.4.2) and No visualization (R11.4.3): paused, as every screen is, so the cover's spectrum has
 # settled to nothing, and the analyzer shows a still landscape of generated spectra, as the mockup
-# draws one (analyzeritem.generated: with nothing heard it would be flat). T01 is
-# Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03 is Organize
-# files (R12) over Your music folders, on the whole library, as its mockup draws it. The
+# draws one (analyzeritem.generated: with nothing heard it would be flat). N04 is N03 with the
+# Lyrics switch on (R17.3): Signal Fires' timed lyrics from the demo library's .lrc, followed as at
+# 1:38 into the song, the place N04 draws (Lyrics.go: the demo library's songs last a second).
+# T01 is Infer tags from path (R3) over L08's folder of songs, as its mockup draws it; T03 is
+# Organize files (R12) over Your music folders, on the whole library, as its mockup draws it. The
 # first queues Glass Harbor, paused at its first song, so every screen after it shows the
 # now-playing bar (R6.5) and the playing album and song marked, with no sound to wait on
 # (Player.go). X03 has no mockup: the Change history panel (R4.9) over Songs, listing the demo
@@ -187,6 +190,18 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
             "nowPlaying": "none",
         },
     ),
+    (
+        "N04-now-playing-lyrics",
+        {
+            "view": "album",
+            "album": "Glass Harbor",
+            "queue": "Glass Harbor",
+            "at": 3,
+            "added": ["Neap Tide", "Moonpull"],
+            "nowPlaying": "none",
+            "lyrics": {"at": 98},
+        },
+    ),
     ("T02-album-art", {"view": "album", "album": "Glass Harbor", "art": True}),
     ("G01-genres", {"view": "genres", "genreMenu": "Electronic"}),
     ("L09-needs-attention", {"view": "attention", "attention": "copies"}),
@@ -270,6 +285,7 @@ class Tour(QObject):
         removing: Removing | None = None,
         now: NowPlayingView | None = None,
         tints: Tints | None = None,
+        lyrics: Lyrics | None = None,
     ) -> None:
         super().__init__(window)
         names = [n for n in only.split(",") if n]
@@ -283,7 +299,7 @@ class Tour(QObject):
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
         self.smart, self.organize, self.removing = smart, organize, removing
-        self.now, self.tints = now, tints
+        self.now, self.tints, self.lyrics = now, tints, lyrics
         self.faults: list[str] = []
         self.saved: list[str] = []
         self._i = 0
@@ -339,6 +355,8 @@ class Tour(QObject):
             self.organize.go(step)
         if self.removing is not None and "view" in step:
             self.removing.go(step)
+        if self.lyrics is not None and "view" in step:
+            self.lyrics.go(step)
         if self.now is not None and "view" in step:
             self.now.go(step)
             for analyzer in analyzers(self.win.contentItem()):

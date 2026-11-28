@@ -165,7 +165,7 @@ def test_shapes_of_an_entrys_fields_each_read_for_what_can_be_used(caplog):
             {"path": "a\\b.mp3", "fields": {"title": "x"}},
             {"path": "LD/./04.flac", "fields": {"title": "x"}},
             {"path": "LD/GH/04.flac", "hash": H1.upper(),
-             "fields": {"year": None, "lyrics": "la", "track": "four", "genre": "Ambient",
+             "fields": {"year": None, "mood": "la", "track": "four", "genre": "Ambient",
                         "rating": 9, "compilation": "yes", "title": None},
              "new": {"year": "2019", "title": "T", "album": "not in fields"},
              "cover": "not a hash", "new_cover": H2, "unknown": 1},
@@ -191,7 +191,7 @@ def test_shapes_of_an_entrys_fields_each_read_for_what_can_be_used(caplog):
     for problem in ("format isn't a number", "time isn't a UTC time", "computer isn't an id",
                     "action isn't text", "description isn't text", "undoes isn't",
                     "a file isn't an object", "../outside.mp3", "C:/Music", "LD/./04",
-                    "'lyrics' isn't a field", "track isn't a value", "genre isn't a value",
+                    "'mood' isn't a field", "track isn't a value", "genre isn't a value",
                     "rating isn't a value", "compilation isn't a value", "named twice",
                     "hash isn't an audio hash", "cover isn't a cover's hash",
                     "new_cover isn't", "fields isn't a group", "new isn't a group"):  # fmt: skip
@@ -1197,3 +1197,67 @@ def test_shapes_of_latin1_in_an_entry_each_read_for_what_can_be_used(caplog):
                           "a.mp3"),),
     ), "/m", False)[0]  # fmt: skip
     assert job.changes == {"title": "Ìàÿê", "latin1": ("title",)}
+
+
+# ---------- lyrics (R17.5): the .lrc beside a song, and the lyrics in its tags ----------
+
+TIMED = "[00:01.00]Lanterns on the water line\n[00:02.50]counting ships"
+
+
+def test_lyrics_saved_beside_a_song_and_in_its_tags_are_one_entry_that_undo_puts_back(
+    library, tmp_path
+):
+    """R17.5 and R4.9: an `.lrc` written beside a song is a file of the entry as cover.jpg is
+    (its old bytes kept in history/images, the one replaced to the trash), named for its lyrics;
+    the lyrics in its tags are its field `lyrics`; Undo puts both back, and Redo the new."""
+    root, i, clock, paths = library
+    trash = Trash(tmp_path / "trash")
+    lrc = os.path.join(root, "LD", "01.lrc")
+    with open(lrc, "wb") as f:
+        f.write(b"\xef\xbb\xbf[00:01.00]old words\r\n")
+    tags.save(paths[0], {"lyrics": "plain old words"}, audio_hash=scanner.audio_hash)
+    data = (TIMED + "\n").encode()
+    jobs = [Job(lrc, {"image": data}), Job(paths[0], {"lyrics": TIMED})]
+    out = art_save(root, clock, jobs, trash, description="Lyrics of 01 edited")
+    assert out.failed == [] and trash.got == ["01.lrc"]
+    assert tags.read(paths[0])[0].lyrics == TIMED
+    with open(os.path.join(history.folder_of(root), out.entry), encoding="utf-8") as f:
+        doc = json.load(f)
+    valid(doc)
+    image, song = doc["files"]
+    assert image["path"] == "LD/01.lrc" and image["new_image"] == history.image_hash(data)
+    assert song["fields"] == {"lyrics": "plain old words"} and song["new"] == {"lyrics": TIMED}
+    entry = history.read(history.folder_of(root), out.entry)
+    assert [f.fields() for f in entry.files] == [["lyrics"], ["lyrics"]]
+    p, undone = art_undo(root, i, clock, out.entry, trash)
+    assert p.changed == [] and undone.failed == []
+    with open(lrc, "rb") as f:
+        assert f.read() == b"\xef\xbb\xbf[00:01.00]old words\r\n"
+    assert tags.read(paths[0])[0].lyrics == "plain old words"
+    art_undo(root, i, clock, undone.entry, trash)  # redone
+    with open(lrc, "rb") as f:
+        assert f.read() == data
+    assert tags.read(paths[0])[0].lyrics == TIMED
+
+
+def test_an_lrc_added_goes_to_the_trash_when_undone_and_lyrics_changed_since_ask(library, tmp_path):
+    """Undoing lyrics added where there were none moves the `.lrc` to the trash and takes them
+    out of the tags; lyrics changed since are R4.9.1's question, named as lyrics."""
+    root, i, clock, paths = library
+    trash = Trash(tmp_path / "trash")
+    lrc = os.path.join(root, "LD", "02.lrc")
+    jobs = [Job(lrc, {"image": b"new\n"}), Job(paths[1], {"lyrics": "new"})]
+    out = art_save(root, clock, jobs, trash)
+    p, undone = art_undo(root, i, clock, out.entry, trash)
+    assert not os.path.exists(lrc) and trash.got == ["02.lrc"] and undone.failed == []
+    assert tags.read(paths[1])[0].lyrics is None
+    out = art_save(root, clock, jobs, trash)
+    with open(lrc, "wb") as f:
+        f.write(b"someone else's\n")
+    tags.save(paths[1], {"lyrics": "someone else's"}, audio_hash=scanner.audio_hash)
+    p, kept = art_undo(root, i, clock, out.entry, trash)
+    assert [[(x.field, x.back) for x in f.lost] for f in p.changed] == [
+        [("lyrics", None)],
+        [("lyrics", None)],
+    ]
+    assert kept.saved == [] and os.path.exists(lrc)

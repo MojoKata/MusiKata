@@ -80,11 +80,12 @@ class Appearance:
     """R13.8's Appearance as read, as far as it is built: Now Playing's visualization, one of
     VISUALIZATIONS, chosen in its picker and kept (R11.4.5); and the 3D analyzer's bands, one of
     ANALYZER_BANDS, and the seconds its landscape holds (its speed), set from its gear and kept
-    (R11.3.1)."""
+    (R11.3.1); and its Lyrics switch, on or off (R17.3)."""
 
     visualization: str = "waveform"
     analyzer_bands: int = 96
     analyzer_seconds: float = 3.0
+    lyrics: bool = False
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,11 @@ def _appearance(value: object, problems: list[str]) -> Appearance:
             f" {value.get('analyzer_seconds')!r}; {default.analyzer_seconds:g}"
         )
         seconds = default.analyzer_seconds
-    return Appearance(shown, int(bands), float(seconds))
+    lyrics = value.get("lyrics", default.lyrics)
+    if not isinstance(lyrics, bool):
+        problems.append(f"appearance.lyrics isn't true or false: {lyrics!r}; off")
+        lyrics = default.lyrics
+    return Appearance(shown, int(bands), float(seconds), lyrics)
 
 
 def _number(value: object) -> float | None:
@@ -314,8 +319,9 @@ def with_appearance(
     new_id: Callable[[], str] = _new_id,
 ) -> dict[str, object]:
     """The file's content with `fields` set in its `appearance` group (the visualization,
-    R11.4.5; the analyzer's bands and seconds, R11.3.1): the rest as it was read, fields it
-    doesn't know included (A2.10), and this computer's id made when it has none (A2.8)."""
+    R11.4.5; the analyzer's bands and seconds, R11.3.1; the Lyrics switch, R17.3): the rest as it
+    was read, fields it doesn't know included (A2.10), and this computer's id made when it has none
+    (A2.8)."""
     return _with_group(shared, computer_name, "appearance", fields, new_id)
 
 
@@ -388,7 +394,8 @@ def set_playback(path: str, home: str, computer_name: str, **fields: object) -> 
 
 
 def set_appearance(path: str, home: str, computer_name: str, **fields: object) -> bool:
-    """Keeps `fields` (the visualization, R11.4.5; the analyzer's bands and seconds, R11.3.1) in
+    """Keeps `fields` (the visualization, R11.4.5; the analyzer's bands and seconds, R11.3.1; the
+    Lyrics switch, R17.3) in
     the appearance group of the shared settings at `path`, the rest as it was; False, logged, when
     they can't be written (`_writable`)."""
     what = ", ".join(f"{k} {v}" for k, v in fields.items())
@@ -681,3 +688,45 @@ def root_playlists(root: str) -> str:
     for problem in problems:
         log.warning("%s: %s", path, problem)
     return folder
+
+
+# ---------- the root's own settings.json: where saved lyrics go (R13.11) ----------
+
+LYRICS_SAVE = ("lrc", "tags", "both")  # R13.11: beside the song as .lrc (the default), its tags
+
+
+def parse_root_lyrics(text: str) -> tuple[str, tuple[str, ...]]:
+    """The `lyrics` group's `save` in the root's settings.json, `text` (R13.11, A2.10): where saved
+    lyrics go, one of LYRICS_SAVE, read in any case and with spaces around it; what can't be one is
+    named in the problems and takes the default, `lrc`. (save, problems)."""
+    try:
+        data = json.loads(text.removeprefix("\ufeff"))
+    except ValueError:
+        return LYRICS_SAVE[0], ("it isn't JSON: saved lyrics go beside the songs as .lrc",)
+    if not isinstance(data, dict):
+        return LYRICS_SAVE[0], ("it isn't a JSON object: saved lyrics go beside the songs",)
+    group = data.get("lyrics", {})
+    if not isinstance(group, dict):
+        return LYRICS_SAVE[0], (f"lyrics isn't a group: {group!r}",)
+    value = group.get("save", LYRICS_SAVE[0])
+    if isinstance(value, str) and value.strip().lower() in LYRICS_SAVE:
+        return value.strip().lower(), ()
+    return LYRICS_SAVE[0], (f"lyrics.save isn't lrc, tags or both: {value!r}; lrc",)
+
+
+def root_lyrics(root: str) -> str:
+    """Where the root's saved lyrics go (`parse_root_lyrics`) from its settings.json; `lrc` when it
+    has none or it can't be read, each problem logged."""
+    path = root_path(root)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return LYRICS_SAVE[0]
+    except OSError as e:
+        log.warning("couldn't read %s: %s; saved lyrics go beside the songs", path, e)
+        return LYRICS_SAVE[0]
+    save, problems = parse_root_lyrics(text)
+    for problem in problems:
+        log.warning("%s: %s", path, problem)
+    return save

@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from mutagen.id3 import TCON
 
+from .. import lyrics as lrc
 from .fields import Tags
 
 # a file's fields, by its own key: an ID3 frame id, an upper-cased Vorbis key, an MP4 atom
@@ -223,7 +224,8 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
     """Vorbis comments, keys in any case (read.py upper-cases them): A3.2's middle column. An
     album artist under "ALBUM ARTIST" (foobar2000's older form) is read too; DESCRIPTION is the
     comment when COMMENT isn't there; an Opus file's R128_TRACK_GAIN and R128_ALBUM_GAIN are its
-    ReplayGain gains (`r128`)."""
+    ReplayGain gains (`r128`). The lyrics are LYRICS's, else SYNCEDLYRICS' or UNSYNCEDLYRICS'
+    (foobar2000's, Mp3tag's), a timed one first (R17.1)."""
     get = raw.get
     track, track_total = number_pair(text(get("TRACKNUMBER")))
     disc, disc_total = number_pair(text(get("DISCNUMBER")))
@@ -253,6 +255,9 @@ def from_vorbis(raw: Raw, has_cover: bool = False) -> Tags:
         rg_album_gain=gains["rg_album_gain"],
         rg_album_peak=gains["rg_album_peak"],
         has_cover=has_cover,
+        lyrics=lrc.chosen_tag(
+            [*(get("LYRICS") or ()), *(get("SYNCEDLYRICS") or ()), *(get("UNSYNCEDLYRICS") or ())]
+        ),
         latin1=(),  # read.py's to say (A3.6)
     )
 
@@ -279,12 +284,13 @@ def from_id3(
     comments: Sequence[tuple[str, str]] = (),
     has_cover: bool = False,
     rva2: Sequence[tuple[str, float, float]] = (),
+    lyrics: str | None = None,
 ) -> Tags:
     """ID3v2 frames by id (TCON already as genre names: read.py takes them from Mutagen, which
     turns ID3v1's numbers, "(17)", into names, R9.3), TXXX frames as "TXXX:<description>", each
     user's POPM, COMM frames as (description, text), and RVA2 frames as `rva2_replaygain` takes
     them. The comment is the first COMM that `is_comment`: without a description (A3.2), or the
-    ID3v1 tag's. ReplayGain is TXXX's, else RVA2's."""
+    ID3v1 tag's. ReplayGain is TXXX's, else RVA2's. `lyrics` are `id3_lyrics`'."""
     get = raw.get
     track, track_total = number_pair(text(get("TRCK")))
     disc, disc_total = number_pair(text(get("TPOS")))
@@ -317,9 +323,30 @@ def from_id3(
         rg_album_gain=replaygain(txxx("REPLAYGAIN_ALBUM_GAIN")),
         rg_album_peak=replaygain(txxx("REPLAYGAIN_ALBUM_PEAK")),
         has_cover=has_cover,
+        lyrics=lyrics,
         latin1=(),  # read.py's to say (A3.6)
     )
     return with_replaygain(tags, rva2_replaygain(rva2))
+
+
+SYLT_MS = 2  # SYLT's time stamps in milliseconds; 1 is MPEG frames, which have no time to read
+
+
+def id3_lyrics(
+    uslt: Sequence[str], sylt: Sequence[tuple[int, Sequence[tuple[str, int]]]] = ()
+) -> str | None:
+    """An ID3 tag's lyrics (R17.1): a USLT holding timed (LRC) text, else a SYLT's lines as LRC
+    text (each SYLT a (time stamp format, [(text, time)]) pair; one timed in MPEG frames passed
+    by), else the first USLT that holds any."""
+    texts = [t for t in (lrc.tag_text(u) for u in uslt) if t is not None]
+    timed = next((t for t in texts if lrc.parse(t).timed), None)
+    if timed is not None:
+        return timed
+    for stamp, entries in sylt:
+        lines = [(ms / 1000, text) for text, ms in entries if text.strip()]
+        if stamp == SYLT_MS and lines:
+            return lrc.tag_text(lrc.lrc_of(lines))
+    return texts[0] if texts else None
 
 
 MP4 = {
@@ -337,7 +364,8 @@ def from_mp4(
     has_cover: bool = False,
 ) -> Tags:
     """MP4 atoms (A3.2's last column), with trkn and disk as the number pairs Mutagen reads and
-    the freeform `----:com.apple.iTunes:<name>` atoms as text, their names in any case."""
+    the freeform `----:com.apple.iTunes:<name>` atoms as text, their names in any case; the lyrics
+    are ©lyr's."""
     get = raw.get
     year, date = year_and_date(text(get("\xa9day")))
 
@@ -365,6 +393,7 @@ def from_mp4(
         rg_album_gain=replaygain(freeform("replaygain_album_gain")),
         rg_album_peak=replaygain(freeform("replaygain_album_peak")),
         has_cover=has_cover,
+        lyrics=lrc.chosen_tag(get("\xa9lyr") or ()),
         latin1=(),  # read.py's to say (A3.6)
     )
 

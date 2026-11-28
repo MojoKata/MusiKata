@@ -117,7 +117,7 @@
               "null"
             ],
             "pattern": "^[0-9a-f]{64}$",
-            "description": "For an image file the save wrote beside the songs (cover.jpg, R5.3): its old bytes, kept as history/images/<sha256>; null when there was none"
+            "description": "For an image file the save wrote beside the songs (cover.jpg, R5.3), or a song's lyrics beside it (its .lrc, R17.5): its old bytes, kept as history/images/<sha256>; null when there was none"
           },
           "new_image": {
             "type": [
@@ -125,7 +125,7 @@
               "null"
             ],
             "pattern": "^[0-9a-f]{64}$",
-            "description": "The image file's bytes written, by their sha256; null when it was moved to the trash"
+            "description": "The image's or lyrics' bytes written, by their sha256; null when the file was moved to the trash"
           },
           "plays_from": {
             "type": "array",

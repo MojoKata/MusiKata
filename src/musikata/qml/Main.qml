@@ -63,6 +63,7 @@ Window {
     required property var waveforms
     required property var nowPlaying
     required property var tints
+    required property var lyrics
     width: 1280
     height: 800
     minimumWidth: 960
@@ -77,6 +78,7 @@ Window {
                                   || win.playlists.opened || win.smart.opened
                                   || win.organize.opened
                                   || win.removing.question.title !== undefined
+                                  || win.lyrics.editing
 
     DropArea {  // files from another app dropped anywhere else (R6.10): into the library (R12.5)
         objectName: "windowDrop"
@@ -250,6 +252,7 @@ Window {
         ratings: win.ratings
         playlists: win.playlists
         dragging: win.dragging
+        lyrics: win.lyrics
     }
     UpNext {
         enabled: !win.modal  // nothing behind a dialog takes a click
@@ -338,6 +341,11 @@ Window {
         objectName: "removingQuestion"
         anchors.fill: parent
         copies: win.removing
+    }
+    LyricsEditor {  // Edit… and Add… of Now Playing's lyrics (R17.5)
+        objectName: "lyricsOverlay"
+        anchors.fill: parent
+        lyrics: win.lyrics
     }
     Shortcut {
         sequence: "Ctrl+E"

@@ -64,6 +64,7 @@ from .firstrun import FirstRun, music_folder
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .lyrics import Lyrics
 from .nowplayingview import NowPlayingView
 from .organize import OrganizeFiles
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
@@ -193,6 +194,7 @@ class Shell:
     waveforms: Waveforms | None = None
     now: NowPlayingView | None = None
     tints: Tints | None = None
+    lyrics: Lyrics | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -203,7 +205,7 @@ class Shell:
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
             self.copies, self.encodings, self.infer, self.playlists, self.dragging, self.smart,
-            self.organize, self.removing, self.waveforms, self.now, self.tints,
+            self.organize, self.removing, self.waveforms, self.now, self.tints, self.lyrics,
         )  # fmt: skip
 
 
@@ -231,6 +233,7 @@ def close_bridges(
     waveforms: Waveforms | None = None,
     now: NowPlayingView | None = None,
     tints: Tints | None = None,
+    lyrics: Lyrics | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the playback
     thread, the waveforms' thread (before the worker processes end), the cover colours' thread
@@ -247,6 +250,8 @@ def close_bridges(
         waveforms.close()
     if tints is not None:
         tints.close()
+    if lyrics is not None:
+        lyrics.close()
     if edit is not None:
         edit.close()
     if art is not None:
@@ -283,8 +288,8 @@ def close_bridges(
     index.close()
     release(
         controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, dragging,
-        smart, organize, removing, attention, ratings, changes, now, player, waveforms, tints,
-        library,
+        smart, organize, removing, attention, ratings, changes, lyrics, now, player, waveforms,
+        tints, library,
     )  # fmt: skip
 
 
@@ -389,6 +394,15 @@ def load(
         player, index.read, shared.playback.replaygain, look.visualization,
         keep=player.remember_appearance, bands=look.analyzer_bands, seconds=look.analyzer_seconds,
     )  # fmt: skip
+    # the lyrics of the song shown (R17), the switch kept as the visualization is, saved where the
+    # root's settings say (R13.11) through the batch and the change history
+    save_to = settings.root_lyrics(root) if not missing else settings.LYRICS_SAVE[0]
+    words = Lyrics(
+        player, root, writing, changes, saved=library.saved, on=look.lyrics,
+        keep=player.remember_appearance, setting=lambda: save_to,
+        available=lambda: bool(library.property("available")),
+        legacy=index_playlists.legacy_encoding(),
+    )  # fmt: skip
     thumbs = ArtImages()
     engine.addImageProvider("albumart", thumbs)
     album_art = AlbumArt(
@@ -452,6 +466,7 @@ def load(
             "waveforms": waveforms,
             "nowPlaying": now,
             "tints": tints,
+            "lyrics": words,
         }  # fmt: skip
     )
     waveitem.register()
@@ -467,7 +482,7 @@ def load(
                       copies=copies, encodings=fix, infer=infer, playlists=lists,
                       dragging=dragging, smart=smart, organize=files,
                       removing=removing, waveforms=waveforms, now=now,
-                      tints=tints)  # fmt: skip
+                      tints=tints, lyrics=words)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -475,7 +490,7 @@ def load(
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
         changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
-        dragging, smart, files, removing, waveforms, now, tints,
+        dragging, smart, files, removing, waveforms, now, tints, words,
     )  # fmt: skip
 
 
@@ -952,11 +967,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         removing = session.shell.removing if session.shell is not None else None
         now = session.shell.now if session.shell is not None else None
         tints = session.shell.tints if session.shell is not None else None
+        words = session.shell.lyrics if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
             copies=copies, encodings=fix, infer=infer, dragging=dragging, smart=smart,
-            organize=files, removing=removing, now=now, tints=tints,
+            organize=files, removing=removing, now=now, tints=tints, lyrics=words,
         ).start()  # fmt: skip
     else:
         session.window.show()

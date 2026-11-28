@@ -294,7 +294,7 @@ def test_the_pickers_menu_chooses_a_visualization_and_the_later_ones_say_so(shel
     click(shell, find(shell, "chooseWaveform"))
     qtbot.waitUntil(lambda: now.property("mode") == "waveform", timeout=WAIT)
     assert find(shell, "waveformMode").isVisible() and not find(shell, "queueMode").isVisible()
-    assert find(shell, "lyricsSwitch").property("later") == nowplayingview.LYRICS_LATER
+    assert find(shell, "lyricsSwitch").property("later") == ""  # R17.3: built (lyrics.py)
     assert find(shell, "equalizerButton").property("later") == nowplayingview.EQUALIZER_LATER
     now.setMode("analyzer")
     settle(shell, qtbot)

@@ -6,9 +6,8 @@ import "."
 
 // Now Playing (R11.4), over everything above the now-playing bar, the sidebar and the header
 // included; the view it was opened from stays underneath. Its top row: ‹ Library on the left, the
-// visualization picker (R11.4.5), the Lyrics switch (R17.3, a later slice's) and the Equalizer button
-// (R19.2, a later slice's) in the middle; the window buttons are the system's, as for the rest of the
-// window. Esc or ‹ Library closes it (R11.4.4), as the bar's Now Playing button does. Its background
+// visualization picker (R11.4.5), the Lyrics switch (R17.3) and the Equalizer button (R19.2, a later
+// slice's) in the middle; the window buttons are the system's, as for the rest of the window. Esc or ‹ Library closes it (R11.4.4), as the bar's Now Playing button does. Its background
 // is tinted with the cover's colour (R6.2.2).
 //
 // With Waveform (R11.4.1, N01-now-playing-waveform): the cover large on the left, then "Now playing ·
@@ -27,6 +26,10 @@ import "."
 // and speed (R11.3.1). Its background is N02's, not the cover's colour: each slice's fill must be the
 // colour behind it to hide the slices behind. What every text says is the bridges'
 // (nowplayingview.py, bridges.py).
+//
+// The Lyrics switch on (R17.3, N04-now-playing-lyrics) shows the song's lyrics (LyricsPanel,
+// lyrics.py) in place of Up next with Waveform and of the queue with No visualization; with 3D
+// analyzer, the line sung and the next over the analyzer's lower part.
 Rectangle {
     id: np
     required property var now          // nowplayingview.NowPlayingView
@@ -36,6 +39,8 @@ Rectangle {
     property var ratings: null         // a star clicked rates the song (R10.2)
     property var playlists: null       // the queue's Save as playlist… (R8.3)
     property var dragging: null        // songs dropped on the queue play next (R6.10)
+    property var lyrics: null          // the song's lyrics and the Lyrics switch (R17)
+    readonly property bool words: np.lyrics !== null && np.lyrics.on
     readonly property var song: now.details
     readonly property string cover: np.song.cover || np.player.cover
     readonly property string tintName: np.tints !== null ? (np.tints.revision, np.tints.of(np.cover)) : ""
@@ -242,6 +247,38 @@ Rectangle {
             Setting { objectName: "speedNormal"; choice: np.now.speedChoices[1]; onTriggered: np.now.setSeconds(choice.value) }
             Setting { objectName: "speedFast"; choice: np.now.speedChoices[2]; onTriggered: np.now.setSeconds(choice.value) }
         }
+        Column {  // the line sung and the next, over the analyzer's lower part (R17.3)
+            objectName: "analyzerLyrics"
+            x: analyzer.x + 40
+            width: analyzer.width - 80
+            y: analyzer.y + analyzer.height * 0.68
+            spacing: 10
+            visible: np.words && np.lyrics.currentText + np.lyrics.nextText !== ""
+            Accessible.role: Accessible.StaticText
+            Accessible.name: np.words ? np.lyrics.currentText : ""
+            Text {
+                objectName: "analyzerLine"
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: np.words ? np.lyrics.currentText : ""
+                color: Theme.text
+                style: Text.Raised
+                styleColor: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.8)
+                font { family: Theme.sans; pixelSize: 30; weight: Font.ExtraBold }
+            }
+            Text {
+                objectName: "analyzerNextLine"
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: np.words ? np.lyrics.nextText : ""
+                color: Theme.cell
+                style: Text.Raised
+                styleColor: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.8)
+                font { family: Theme.sans; pixelSize: 20 }
+            }
+        }
     }
 
     // what the cover's rounded corners are drawn in: the tint near the cover
@@ -340,13 +377,17 @@ Rectangle {
             }
             Icon { x: parent.width - 27; anchors.verticalCenter: parent.verticalCenter; name: "chevDown"; size: 14; color: Theme.muted }
         }
-        TopButton {
+        TopButton {  // the Lyrics switch (R17.3), kept
             objectName: "lyricsSwitch"
             icon: "lyrics"
             label: qsTr("Lyrics")
             width: 100
-            later: np.now.lyricsLater
+            open: np.words
+            visible: np.lyrics !== null
             Accessible.role: Accessible.CheckBox
+            Accessible.checkable: true
+            Accessible.checked: np.words
+            onClicked: np.lyrics.toggle()
         }
         TopButton {
             objectName: "equalizerButton"
@@ -474,7 +515,7 @@ Rectangle {
             id: about
             x: waveCover.x + waveCover.width + 50 * np.k
             y: waveCover.y + 28 * np.k
-            width: upNext.x - x - 32
+            width: (np.words ? waveLyrics.x : upNext.x) - x - 32
             spacing: 0
             Words { width: about.width; titleSize: 44; kicker: np.song.kicker || ""; title: np.song.title || np.player.title; artist: np.song.artist || ""; line: np.song.line || "" }
             Item { width: 1; height: 26 }
@@ -519,6 +560,7 @@ Rectangle {
             y: waveCover.y
             width: 260
             spacing: 12
+            visible: !np.words
             Text {
                 text: qsTr("Up next")
                 visible: np.now.upNext.length > 0
@@ -555,6 +597,17 @@ Rectangle {
                     }
                 }
             }
+        }
+
+        LyricsPanel {  // the lyrics in Up next's place (R17.3)
+            id: waveLyrics
+            objectName: "waveLyrics"
+            visible: np.words && np.lyrics !== null
+            lyrics: np.lyrics
+            x: parent.width - width - 40 * np.k
+            y: waveCover.y - 10
+            width: Math.max(320, 420 * np.k)
+            height: wavePanel.y - y - 18
         }
 
         // the song's waveform, large, with the play head, its time and the minute marks; clicking or
@@ -744,8 +797,18 @@ Rectangle {
                 }
             }
         }
+        LyricsPanel {  // the lyrics in the queue's place (R17.3, N04)
+            objectName: "queueLyrics"
+            visible: np.words && np.lyrics !== null && np.now.emptyText === ""
+            lyrics: np.lyrics
+            x: 480 * np.k
+            y: 82 * np.k
+            width: parent.width - x - 40 * np.k
+            height: parent.height - y - 22
+        }
         UpNext {  // the queue at full size (R7.2, R11.4.3)
             objectName: "nowQueue"
+            visible: !np.words
             x: 480 * np.k
             y: 82 * np.k
             width: parent.width - x - 40 * np.k
@@ -756,7 +819,7 @@ Rectangle {
             model: np.player.queueList
             playlists: np.playlists
             dragging: np.dragging
-            focus: noneMode.visible && np.visible
+            focus: noneMode.visible && np.visible && !np.words
             onEscaped: np.now.close()
             onSavedAsPlaylist: np.now.close()  // its name is edited in the sidebar (R8.3)
         }

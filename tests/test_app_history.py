@@ -120,6 +120,8 @@ def test_what_undoing_would_lose_is_said_field_by_field_file_by_file():
         "Other pictures: 2 other pictures → 1 other picture"
     )
     assert value_text("others", ()) == "no other pictures"
+    # R17.5: lyrics, their text or an .lrc's hash, too long to show
+    assert lost_text(Lost("lyrics", "[00:01.00]words", None)) == "Lyrics: lyrics → no lyrics"
     e = Entry("n", NOW, ME, "edit-tags", "", (
         FileChange("LD/a.flac", None, {"title": "A"}),
         FileChange("LD/b.flac", None, {"title": "B"}),

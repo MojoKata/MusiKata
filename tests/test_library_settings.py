@@ -619,3 +619,68 @@ def test_the_roots_own_settings_give_organize_files_layout(group, layout, proble
     found = settings.parse_root_tags(json.dumps({"format": 1, "patterns": group}))
     assert found.layout == layout
     assert any(problem in p for p in found.problems) if problem else not found.problems
+
+
+# ---------- the Lyrics switch (R17.3), and where saved lyrics go (R13.11) ----------
+
+
+@pytest.mark.parametrize(
+    "appearance, on, problem",
+    [
+        ({"lyrics": True}, True, ""),
+        ({}, False, ""),
+        ({"lyrics": "true"}, False, "appearance.lyrics isn't true or false"),
+        ({"lyrics": 1}, False, "appearance.lyrics isn't true or false"),
+        ({"lyrics": None}, False, "appearance.lyrics isn't true or false"),
+    ],
+)
+def test_the_lyrics_switch_is_read_from_appearance_off_by_default(appearance, on, problem):
+    got = parse({"format": 1, "appearance": appearance})
+    assert got.appearance.lyrics is on
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_lyrics_switch_set_keeps_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"format": 1, "appearance": {"visualization": "none", "x": 1}}))
+    assert settings.set_appearance(str(path), HOME, "PC", lyrics=True)
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {"visualization": "none", "x": 1, "lyrics": True}
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).appearance.lyrics is True
+
+
+@pytest.mark.parametrize(
+    "text, save, problem",
+    [
+        ('{"format": 1, "lyrics": {"save": "tags"}}', "tags", ""),
+        ('﻿{"lyrics": {"save": " Both "}}', "both", ""),
+        ('{"format": 1}', "lrc", ""),
+        ('{"lyrics": {}}', "lrc", ""),
+        ('{"lyrics": {"save": "id3"}}', "lrc", "lyrics.save isn't lrc, tags or both"),
+        ('{"lyrics": {"save": null}}', "lrc", "lyrics.save isn't lrc, tags or both"),
+        ('{"lyrics": "tags"}', "lrc", "lyrics isn't a group"),
+        ("[]", "lrc", "it isn't a JSON object"),
+        ('{"lyrics": {"save": "t', "lrc", "it isn't JSON"),
+    ],
+)
+def test_where_saved_lyrics_go_is_the_roots_lyrics_save_lrc_by_default(text, save, problem):
+    """R13.11, A2.10: the root's `lyrics.save`, in any case and with spaces around it."""
+    got, problems = settings.parse_root_lyrics(text)
+    assert got == save
+    assert (problem in problems[0]) if problem else problems == ()
+
+
+def test_the_roots_lyrics_setting_is_read_from_its_settings_json(tmp_path, caplog):
+    root = tmp_path / "Music"
+    assert settings.root_lyrics(str(root)) == "lrc"  # no file
+    (root / ".musikata").mkdir(parents=True)
+    path = root / ".musikata" / "settings.json"
+    path.write_text('{"format": 1, "lyrics": {"save": "both"}}')
+    assert settings.root_lyrics(str(root)) == "both"
+    path.write_text('{"format": 1, "lyrics": {"save": 3}}')
+    assert settings.root_lyrics(str(root)) == "lrc" and "lyrics.save" in caplog.text
+    path.unlink()
+    path.mkdir()  # can't be read
+    assert settings.root_lyrics(str(root)) == "lrc"

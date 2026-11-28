@@ -237,6 +237,8 @@ class Library:
     # folder -> its other images: (name, seed, size), a PNG (T02's back.png, R5.2)
     images: dict[str, list[tuple[str, int, int]]] = field(default_factory=dict)
     cues: dict[str, str] = field(default_factory=dict)  # path -> a .cue sheet's text (A2.6)
+    # path -> an .lrc's text (R17.1), written as a Windows lyrics editor writes one: a BOM, CRLF
+    lyrics: dict[str, str] = field(default_factory=dict)
 
 
 def _titles(rng: random.Random, n: int) -> list[str]:
@@ -320,6 +322,40 @@ MOONPULL_COPY = "_Incoming/From Phone/Moonpull (radio).m4a"  # a likely copy of 
 # the plays of the copies L09 shows, as Studio-PC's plays.json has them (R7.9, A2.8)
 PLAYS = {SIGNAL_FIRES: 52, SIGNAL_COPY: 3, MOONPULL: 18, MOONPULL_COPY: 6}
 PLAYED = "2026-11-25T20:41:00Z"
+# Signal Fires' timed lyrics beside it (R17.1, N04-now-playing-lyrics), made up as the mockup's are:
+# LRC's own tags, pauses between verses, a chorus sung twice (two times on one line) and one line
+# with enhanced LRC's word times
+SIGNAL_LYRICS = """[ar:Lumen Drift]
+[ti:Signal Fires]
+[al:Glass Harbor]
+[by:MusiKata demo]
+[length:04:18]
+[offset:0]
+
+[00:21.50]Grey light on the breakwater
+[00:26.00]gulls above the pier
+[00:30.40]every rope is fraying
+[00:34.90]every year a year
+[00:39.50]
+[01:12.00]Lanterns on the water line
+[01:16.40]counting ships that never came
+[01:20.90]every harbour keeps a light
+[01:25.30]every light a different name
+[01:30.00]
+[01:36.00][02:40.00]We were signal fires, burning on the shore
+[01:40.60][02:44.60]calling out to no one, calling out for more
+[01:45.20][02:49.20]and the tide came in to take the words away
+[01:49.80][02:53.80]still I kept the embers for another day
+[01:54.50][02:58.50]
+[02:02.00]Salt across the windows
+[02:06.40]static on the line
+[02:10.90]every wave a question
+[02:15.30]<02:15.30>every <02:15.90>shore <02:16.40>a <02:16.80>sign
+[02:20.00]
+[03:30.00]Signal fires
+[03:34.50]signal fires
+[03:40.00]
+"""
 
 
 def _one_file(lib: Library, folder: str, artist: str, album: str, year: int, genre: str | None,
@@ -388,6 +424,7 @@ def plan(seed: int = 1) -> Library:
             seconds=2.0,
         )
     )
+    lib.lyrics[SIGNAL_FIRES.rsplit(".", 1)[0] + ".lrc"] = SIGNAL_LYRICS
     _playlists(lib)
     _apart(lib, {SIGNAL_COPY})
     return lib
@@ -820,6 +857,9 @@ def build(dest: str, songs: int = 0, seconds: float = 1.0, seed: int = 1) -> Lib
     for rel, text in lib.cues.items():
         with open(os.path.join(music, rel), "w", encoding="utf-8", newline="") as f:
             f.write(text)
+    for rel, text in lib.lyrics.items():
+        with open(os.path.join(music, rel), "w", encoding="utf-8-sig", newline="") as f:
+            f.write(text.replace("\n", "\r\n"))
     for rel, lines in lib.playlists.items():
         path = os.path.join(music, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)

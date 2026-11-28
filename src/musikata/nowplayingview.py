@@ -14,8 +14,8 @@ genres; the queue is the Player bridge's (bridges.py). What every text says is d
 The choice of visualization is kept in the shared settings' `appearance` (A2.10): it belongs to
 this computer and this person, as Appearance does (R13.9), not to the root; so are the 3D
 analyzer's bands and speed, set from its gear (R11.3.1), and what its gear and its labels say is
-decided here too. The Lyrics switch (R17.3) and the Equalizer button (R19.2) are there, faded,
-saying they come later."""
+decided here too. The Lyrics switch (R17.3) is lyrics.py's; the Equalizer button (R19.2) is
+there, faded, saying it comes later."""
 
 from __future__ import annotations
 
@@ -35,7 +35,6 @@ from .nowplaying import read_songs
 # each choice of the picker (R11.4.5): its setting, its name and its icon (Icons.js)
 MODES = {"waveform": ("Waveform", "wave"), "analyzer": ("3D analyzer", "cube"),
          "none": ("No visualization", "nowave")}  # fmt: skip
-LYRICS_LATER = "Lyrics come in a later version"  # R17.3: slice 8.4 (#25)
 EQUALIZER_LATER = "The equalizer comes in a later version"  # R19.2: slice 9 (#26)
 UP_NEXT_SHOWN = 5  # Up next's songs beside the cover with Waveform (N01)
 MARKS_AT_MOST = 12  # the waveform's minute marks, at most: longer songs mark every few minutes
@@ -369,5 +368,4 @@ class NowPlayingView(QObject):
     analyzerAgo = QtProperty(str, lambda self: ago_text(self._seconds), notify=analyzerChanged)
     bandChoices = QtProperty(list, _get_band_choices, notify=analyzerChanged)  # the gear's menu
     speedChoices = QtProperty(list, _get_speed_choices, notify=analyzerChanged)
-    lyricsLater = QtProperty(str, lambda self: LYRICS_LATER, constant=True)
     equalizerLater = QtProperty(str, lambda self: EQUALIZER_LATER, constant=True)

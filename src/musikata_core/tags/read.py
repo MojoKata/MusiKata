@@ -219,7 +219,10 @@ def _id3(tags: mutagen.id3.ID3 | None) -> Tags:
         for f in tags.getall("RVA2")
         if f.channel == 1  # the master volume: the only one ReplayGain writes
     ]
-    found = parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2)
+    uslt = [str(f.text) for f in tags.getall("USLT")]
+    sylt = [(int(f.format), [(str(t), int(ms)) for t, ms in f.text]) for f in tags.getall("SYLT")]
+    found = parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2,
+                           lyrics=parse.id3_lyrics(uslt, sylt))  # fmt: skip
     return dataclasses.replace(found, latin1=latin1_of(tags, found))
 
 

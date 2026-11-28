@@ -7,8 +7,9 @@ the old value of each field that changed (`fields`) and the value written (`new`
 cover changed, the old cover by hash (`cover`, null: there was none) and the new one's
 (`new_cover`), and, when its other pictures changed (R5.3), each of those it had, with its type and
 description (`pictures`), and the hashes of those written (`new_pictures`). An image file a save
-wrote beside the songs (cover.jpg, R5.3) is a file of the entry too, with its old bytes' hash
-(`image`, null: there was none) and its new one's (`new_image`). An old cover, picture or image is
+wrote beside the songs (cover.jpg, R5.3), or a song's lyrics beside it (its `.lrc`, R17.5), is a
+file of the entry too, with its old bytes' hash (`image`, null: there was none) and its new one's
+(`new_image`); a song's lyrics in its tags are its field `lyrics`. An old cover, picture or image is
 kept once in `history/images/<sha256>`, however many entries name it
 (`history-entry.v1.schema.json`, A2.10). Moving the others of a song's copies to the trash (R2.12,
 R2.11) names each file moved (`trashed`), which Undo can't take out of the trash, and the plays
@@ -58,7 +59,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from . import art, db, organize, rootfiles, scanner
+from . import art, db, lyrics, organize, rootfiles, scanner
 from .art import ImageWritten
 from .clock import Clock
 from .organize import Moved, Trashed
@@ -133,9 +134,9 @@ class FileChange:
     def fields(self) -> list[str]:
         """The fields it changed, in compose.FIELDS' order, the cover and the other pictures
         among them, then its plays (R2.12) and whether it went to the trash; an image file's is
-        its cover."""
+        its cover, an `.lrc`'s its lyrics."""
         if self.image:
-            return ["cover"]
+            return [file_field(self.path)]
         return (  # a move (R12) is its path
             [
                 f
@@ -188,6 +189,12 @@ class Broken:
 
     name: str
     why: str
+
+
+def file_field(path: str) -> str:
+    """What a file written beside the songs is, as the history names it: an `.lrc`, a song's
+    lyrics (R17.5); else an image, the cover (R5.3)."""
+    return "lyrics" if path.lower().endswith(lyrics.LRC) else "cover"
 
 
 def value_of(tags: Tags, name: str) -> object:
@@ -978,7 +985,7 @@ def lost_image(change: FileChange, now: str | None) -> tuple[Lost, ...]:
     neither what the entry wrote nor what undoing puts back."""
     if now in (change.old_cover, change.new_cover):
         return ()
-    return (Lost("cover", now, change.old_cover),)
+    return (Lost(file_field(change.path), now, change.old_cover),)
 
 
 def plan(

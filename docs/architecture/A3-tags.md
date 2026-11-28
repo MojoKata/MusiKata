@@ -25,6 +25,7 @@ kind; everything else reads and writes through it.
 | Album artist sort | `TSO2` | `ALBUMARTISTSORT` | `soaa` |
 | Album sort | `TSOA` | `ALBUMSORT` | `soal` |
 | Rating | `POPM` (R10.4) | `RATING`, `FMPS_RATING` | `----:com.apple.iTunes:RATING` |
+| Lyrics (R17.1, A7.6) | `USLT` (lang `eng`, no description; LRC text when timed), with `SYLT` for timed lyrics | `LYRICS` | `©lyr` |
 | Cover | `APIC` type 3 | `METADATA_BLOCK_PICTURE` (Ogg), picture block (FLAC) | `covr` |
 | ReplayGain | `TXXX:REPLAYGAIN_*` | `REPLAYGAIN_*` | `----:com.apple.iTunes:replaygain_*` |
 
