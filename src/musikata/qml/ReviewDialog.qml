@@ -55,6 +55,7 @@ Item {
             y: 29
             label: dialog.copies.badge
             tone: dialog.copies.likely ? "warn" : "ok"
+            tip: dialog.copies.badgeTip
         }
         Item {
             id: close

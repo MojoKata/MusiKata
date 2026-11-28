@@ -89,14 +89,16 @@ def test_a_copy_says_its_format_and_bit_rate_as_l09_does():
 
 
 def test_a_group_says_its_artist_lengths_and_whether_its_copies_are_exact():
-    """L09: "Lumen Drift · 4:18", Exact copies; "Lumen Drift · 4:44 and 4:45", Likely."""
+    """L09: "Lumen Drift · 4:18", Exact; "Lumen Drift · 4:44 and 4:45", Likely; why, in the
+    chip's tooltip (R2.12)."""
     exact = entry_of(FLAC, RIP)
-    assert heading_text(exact) == "Lumen Drift · 4:18" and copies_app.badge_text(exact) == (
-        "Exact copies"
-    )
+    assert heading_text(exact) == "Lumen Drift · 4:18" and copies_app.badge_text(exact) == "Exact"
+    assert copies_app.badge_tip(exact) == "Exact copies: the same audio"
     likely = entry_of(FLAC, M4A, likely=True)
     assert heading_text(likely) == "Lumen Drift · 4:18 and 4:45"
     assert copies_app.badge_text(likely) == "Likely"
+    assert copies_app.badge_tip(likely) == (
+        "Likely copies: the same artist and title, lengths within 2 seconds")  # fmt: skip
     assert lengths_text([FLAC, RIP, M4A, Copy(9, "x", length=59.0)]) == "0:59, 4:18 and 4:45"
     assert lengths_text([]) == "" and heading_text(Entry("same-song", "x")) == "Unknown artist"
 
@@ -190,8 +192,8 @@ def test_needs_attention_lists_the_groups_of_copies_first_with_their_chip():
     heading and note; each group an entry with Review… and Ignore."""
     e = entry_of(FLAC, RIP)
     row = entry_row(e)
-    assert (row["group"], row["title"], row["badge"], row["icon"]) == (
-        "copies", "Signal Fires", "Exact copies", "album"
+    assert (row["group"], row["title"], row["badge"], row["badgeTip"], row["icon"]) == (
+        "copies", "Signal Fires", "Exact", "Exact copies: the same audio", "album"
     )  # fmt: skip
     assert [a["name"] for a in row["actions"]] == ["review", "ignore"]
     assert [(c["song"], c["checked"]) for c in row["copies"]] == [(1, False), (2, True)]
@@ -430,10 +432,12 @@ def test_review_asks_first_moves_and_undo_gives_back_the_plays_and_rating(root, 
     try:
         moon = model.entry_titled("Moonpull")
         assert d.property("opened") is False and d.property("rows") == []
-        assert (d.property("title"), d.property("about"), d.property("badge")) == ("", "", "")
+        assert (d.property("title"), d.property("about"), d.property("badge"),
+                d.property("badgeTip")) == ("", "", "", "")  # fmt: skip
         d.open(moon)
         assert d.property("opened") and d.property("title") == "Copies of Moonpull"
         assert d.property("likely") and d.property("badge") == "Likely"
+        assert d.property("badgeTip").startswith("Likely copies: ")
         assert d.property("about").startswith("Lumen Drift · 0:00. They share artist and title")
         assert [r["checked"] for r in d.property("rows")] == [False, False]  # likely: unchecked
         assert d.property("footer") == "Check the copies to move to the trash"

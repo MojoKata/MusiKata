@@ -168,14 +168,17 @@ MATCH_COLUMNS = ("title", "artist", "album", "albumartist", "track", "tracktotal
 
 def diff_text(diffs: Sequence[patterns.Difference]) -> str | None:
     """How a song's tags differ from its path, as `song.path_diff` keeps it: JSON, a [field,
-    how, value] each; None for no difference."""
+    how, the path's value, the tag's] each, the tag's left out when it has none; None for no
+    difference."""
     if not diffs:
         return None
-    return json.dumps([[d.field, d.how, d.value] for d in diffs], ensure_ascii=False)
+    return json.dumps([[d.field, d.how, d.value, *([d.old] if d.old else [])] for d in diffs],
+                      ensure_ascii=False)  # fmt: skip
 
 
 def diffs_of(text: object) -> tuple[patterns.Difference, ...]:
-    """`song.path_diff` read back (`diff_text`); none for NULL or what isn't one."""
+    """`song.path_diff` read back (`diff_text`), the tag's value "" where it was kept without
+    one (as it was before the tag's value was kept too); none for NULL or what isn't one."""
     try:
         found = json.loads(str(text)) if text else []
     except ValueError:
@@ -183,9 +186,9 @@ def diffs_of(text: object) -> tuple[patterns.Difference, ...]:
     if not isinstance(found, list):
         return ()
     return tuple(
-        patterns.Difference(str(d[0]), str(d[1]), str(d[2]))
+        patterns.Difference(*(str(v) for v in d))
         for d in found
-        if isinstance(d, list) and len(d) == 3
+        if isinstance(d, list) and len(d) in (3, 4)
     )
 
 

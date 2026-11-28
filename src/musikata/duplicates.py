@@ -2,12 +2,13 @@
 copies says in Needs attention, the Review… dialog over one group, and Move the others to the
 trash.
 
-- **A group** (`copy_rows`, `heading_text`, `badge_text`): its kept copy's title and artist, its
-  lengths, "Exact copies" or "Likely", and a row per copy with its format and bit rate, its path,
-  its plays and rating, the copy kept (a radio button, changeable) and those checked for the trash
-  (exact copies checked at first, likely ones not; duplicates.initial), and why the copy proposed
-  is kept ("Keep: lossless"). The choice of each group is the Needs attention list's
-  (attention.AttentionModel), shared by its rows, its selection bar and the dialog.
+- **A group** (`copy_rows`, `heading_text`, `badge_text`, `badge_tip`): its kept copy's title and
+  artist, its lengths, "Exact" or "Likely" (why, in its tooltip), and a row per copy with its
+  format and bit rate, its path, its plays and rating, the copy kept (a radio button,
+  changeable) and those checked for the trash (exact copies checked at first, likely ones not;
+  duplicates.initial), and why the copy proposed is kept ("Keep: lossless"). The choice of each
+  group is the Needs attention list's (attention.AttentionModel), shared by its rows, its
+  selection bar and the dialog.
 - **Review…** (`Duplicates.open`): the group in a dialog of its own, drawn after T01's preview: a
   row per copy with its details (format, bit rate and sample rate, length, folder and file, album,
   plays and rating), the copy kept and those to the trash changeable, and the footer with what
@@ -112,8 +113,15 @@ def heading_text(e: Entry) -> str:
 
 
 def badge_text(e: Entry) -> str:
-    """Exact copies (the same audio, A2.3), or Likely."""
-    return "Likely" if e.likely else "Exact copies"
+    """A group's chip (R2.12): Exact (the same audio, A2.3), or Likely."""
+    return "Likely" if e.likely else "Exact"
+
+
+def badge_tip(e: Entry) -> str:
+    """What a group's chip says in its tooltip (R2.12): why its copies are taken for one song."""
+    if e.likely:
+        return "Likely copies: the same artist and title, lengths within 2 seconds"
+    return "Exact copies: the same audio"
 
 
 def copy_rows(e: Entry, kept: int, checked: frozenset[int]) -> list[dict[str, Any]]:
@@ -581,6 +589,8 @@ class Duplicates(QObject):
     about = QtProperty(str, _get_about, notify=changed)
     badge = QtProperty(str, lambda self: badge_text(e) if (e := self.entry()) else "",
                        notify=changed)  # fmt: skip
+    badgeTip = QtProperty(str, lambda self: badge_tip(e) if (e := self.entry()) else "",
+                          notify=changed)  # fmt: skip
     likely = QtProperty(bool, lambda self: bool((e := self.entry()) and e.likely), notify=changed)
     footer = QtProperty(str, _get_footer, notify=changed)
     moveLabel = QtProperty(str, lambda self: move_label(self._count()), notify=changed)

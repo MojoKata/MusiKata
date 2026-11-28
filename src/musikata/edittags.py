@@ -155,13 +155,18 @@ def art_of(c: sqlite3.Connection, songs: Sequence[Song]) -> dict[str, Any]:
 
 
 def art_chip(embedded: int, songs: int, in_folder: bool) -> dict[str, str]:
-    """The cover's chip: "Art in all 4" when every song has its art embedded; else, as a
-    warning, how many have it, "Art in folder only", or "No cover yet"."""
+    """The cover's chip, its word, tone and tooltip: Embedded when every song has its art
+    embedded; else, as a warning, Partial (how many have it), Folder (an image in the folder
+    alone) or Missing."""
     if embedded and embedded == songs:
-        return {"text": "Art in this song" if songs == 1 else f"Art in all {songs:,}", "tone": "ok"}
+        tip = "Art embedded in this song" if songs == 1 else f"Art embedded in all {songs:,} songs"
+        return {"text": "Embedded", "tone": "ok", "tip": tip}
     if embedded:
-        return {"text": f"Art in {embedded:,} of {songs:,}", "tone": "warn"}
-    return {"text": "Art in folder only" if in_folder else "No cover yet", "tone": "warn"}
+        return {"text": "Partial", "tone": "warn",
+                "tip": f"Art embedded in {embedded:,} of {songs:,} songs"}  # fmt: skip
+    if in_folder:
+        return {"text": "Folder", "tone": "warn", "tip": "Art in the folder only, not embedded"}
+    return {"text": "Missing", "tone": "warn", "tip": "No cover yet"}
 
 
 def load(

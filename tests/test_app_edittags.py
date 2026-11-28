@@ -107,12 +107,15 @@ def test_what_will_change_is_said_and_saved_in_words():
         "year", "title", "track"]  # fmt: skip
 
 
-def test_the_covers_chip_says_where_the_songs_art_is():
-    assert art_chip(4, 4, False) == {"text": "Art in all 4", "tone": "ok"}
-    assert art_chip(1, 1, True)["text"] == "Art in this song"
-    assert art_chip(2, 4, True) == {"text": "Art in 2 of 4", "tone": "warn"}
-    assert art_chip(0, 4, True)["text"] == "Art in folder only"
-    assert art_chip(0, 11, False) == {"text": "No cover yet", "tone": "warn"}
+def test_the_covers_chip_says_where_the_songs_art_is_in_a_word_and_how_many_in_its_tooltip():
+    assert art_chip(4, 4, False) == {
+        "text": "Embedded", "tone": "ok", "tip": "Art embedded in all 4 songs"}  # fmt: skip
+    assert art_chip(1, 1, True)["tip"] == "Art embedded in this song"
+    assert art_chip(2, 4, True) == {
+        "text": "Partial", "tone": "warn", "tip": "Art embedded in 2 of 4 songs"}  # fmt: skip
+    assert art_chip(0, 4, True) == {"text": "Folder", "tone": "warn",
+                                    "tip": "Art in the folder only, not embedded"}  # fmt: skip
+    assert art_chip(0, 11, False) == {"text": "Missing", "tone": "warn", "tip": "No cover yet"}
 
 
 def test_a_field_shows_what_was_typed_else_what_the_songs_share_and_mixed_in_grey():
@@ -303,7 +306,7 @@ def test_four_songs_show_what_they_share_and_whats_mixed(root, panel, qtbot):
     assert [v["text"] for v in field(panel, "artist")["values"]] == ["Lumen Drift", "lumen drift"]
     assert field(panel, "track")["text"] == "/ 9"
     assert panel.property("rating") == {"stars": 0, "mixed": True, "changed": False}
-    assert panel.property("artChip") == {"text": "No cover yet", "tone": "warn"}
+    assert panel.property("artChip") == {"text": "Missing", "tone": "warn", "tip": "No cover yet"}
     assert panel.property("details") == [] and panel.property("keptNote") == ""
     assert not panel.property("canSave") and panel.property("changeLine") == ""
     assert not panel.property("more")

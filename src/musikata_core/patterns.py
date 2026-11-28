@@ -39,6 +39,7 @@ Plain functions over strings and tags.Tags: no file, index or Qt."""
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import unicodedata
 from collections import Counter
@@ -495,11 +496,13 @@ def plan(
 @dataclass(frozen=True)
 class Difference:
     """How a song's tag differs from its path (R3.9): the field, how ("missing", "case": only in
-    case, "differs"), and the path's value as the preview shows it."""
+    case, "differs"), and the path's value as the preview shows it; and the tag's own (`old`, ""
+    for none, or unknown), which says how but not whether they differ, so is left out of `==`."""
 
     field: str
     how: str
     value: str
+    old: str = dataclasses.field(default="", compare=False)
 
 
 def has_tags(tags: Tags) -> bool:
@@ -518,7 +521,7 @@ def differences(old: Tags, new: Tags) -> tuple[Difference, ...]:
             continue
         how = "missing" if not before else "case" if before.casefold() == after.casefold() else (
             "differs")  # fmt: skip
-        out.append(Difference(field, how, after))
+        out.append(Difference(field, how, after, before))
     return tuple(out)
 
 

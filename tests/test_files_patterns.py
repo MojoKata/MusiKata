@@ -438,6 +438,7 @@ def test_each_files_tags_match_its_path_can_be_fixed_or_it_has_none():
                 Difference("title", "missing", "Ebb"))),
         (None, ()),
     ]  # fmt: skip
+    assert got[1][1][0].old == "lumen drift" and got[2][1][0].old == ""  # the tag's own value
     assert patterns.states([], patterns.patterns_of()) == []
     assert patterns.states([("x.flac", Tags())], patterns.patterns_of()) == [(BARE, ())]
 

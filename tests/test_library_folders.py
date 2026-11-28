@@ -374,7 +374,7 @@ def test_a_write_keeps_each_songs_path_match_and_each_folders_worst_beneath(inde
     got = states(index)
     assert got["Lumen Drift/Tide Tables/01 - Neap Tide.flac"] == (0, None)
     assert got["Lumen Drift/Tide Tables/03 - Slack Water.flac"] == (
-        1, '[["albumartist", "case", "Lumen Drift"]]')  # fmt: skip
+        1, '[["albumartist", "case", "Lumen Drift", "lumen drift"]]')  # fmt: skip
     assert got["_Incoming/new rips/track01.mp3"] == (2, None)  # no tags, no pattern fits
     assert got["_Incoming/new rips/Signal Fires.flac"] == (None, None)
     by = {p: (s, n) for p, s, n in index.read().execute(
@@ -406,7 +406,7 @@ def test_the_users_own_patterns_are_kept_and_every_folder_worked_out_again_when_
     user = ["{artist}/{album}/{track} - {title}"]
     assert index.write(lambda c: folders.set_user_patterns(c, user)).result()
     assert folders.user_patterns(index.read()) == user
-    assert states(index)[moon] == (1, '[["artist", "case", "Lumen Drift"]]')
+    assert states(index)[moon] == (1, '[["artist", "case", "Lumen Drift", "lumen drift"]]')
     assert not index.write(lambda c: folders.set_user_patterns(c, user)).result()
     assert index.write(lambda c: folders.set_user_patterns(c, [])).result()
     assert folders.user_patterns(index.read()) == []
@@ -551,9 +551,11 @@ def test_an_index_of_slice_8_loses_its_false_flags_as_its_songs_are_read_again(t
 def test_how_a_song_differs_is_kept_as_json_and_read_back_whatever_the_column_holds():
     from musikata_core.patterns import Difference
 
-    diffs = (Difference("year", "missing", "2022"), Difference("artist", "case", "Ünïcode"))
+    diffs = (Difference("year", "missing", "2022"), Difference("artist", "case", "Ünïcode", "ü"))
     text = folders.diff_text(diffs)
     assert folders.diffs_of(text) == diffs and "Ünïcode" in text
+    assert [d.old for d in folders.diffs_of(text)] == ["", "ü"]  # the tag's value, when it has one
+    assert folders.diffs_of('[["year", "missing", "2022"]]') == diffs[:1]  # kept without it
     assert folders.diff_text(()) is None
     for broken in (None, "", "not json", "{}", '[["a", "b"], 3]', "[[1, 2, 3]]"):
         got = folders.diffs_of(broken)

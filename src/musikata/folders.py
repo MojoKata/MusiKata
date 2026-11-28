@@ -73,8 +73,9 @@ LATER = [
 STRIP = [{**INFER, "primary": True}, EDIT, ART]
 # R3.9's states as Folders shows them: a folder's dot on its cover (R2.9.5) and a chip's tone
 TONES = {patterns.FIX: "warn", patterns.BARE: "err"}
-# how a song's tag differs from its path, said of the field (a chip, R3.9) and of files (the
-# strip's line, R2.9.7)
+# and a chip's one word (R3.9, R2.9.5, R2.9.7), its tooltip saying the rest
+WORDS = {patterns.MATCH: "Match", patterns.FIX: "Fixable", patterns.BARE: "Untagged"}
+# how a song's tag differs from its path, said of the field (a chip's tooltip, R3.9)
 CHIP_HOW = {"missing": "{} missing", "case": "{} case differs", "differs": "{} differs"}
 
 
@@ -178,14 +179,17 @@ def art_line(image: str | None, embedded: int, songs: int) -> str:
 
 
 def art_chip(image: str | None, embedded: int, songs: int) -> dict[str, str]:
-    """A folder of songs' art chip (R2.9.7), its text and tone."""
-    if embedded and embedded == songs:
-        return {"text": f"Art embedded in {embedded} of {songs}", "tone": "ok"}
+    """A folder of songs' art chip (R2.9.7), its word, tone and tooltip: Embedded in every file,
+    Partial, Folder (an image in the folder alone) or Missing."""
     if embedded:
-        return {"text": f"Art embedded in {embedded} of {songs}", "tone": "warn"}
+        tip = f"Art embedded in {embedded:,} of {_files(songs)}"
+        if embedded == songs:
+            return {"text": "Embedded", "tone": "ok", "tip": tip}
+        return {"text": "Partial", "tone": "warn", "tip": tip}
     if image:
-        return {"text": "Art in folder only", "tone": "info"}
-    return {"text": "No art", "tone": "warn"}
+        name = image.rpartition("/")[2]
+        return {"text": "Folder", "tone": "info", "tip": f"Art in {name} only, not embedded"}
+    return {"text": "Missing", "tone": "warn", "tip": "No art, embedded or in the folder"}
 
 
 # ---------- tags match path (R3.9) ----------
@@ -196,49 +200,60 @@ def field_label(field: str) -> str:
     return LABELS.get(field, field)
 
 
+def difference_tip(d: patterns.Difference) -> str:
+    """A line of a file's chip's tooltip (R3.9): Genre differs: the path says Ambient, the tags
+    Electronic; Year missing: the path says 2022; the tags' part left out where the index
+    doesn't know it."""
+    says = f"the path says {d.value}"
+    if d.how != "missing" and d.old:
+        says += f", the tags {d.old}"
+    return f"{CHIP_HOW.get(d.how, '{} differs').format(field_label(d.field))}: {says}"
+
+
 def file_chip(state: int | None, diffs: Sequence[patterns.Difference]) -> dict[str, str]:
-    """A file's path-match chip (R3.9, L05, L08): Match; Year missing, Artist case differs, Genre
-    differs for one field; for more, Case differs when they differ only in case, else 3 tags
-    differ, 3 tags missing; No tags; none ({}) when no pattern fits it."""
+    """A file's path-match chip (R3.9, L05, L08), its word, tone and tooltip: Match; Fixable,
+    its tooltip a line for each tag that differs (`difference_tip`); Untagged; none ({}) when no
+    pattern fits it."""
     if state is None:
         return {}
+    lines = [difference_tip(d) for d in diffs]
     if state == patterns.BARE:
-        return {"text": "No tags", "tone": "err"}
+        return {"text": WORDS[state], "tone": "err", "tip": "\n".join(["No tags at all", *lines])}
     if state == patterns.MATCH or not diffs:
-        return {"text": "Match", "tone": "ok"}
-    if len(diffs) == 1:
-        d = diffs[0]
-        return {"text": CHIP_HOW.get(d.how, "{} differs").format(field_label(d.field)),
-                "tone": "warn"}  # fmt: skip
-    hows = {d.how for d in diffs}
-    if hows == {"case"}:
-        return {"text": "Case differs", "tone": "warn"}
-    how = "missing" if hows == {"missing"} else "differ"
-    return {"text": f"{len(diffs)} tags {how}", "tone": "warn"}
+        return {"text": WORDS[patterns.MATCH], "tone": "ok", "tip": "Its tags match its path"}
+    return {"text": WORDS[patterns.FIX], "tone": "warn", "tip": "\n".join(lines)}
 
 
 def folder_chip(state: int | None, fix: int) -> dict[str, str]:
-    """A folder's state chip on cards and in List (R2.9.5, L06): No tags, 3 to fix; none ({})
-    when its files all match."""
+    """A folder's state chip on cards and in List (R2.9.5, L06), its word, tone and tooltip:
+    Fixable (3 files can be fixed from the path) or Untagged; none ({}) when its files all
+    match."""
     if state == patterns.BARE:
-        return {"text": "No tags", "tone": "err"}
+        tip = f"Some files have no tags; {_files(fix)} to fix from the path in all"
+        return {"text": WORDS[state], "tone": "err", "tip": tip}
     if state == patterns.FIX and fix:
-        return {"text": f"{fix:,} to fix", "tone": "warn"}
+        tip = f"{_files(fix)} can be fixed from the path"
+        return {"text": WORDS[state], "tone": "warn", "tip": tip}
     return {}
 
 
 def match_chip(states: Sequence[int | None]) -> dict[str, str]:
-    """A folder of songs' or an album's chip (R2.9.7, L02, L08): Tags match path, or how many of
-    its files do (Tags match path: 7 of 9), amber when some can be fixed, red when one has no
-    tags; none ({}) when no pattern fits any."""
+    """A folder of songs' or an album's chip (R2.9.7, L02, L08), its word, tone and tooltip:
+    Match when every file's tags match its path, Fixable when some can be fixed, Untagged when
+    one has no tags, the tooltip saying how many match (Tags match path for 7 of 9 files); none
+    ({}) when no pattern fits any."""
     known = [s for s in states if s is not None]
     if not known:
         return {}
     matched = sum(s == patterns.MATCH for s in known)
+    tip = f"Tags match path for {matched:,} of {_files(len(states))}"
     if matched == len(states):
-        return {"text": "Tags match path", "tone": "ok"}
-    tone = "err" if patterns.BARE in known else "warn"
-    return {"text": f"Tags match path: {matched} of {len(states)}", "tone": tone}
+        return {"text": WORDS[patterns.MATCH], "tone": "ok", "tip": tip}
+    bare = known.count(patterns.BARE)
+    if bare:
+        tip += f"; {bare:,} {'has' if bare == 1 else 'have'} no tags"
+        return {"text": WORDS[patterns.BARE], "tone": "err", "tip": tip}
+    return {"text": WORDS[patterns.FIX], "tone": "warn", "tip": tip}
 
 
 def _files(n: int) -> str:

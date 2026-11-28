@@ -238,17 +238,20 @@ def kicker(compilation: bool, year: int | None, genre: str | None) -> str:
 def state_chips(
     songs: int, embedded: int, folder_image: str | None, path_states: Sequence[int | None] = ()
 ) -> list[dict[str, str]]:
-    """An album's state chips (R2.6, L02), each its text and tone ("ok", "warn", "info", "err"):
-    the art embedded in its songs, its folder's cover image, and whether its songs' tags match
-    their paths (R3.9, `path_states`: each song's)."""
+    """An album's state chips (R2.6, L02), each a word, its tone ("ok", "warn", "info", "err")
+    and its tooltip: the art embedded in its songs (Embedded in every one, Partial, Unembedded),
+    its folder's cover image (Folder), and whether its songs' tags match their paths (R3.9,
+    `path_states`: each song's; folders.match_chip)."""
+    tip = f"Art embedded in {embedded:,} of {plural(songs, 'song')}"
     if embedded == songs:
-        out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "ok"}]
+        out = [{"text": "Embedded", "tone": "ok", "tip": tip}]
     elif embedded:
-        out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "warn"}]
+        out = [{"text": "Partial", "tone": "warn", "tip": tip}]
     else:
-        out = [{"text": "No art embedded", "tone": "info"}]
+        out = [{"text": "Unembedded", "tone": "info", "tip": "No song has its art embedded"}]
     if folder_image:
-        out.append({"text": f"{folder_image.rpartition('/')[2]} in folder", "tone": "info"})
+        name = folder_image.rpartition("/")[2]
+        out.append({"text": "Folder", "tone": "info", "tip": f"{name} in the album's folder"})
     matched = match_chip(path_states)
     return [*out, matched] if matched else out
 

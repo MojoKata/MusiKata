@@ -92,5 +92,6 @@ where the tag already has mixed case). A folder that holds two or more album fol
 whose songs carry its name as album artist or artist, groups albums (`Soundtracks`,
 `Lumen Drift/Remixes`) and gives the songs beneath it no album artist or artist to agree with;
 their album, track and title are still judged from their own folder and file. Folders shows each folder's worst state beneath it (green:
-match, amber: can be fixed, red: no tags; R2.9.5) and a chip per file ("Match", "Genre differs",
-"Year missing"), and the mismatches are listed in Needs attention (R2.8).
+match, amber: can be fixed, red: no tags; R2.9.5) and a chip per file ("Match", "Fixable" or
+"Untagged", its tooltip saying what differs, a line each, as "Genre differs: the path says Ambient,
+the tags Electronic"), and the mismatches are listed in Needs attention (R2.8).
