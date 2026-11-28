@@ -174,6 +174,10 @@ entry for the list.
   kind of tag (R17.1).
 - **The analysis** (A5): peaks and bands of generated tones land where they should.
 - **QML**: the models with a 50,000-row library; the views load with no QML warnings.
+  A test never reaches a QtQuick.Controls `Popup` (a `Menu`, `ToolTip` or `Dialog`) from Python,
+  not even by `findChild` to read one property: a later test then crashes about half the time
+  (slice 8.5). It checks what the popup shows through the bridge or model that fills it, or its
+  order in the QML file.
 
 Tests never need the network or a sound card: playback tests play into a null output and check
 positions and signals, and online lookups use recorded answers (A7.8). Qt has no null output of its
