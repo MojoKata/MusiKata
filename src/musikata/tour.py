@@ -261,8 +261,8 @@ def analyzers(item: QQuickItem) -> list[Analyzer]:
 
 
 def _waiting_on(item: QQuickItem, tints: bool) -> None:
-    """Says on stderr what a step waits on, and the memory the tour's processes hold: CI's tour
-    of #95 was killed for its memory while N01 waited."""
+    """Says on stderr what a step waits on: whether the cover colours are busy, and which items
+    are loading, so a screen that runs out of patience says why."""
     found = []
 
     def walk(at: QQuickItem) -> None:
@@ -274,44 +274,7 @@ def _waiting_on(item: QQuickItem, tints: bool) -> None:
             walk(child)
 
     walk(item)
-    print(
-        f"the tour waits: tints {tints}, {_memory()}, loading {found}", file=sys.stderr, flush=True
-    )
-
-
-def _memory() -> str:
-    """Each of the tour's processes' resident memory, from /proc, in MB."""
-    held = []
-    for pid in os.listdir("/proc"):
-        try:
-            with open(f"/proc/{pid}/status", encoding="utf-8") as f:
-                fields = dict(line.split(":", 1) for line in f if ":" in line)
-        except OSError:
-            continue
-        if "VmRSS" in fields:
-            held.append(f"{fields['Name'].strip()} {int(fields['VmRSS'].split()[0]) // 1024}")
-    return "MB " + ", ".join(held)
-
-
-def _watch() -> None:
-    """While the tour runs, every second its memory when it passes 1 GB, and then every thread's
-    stack: CI's tour of #95 grew until it was killed, at N01, in seconds."""
-    import faulthandler
-    import threading
-
-    def look() -> None:
-        while True:
-            time.sleep(1)
-            held = _memory()
-            if any(
-                int(v.split()[-1]) > 1024 for v in held[3:].split(", ") if v.split()[-1].isdigit()
-            ):
-                print(
-                    f"the tour grows: {time.monotonic():.1f}, {held}", file=sys.stderr, flush=True
-                )
-                faulthandler.dump_traceback(sys.stderr)
-
-    threading.Thread(target=look, daemon=True, name="tour-watch").start()
+    print(f"the tour waits: tints {tints}, loading {found}", file=sys.stderr, flush=True)
 
 
 def _quit(code: int) -> None:
@@ -351,7 +314,6 @@ class Tour(QObject):
         mine = screens(state_of(library))
         self.steps = [(n, s) for n, s in STEPS if n in mine and (not names or n in names)]
         self.win, self.library, self.out, self.done = window, library, out, done
-        _watch()
         self.player, self.history, self.edit, self.art = player, history, edit, art
         self.genres, self.attention, self.copies = genres, attention, copies
         self.encodings, self.infer, self.dragging = encodings, infer, dragging
@@ -472,11 +434,7 @@ class Tour(QObject):
         for fault in layout.faults(self.win):
             self.faults.append(f"{name} at {w} x {h}: {fault['line']}")
         # each screen and size taken, and when, so a tour that stops says where
-        print(
-            f"the tour: {name} at {w} x {h}, {time.monotonic():.1f}, {_memory()}",
-            file=sys.stderr,
-            flush=True,
-        )
+        print(f"the tour: {name} at {w} x {h}, {time.monotonic():.1f}", file=sys.stderr, flush=True)
         self._size += 1
         if self._size < len(SIZES):
             self._at_size()

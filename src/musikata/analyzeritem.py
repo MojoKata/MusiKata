@@ -49,7 +49,6 @@ from PySide6.QtQuick import (
     QQuickWindow,
     QSGGeometry,
     QSGGeometryNode,
-    QSGImageNode,
     QSGNode,
     QSGRendererInterface,
     QSGVertexColorMaterial,
@@ -58,7 +57,7 @@ from PySide6.QtQuick import (
 from musikata_core.analysis import landscape, spectrum
 from musikata_core.audio.stream import Recent
 
-from .waveitem import VERTEX, attributes, fill, premultiplied
+from .waveitem import VERTEX, attributes, fill, image_node, premultiplied
 
 FPS = 60  # R11.3.2: at most
 SLOW_FPS = 30  # when the computer can't keep up
@@ -438,17 +437,13 @@ class Analyzer(QQuickItem):
         return node
 
     def _image_node(self, old: QSGNode | None, window: QQuickWindow) -> QSGNode:
-        """The software renderer's: one image node, made at the first render, showing the slices
-        painted (`painted`); each new image's texture replaces the last, which the node deletes."""
-        node = old if isinstance(old, QSGImageNode) else window.createImageNode()
+        """The software renderer's: one image node (`waveitem.image_node`) showing the slices
+        painted (`painted`)."""
         size = (max(1, math.ceil(self.width())), max(1, math.ceil(self.height())))
         c = self._colours
         image = painted(self._places, self._depths, c["front"], c["back"], c["background"],
                         size, window.effectiveDevicePixelRatio())  # fmt: skip
-        node.setTexture(window.createTextureFromImage(image))
-        node.setOwnsTexture(True)
-        node.setRect(QRectF(0, 0, size[0], size[1]))
-        return node
+        return image_node(old, window, image, size)
 
 
 def _none() -> None:

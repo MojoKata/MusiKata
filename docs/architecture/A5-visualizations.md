@@ -22,8 +22,12 @@ frames a second costs the CPU little more than the arithmetic of A5.2.
   the rest grey), rebuilt only when the size, the peaks or the play head's bar changes. One node,
   not one per colour: PySide hands Qt only the node `updatePaintNode` returns, and a child node
   made in Python stays Python's to delete, behind the render thread's back. Qt Quick's software
-  renderer (offscreen, and where there is no GPU) draws no custom geometry, so there the bars are
-  rectangle nodes in their colours, square-ended.
+  renderer (offscreen, and where there is no GPU) draws no custom geometry, so there the same
+  bars, square-ended, are painted into an image (`QPainter`) shown by one image node, as the
+  analyzer's slices are. Not a rectangle node per bar: each frame that renderer works out the
+  region every opaque node hides and every node's region left to paint, and hundreds of bars of
+  every height made those regions of thousands of rectangles, copied for each node under them, so
+  a frame of Now Playing took half a second and gigabytes.
 - The analyzer keeps the last N spectra (the speed of R11.3.1 sets N). Each frame it projects them
   into a perspective landscape: depth scales a slice's width and height towards a vanishing
   point and moves it up towards the horizon. Slices are drawn back to front, each as a filled
@@ -33,7 +37,7 @@ frames a second costs the CPU little more than the arithmetic of A5.2.
   graph draws lines one pixel wide at most). Where Qt Quick renders in software, the same slices
   are painted into an image (`QPainter`) shown by one image node, made at the first render: the
   software renderer places a node added under one it has drawn already without the item's place,
-  so no node is added later, there or in the waveform's rectangles.
+  so no node is added later, there or in the waveform's.
 
 A5.4. **Why not Qt Quick 3D or Qt Graphs.** Both could draw a 3D surface, but they add large
 modules to every download (A6.3), their look would need much undoing to match R6.2, and the
