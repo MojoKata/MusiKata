@@ -301,6 +301,96 @@ def test_shuffle_and_repeat_never_go_into_a_newer_or_unreadable_file(tmp_path, c
     assert "newer MusiKata" in caplog.text and "left as it is" in caplog.text
 
 
+def test_the_visualization_is_read_from_appearance_waveform_by_default():
+    got = parse({"format": 1, "appearance": {"theme": "dark", "visualization": "none"}})
+    assert got.appearance == settings.Appearance("none") and got.problems == ()
+    assert parse({"format": 1}).appearance.visualization == "waveform"
+
+
+@pytest.mark.parametrize(
+    "appearance, want, problem",
+    [
+        ({"visualization": " Analyzer "}, "analyzer", ""),
+        ({"visualization": "NONE"}, "none", ""),
+        ({"visualization": "3d"}, "waveform", "isn't waveform, analyzer or none"),
+        ({"visualization": 2}, "waveform", "isn't waveform, analyzer or none"),
+        ({"visualization": None}, "waveform", "isn't waveform, analyzer or none"),
+        ([], "waveform", "appearance isn't a group"),
+    ],
+)
+def test_the_visualization_broken_in_another_case_or_type(appearance, want, problem):
+    got = parse({"format": 1, "appearance": appearance})
+    assert got.appearance.visualization == want
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_visualization_set_keeps_the_rest_of_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({
+        "format": 1, "computer": {"id": "b2c4", "name": "Studio-PC"},
+        "appearance": {"theme": "dark", "tint": False, "later": 1},
+    }))  # fmt: skip
+    assert settings.set_appearance(str(path), HOME, "Other", visualization="none")
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {
+        "theme": "dark",
+        "tint": False,
+        "later": 1,
+        "visualization": "none",
+    }
+    assert doc["computer"] == {"id": "b2c4", "name": "Studio-PC"}
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).appearance.visualization == "none"
+    newer = tmp_path / "newer.json"
+    newer.write_text(json.dumps({"format": 2}))
+    assert not settings.set_appearance(str(newer), HOME, "PC", visualization="none")
+
+
+def test_the_analyzers_bands_and_seconds_are_read_from_appearance_96_and_3_by_default():
+    got = parse({"format": 1, "appearance": {"analyzer_bands": 128, "analyzer_seconds": 6}})
+    assert got.appearance == settings.Appearance("waveform", 128, 6.0) and got.problems == ()
+    assert parse({"format": 1}).appearance == settings.Appearance("waveform", 96, 3.0)
+
+
+@pytest.mark.parametrize(
+    "appearance, bands, seconds, problem",
+    [
+        ({"analyzer_bands": "48", "analyzer_seconds": " 1.5 "}, 48, 1.5, ""),
+        ({"analyzer_bands": 96.0, "analyzer_seconds": 4}, 96, 4.0, ""),  # a hand edit
+        ({"analyzer_bands": 64}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_bands": True}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_bands": None}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_bands": "many"}, 96, 3.0, "analyzer_bands isn't 48, 96 or 128"),
+        ({"analyzer_seconds": 0}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": 60}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": float("nan")}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": "3 s"}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+        ({"analyzer_seconds": False}, 96, 3.0, "analyzer_seconds isn't 1 to 12 seconds"),
+    ],
+)
+def test_the_analyzers_bands_and_seconds_broken_out_of_range_or_as_text(
+    appearance, bands, seconds, problem
+):
+    got = parse({"format": 1, "appearance": appearance})
+    assert (got.appearance.analyzer_bands, got.appearance.analyzer_seconds) == (bands, seconds)
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_analyzers_bands_and_seconds_set_keep_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"format": 1, "appearance": {"visualization": "analyzer"}}))
+    assert settings.set_appearance(str(path), HOME, "PC", analyzer_bands=128)
+    assert settings.set_appearance(str(path), HOME, "PC", analyzer_seconds=1.5)
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {
+        "visualization": "analyzer", "analyzer_bands": 128, "analyzer_seconds": 1.5
+    }  # fmt: skip
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).appearance == settings.Appearance("analyzer", 128, 1.5)
+
+
 def test_this_computers_id_is_the_files_else_made_once_and_kept(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"format": 1, "library": {"root": "/m"}, "later": 1}))
@@ -529,3 +619,68 @@ def test_the_roots_own_settings_give_organize_files_layout(group, layout, proble
     found = settings.parse_root_tags(json.dumps({"format": 1, "patterns": group}))
     assert found.layout == layout
     assert any(problem in p for p in found.problems) if problem else not found.problems
+
+
+# ---------- the Lyrics switch (R17.3), and where saved lyrics go (R13.11) ----------
+
+
+@pytest.mark.parametrize(
+    "appearance, on, problem",
+    [
+        ({"lyrics": True}, True, ""),
+        ({}, False, ""),
+        ({"lyrics": "true"}, False, "appearance.lyrics isn't true or false"),
+        ({"lyrics": 1}, False, "appearance.lyrics isn't true or false"),
+        ({"lyrics": None}, False, "appearance.lyrics isn't true or false"),
+    ],
+)
+def test_the_lyrics_switch_is_read_from_appearance_off_by_default(appearance, on, problem):
+    got = parse({"format": 1, "appearance": appearance})
+    assert got.appearance.lyrics is on
+    assert (problem in got.problems[0]) if problem else got.problems == ()
+
+
+def test_the_lyrics_switch_set_keeps_the_file_valid_under_its_schema(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"format": 1, "appearance": {"visualization": "none", "x": 1}}))
+    assert settings.set_appearance(str(path), HOME, "PC", lyrics=True)
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {"visualization": "none", "x": 1, "lyrics": True}
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    assert settings.load(str(path), HOME).appearance.lyrics is True
+
+
+@pytest.mark.parametrize(
+    "text, save, problem",
+    [
+        ('{"format": 1, "lyrics": {"save": "tags"}}', "tags", ""),
+        ('﻿{"lyrics": {"save": " Both "}}', "both", ""),
+        ('{"format": 1}', "lrc", ""),
+        ('{"lyrics": {}}', "lrc", ""),
+        ('{"lyrics": {"save": "id3"}}', "lrc", "lyrics.save isn't lrc, tags or both"),
+        ('{"lyrics": {"save": null}}', "lrc", "lyrics.save isn't lrc, tags or both"),
+        ('{"lyrics": "tags"}', "lrc", "lyrics isn't a group"),
+        ("[]", "lrc", "it isn't a JSON object"),
+        ('{"lyrics": {"save": "t', "lrc", "it isn't JSON"),
+    ],
+)
+def test_where_saved_lyrics_go_is_the_roots_lyrics_save_lrc_by_default(text, save, problem):
+    """R13.11, A2.10: the root's `lyrics.save`, in any case and with spaces around it."""
+    got, problems = settings.parse_root_lyrics(text)
+    assert got == save
+    assert (problem in problems[0]) if problem else problems == ()
+
+
+def test_the_roots_lyrics_setting_is_read_from_its_settings_json(tmp_path, caplog):
+    root = tmp_path / "Music"
+    assert settings.root_lyrics(str(root)) == "lrc"  # no file
+    (root / ".musikata").mkdir(parents=True)
+    path = root / ".musikata" / "settings.json"
+    path.write_text('{"format": 1, "lyrics": {"save": "both"}}')
+    assert settings.root_lyrics(str(root)) == "both"
+    path.write_text('{"format": 1, "lyrics": {"save": 3}}')
+    assert settings.root_lyrics(str(root)) == "lrc" and "lyrics.save" in caplog.text
+    path.unlink()
+    path.mkdir()  # can't be read
+    assert settings.root_lyrics(str(root)) == "lrc"

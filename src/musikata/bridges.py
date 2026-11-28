@@ -32,6 +32,7 @@ from musikata_core import albums, db, nowplaying, scanner, settings, watch, work
 from musikata_core.audio import gain
 from musikata_core.audio.played import Listening
 from musikata_core.audio.queue import Entry, Queue
+from musikata_core.audio.stream import Recent
 from musikata_core.clock import Clock, SystemClock
 from musikata_core.tags import Written
 
@@ -1621,7 +1622,14 @@ class Player(QObject):
 
     It says which song the bar shows (`nowPlaying`) and which comes after it (`nextSong`), whose
     waveforms are worked out (waveforms.py, R11.1.1), and the time at a place on the seek bar
-    (`timeAt`, R11.2)."""
+    (`timeAt`, R11.2). Its `analyzer` is the engine's ring of what the device played (A4.3), which
+    the spectrum's views read (spectrumitem.py).
+
+    The queue is shown twice: in Up next (`upNext`, R7.2) and at full size in Now Playing with No
+    visualization (`queueList`, R11.4.3), the song played last above the one playing there. Each
+    is changed through the slots that take it (`playRowOf`, `removeRowOf`, `moveRowOf`, …): a
+    row's song played, taken out, or moved; and **Clear** takes out every song but the one
+    playing (`clearQueue`)."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
@@ -1666,7 +1674,11 @@ class Player(QObject):
         self._cued_at = 0.0  # where play starts the cued song: its place kept across a restart
         self._begun_at = 0.0  # where the engine was asked to start the song it plays
         self._up_next = UpNextModel(read, self.queue, self)
+        self._queue_list = UpNextModel(read, self.queue, self, played_shown=1)  # R11.4.3
         self._up_next_open = False
+        # the ring of what the device played (A4.3); an engine of a test's has none: one never fed
+        found = getattr(self._engine, "analyzer", None)
+        self.analyzer: Recent = found if isinstance(found, Recent) else Recent()
         self._info: SongInfo | None = None  # the shown song's words, when the index has it
         self._ratings: dict[int, int] = {}  # ratings being saved, by song id (R10.2)
         self._path = ""  # the shown song's path under the root
@@ -1869,6 +1881,12 @@ class Player(QObject):
         if self._keeping is not None:
             self._keeping.playback(**fields)
 
+    def remember_appearance(self, **fields: object) -> None:
+        """Now Playing's visualization chosen (R11.4.5): kept in the shared settings, on the
+        thread that keeps shuffle and repeat, so the two never write the file at once."""
+        if self._keeping is not None:
+            self._keeping.appearance(**fields)
+
     def go(self, step: dict[str, Any]) -> None:
         """A tour's step (A1.6): {"queue": "Glass Harbor"} cues that album at its first song,
         paused, nothing playing; with "at": 3, at its fourth, the three before it played; "added":
@@ -1916,10 +1934,19 @@ class Player(QObject):
         else:
             self._queue_changed()
 
+    def _list(self, model: QObject | None) -> UpNextModel:
+        """The queue's list a slot acts on: Now Playing's (`queueList`), else Up next."""
+        return self._queue_list if model is self._queue_list else self._up_next
+
     @Slot(int)
     def playRow(self, row: int) -> None:  # noqa: N802
         """A double click on a row of Up next: that song plays."""
-        found = self._up_next.entry(row)
+        self.playRowOf(self._up_next, row)
+
+    @Slot(QObject, int)
+    def playRowOf(self, model: QObject, row: int) -> None:  # noqa: N802
+        """A double click on a row of the queue's list `model`: that song plays."""
+        found = self._list(model).entry(row)
         if found is not None:
             entry = self.queue.jump(found[0].key)
             if entry is not None:
@@ -1928,19 +1955,37 @@ class Player(QObject):
     @Slot(int)
     def removeRow(self, row: int) -> None:  # noqa: N802
         """Up next's ×: the song out of the queue; the song playing stays."""
-        found = self._up_next.entry(row)
+        self.removeRowOf(self._up_next, row)
+
+    @Slot(QObject, int)
+    def removeRowOf(self, model: QObject, row: int) -> None:  # noqa: N802
+        """A row's × in the queue's list `model`: its song out of the queue; the song playing
+        stays."""
+        found = self._list(model).entry(row)
         if found is not None and self.queue.remove(found[0].key):
             self._queue_changed()
 
     @Slot()
     def playSelected(self) -> None:  # noqa: N802
         """Enter on Up next's selection: its first song plays, as a double click on it would."""
-        self.playRow(self._up_next.first_selected())
+        self.playSelectedOf(self._up_next)
+
+    @Slot(QObject)
+    def playSelectedOf(self, model: QObject) -> None:  # noqa: N802
+        """Enter on the selection of the queue's list `model`: its first song plays."""
+        found = self._list(model)
+        self.playRowOf(found, found.first_selected())
 
     @Slot()
     def removeSelected(self) -> None:  # noqa: N802
         """Delete on Up next's selection: its songs out of the queue; the song playing stays."""
-        removed = [self.queue.remove(entry.key) for entry, _ in self._up_next.selected()]
+        self.removeSelectedOf(self._up_next)
+
+    @Slot(QObject)
+    def removeSelectedOf(self, model: QObject) -> None:  # noqa: N802
+        """Delete on the selection of the queue's list `model`: its songs out of the queue; the
+        song playing stays."""
+        removed = [self.queue.remove(entry.key) for entry, _ in self._list(model).selected()]
         if any(removed):
             self._queue_changed()
 
@@ -1948,13 +1993,33 @@ class Player(QObject):
     def moveRow(self, row: int, to: int) -> None:  # noqa: N802
         """Up next's drag: a song to come dropped above row `to` (the line drawn there), where it
         then plays; below the songs to come, it goes last among them."""
-        found = self._up_next.entry(row)
+        self.moveRowOf(self._up_next, row, to)
+
+    @Slot(QObject, int, int)
+    def moveRowOf(self, model: QObject, row: int, to: int) -> None:  # noqa: N802
+        """A drag in the queue's list `model`: a song to come dropped above row `to`, where it then
+        plays; above the songs to come it goes first among them, below them last."""
+        found_list = self._list(model)
+        found = found_list.entry(row)
         if found is None or found[1] != "next":
             return
-        first = 1 if self.queue.current is not None else 0  # the songs to come follow it
+        first = found_list.first_next()  # the rows before the songs to come
         place = to - first - (1 if to > row else 0)  # its own row leaves the list first
         if self.queue.move(found[0].key, place):
             self._queue_changed()
+
+    @Slot()
+    def clearQueue(self) -> None:  # noqa: N802
+        """Now Playing's Clear (R11.4.3): every song out of the queue but the one playing or
+        cued, which plays on."""
+        others = [e.key for e in (*self.queue.played, *self.queue.upcoming)]
+        removed = [self.queue.remove(key) for key in others]
+        if any(removed):
+            self._queue_changed()
+
+    def queue_songs(self) -> list[int]:
+        """The queue's songs in the order they play (Save as playlist…, R11.4.3)."""
+        return [e.song for e in self.queue.order]
 
     @Slot()
     def toggleUpNext(self) -> None:  # noqa: N802
@@ -2266,8 +2331,9 @@ class Player(QObject):
         if following != self._next_path:  # its waveform is worked out ahead (R11.1.1)
             self._next_path = following
             self.nextSong.emit(following)
-        self._up_next.set_note(self._next_note)
-        self._up_next.refresh()
+        for shown in (self._up_next, self._queue_list):
+            shown.set_note(self._next_note)
+            shown.refresh()
         self.queueChanged.emit()
         self._tell_following()
         self._keep(nowplaying.QUEUE)
@@ -2499,6 +2565,9 @@ class Player(QObject):
     def _get_up_next_open(self) -> bool:
         return self._up_next_open
 
+    def _get_queue_list(self) -> UpNextModel:
+        return self._queue_list
+
     path = QtProperty(str, _get_path, notify=changed)  # the song's path under the root; "": none
     playing = QtProperty(bool, _get_playing, notify=changed)  # a song plays, not paused
     paused = QtProperty(bool, _get_paused, notify=changed)
@@ -2523,3 +2592,4 @@ class Player(QObject):
     volume = QtProperty(float, _get_volume, notify=volumeChanged)  # 0 to 1
     upNext = QtProperty(QObject, _get_up_next, constant=True)
     upNextOpen = QtProperty(bool, _get_up_next_open, notify=queueChanged)
+    queueList = QtProperty(QObject, _get_queue_list, constant=True)  # Now Playing's (R11.4.3)

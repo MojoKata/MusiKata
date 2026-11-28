@@ -9,9 +9,11 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class Tags:
     """R4.1's fields as read. A field the file doesn't hold is None (or empty, for genres).
-    `latin1`: the text fields an ID3 tag holds as Latin-1 (its encoding 0) beyond ASCII, whose
-    text is then its bytes exactly, a character a byte (A3.6); it isn't a field, and two Tags of
-    the same values are equal whatever their text's encoding."""
+    `lyrics`: the lyrics its tags hold (R17.1), as lyrics.tag_text gives them: ID3's USLT, or its
+    SYLT as LRC text; Vorbis' LYRICS; MP4's ©lyr (lyrics.chosen_tag). `latin1`: the text fields an
+    ID3 tag holds as Latin-1 (its encoding 0) beyond ASCII, whose text is then its bytes exactly, a
+    character a byte (A3.6); it isn't a field, and two Tags of the same values are equal whatever
+    their text's encoding."""
 
     title: str | None = None
     artist: str | None = None
@@ -36,18 +38,22 @@ class Tags:
     rg_album_gain: float | None = None
     rg_album_peak: float | None = None
     has_cover: bool = False
+    lyrics: str | None = None
     latin1: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
 class AudioInfo:
-    """What the audio is: its kind (R2.2), length, bit rate, sample rate and channels."""
+    """What the audio is: its kind (R2.2), length, bit rate, sample rate and channels, and its
+    bit depth where the format has one (FLAC, WAV, AIFF, ALAC, WavPack; 0 for a lossy one: Now
+    Playing's chips, R11.4.1)."""
 
     kind: str
     length: float
     bitrate: int
     sample_rate: int
     channels: int
+    bits: int = 0
 
 
 @dataclass(frozen=True)

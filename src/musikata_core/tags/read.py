@@ -39,6 +39,9 @@ class TagReadError(Exception):
     """A file MusiKata couldn't read: Needs attention lists it with this reason (R2.8)."""
 
 
+DEPTH_KINDS = ("flac", "alac", "wav", "aiff")  # R2.2's lossless kinds, which have a bit depth
+
+
 def open_song(path: str, name: str | None = None) -> tuple[str, mutagen.FileType]:
     """The file's kind (R2.2) and Mutagen's view of it; TagReadError when it can't be opened.
     `name`, when given, is the name whose extension says the kind: a song's, for the copy a safe
@@ -83,6 +86,8 @@ def read(path: str, name: str | None = None) -> tuple[Tags, AudioInfo]:
         bitrate=int(getattr(info, "bitrate", 0) or 0),
         sample_rate=int(getattr(info, "sample_rate", 0) or 0),
         channels=int(getattr(info, "channels", 0) or 0),
+        # a lossy kind's sample depth is the decoder's, not the song's (an AAC's says 16)
+        bits=int(getattr(info, "bits_per_sample", 0) or 0) if kind in DEPTH_KINDS else 0,
     )
 
 
@@ -214,7 +219,10 @@ def _id3(tags: mutagen.id3.ID3 | None) -> Tags:
         for f in tags.getall("RVA2")
         if f.channel == 1  # the master volume: the only one ReplayGain writes
     ]
-    found = parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2)
+    uslt = [str(f.text) for f in tags.getall("USLT")]
+    sylt = [(int(f.format), [(str(t), int(ms)) for t, ms in f.text]) for f in tags.getall("SYLT")]
+    found = parse.from_id3(raw, popms, comments, has_cover=bool(tags.getall("APIC")), rva2=rva2,
+                           lyrics=parse.id3_lyrics(uslt, sylt))  # fmt: skip
     return dataclasses.replace(found, latin1=latin1_of(tags, found))
 
 

@@ -26,6 +26,9 @@ Item {
     property var organize: null  // Organize files' dialog (R12.2)
     property var removing: null  // Move to trash (R2.11): the ⋯ menu's, a row's, and Delete's
     property var dragging: null  // a song dragged: the selection when it is in it (R6.10)
+    property var tints: null  // the cover's colour, which Main tints the page with (R6.2.2)
+    readonly property string tint: page.tints !== null ? (page.tints.revision, page.tints.of(page.album.cover)) : ""
+    readonly property color shade: page.tint !== "" ? page.tint : Theme.bg
     readonly property var album: library.album
     readonly property var tracks: album.songs
     readonly property bool loading: art.loading
@@ -53,6 +56,8 @@ Item {
         height: 220
         radius: 12
         sourceSide: 512
+        // its corners in the tint behind it, about where the cover lies in Main's gradient
+        matte: Qt.tint(Theme.bg, Qt.rgba(page.shade.r, page.shade.g, page.shade.b, page.tint !== "" ? 0.45 : 0))
         source: page.album.cover
         takesImages: page.art !== null
         onImageDropped: (urls) => page.art.dropOnAlbum(page.album.id, urls)

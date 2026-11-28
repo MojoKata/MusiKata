@@ -13,8 +13,12 @@ GUI thread, only when the size, the waveform or the play head's bar changes (A5.
 into the node as it syncs; the render thread runs no more Python than that copy.
 
 Qt Quick's software renderer (offscreen, as the tests and the tour draw, and where there is no
-GPU) draws no custom geometry, so there each bar is a rectangle node (`createRectangleNode`) in
-its colour: the same bars, square-ended.
+GPU) draws no custom geometry, so there the same bars, square-ended, are painted with `QPainter`
+into an image, shown by one image node made at the first render (`image_node`). Not a rectangle
+node per bar: each frame that renderer works out the region every opaque node hides and every
+node's region left to paint, and hundreds of bars of every height made those regions of thousands
+of rectangles, copied for each node under them, so a frame of Now Playing took half a second and
+gigabytes, more on a slower computer (CI's tour of #95 was killed at 14 GB).
 
 The arithmetic (`slots`, `capsules`, `gradient`) is plain NumPy, tested without a window."""
 
@@ -22,20 +26,23 @@ from __future__ import annotations
 
 import ctypes
 import math
+import weakref
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 from PySide6.QtCore import Property as QtProperty
-from PySide6.QtCore import QObject, QRect, QRectF, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QObject, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtQuick import (
     QQuickItem,
+    QQuickWindow,
     QSGGeometry,
     QSGGeometryNode,
+    QSGImageNode,
     QSGNode,
-    QSGRectangleNode,
     QSGRendererInterface,
     QSGVertexColorMaterial,
 )
@@ -121,6 +128,34 @@ def premultiplied(rgba: NDArray[np.uint8]) -> NDArray[np.uint8]:
     return np.round(out).astype(np.uint8)
 
 
+def painted(rects: list[tuple[QRectF, QColor]], size: tuple[int, int], ratio: float) -> QImage:
+    """`rects` filled in their colours in an image of `size` (in the item's pixels) at the
+    display's pixel `ratio`, the rest transparent: the bars, for Qt Quick's software renderer."""
+    width, height = (max(1, math.ceil(v * ratio)) for v in size)
+    image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+    image.setDevicePixelRatio(ratio)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    for shape, colour in rects:
+        painter.fillRect(shape, colour)
+    painter.end()
+    return image
+
+
+def image_node(
+    old: QSGNode | None, window: QQuickWindow, image: QImage, size: tuple[int, int]
+) -> QSGNode:
+    """The software renderer's one node for an item: an image node showing `image` over `size`
+    (in the item's pixels), made at the first render and kept, since that renderer places a node
+    added under one it has drawn already without the item's place; each new image's texture
+    replaces the last, which the node deletes."""
+    node = old if isinstance(old, QSGImageNode) else window.createImageNode()
+    node.setTexture(window.createTextureFromImage(image))
+    node.setOwnsTexture(True)
+    node.setRect(QRectF(0, 0, size[0], size[1]))
+    return node
+
+
 def _colour(name: str, notify: Signal) -> Any:
     """A colour property of the item, by its name; a change recolours the bars."""
 
@@ -150,7 +185,9 @@ class Waveform(QQuickItem):
     def __init__(self, parent: QQuickItem | None = None) -> None:
         super().__init__(parent)
         self.setFlag(QQuickItem.Flag.ItemHasContents, True)
-        self._source: QObject | None = None
+        # weakly: a QML item of a Python type outlives its window as a husk (PySide keeps its
+        # wrapper), which must hold nothing of the window's bridges (A1.3)
+        self._source_ref: Callable[[], QObject | None] = _none
         self._progress = 0.0
         self._bar, self._gap = 2.0, 1.3
         self._colours = {
@@ -164,20 +201,20 @@ class Waveform(QQuickItem):
         self._points = np.zeros((0, 2), np.float32)
         self._played = 0  # bars played: the play head's bar
         self._vertices = np.zeros(0, VERTEX)
-        self._rects: list[tuple[QRectF, QColor]] = []
-        self._software: list[QSGRectangleNode] = []  # the rectangle nodes made, while Qt has them
+        self._rects: list[tuple[QRectF, QColor]] = []  # the bars, for the software renderer
 
     # ---------- what QML sets ----------
 
     def _get_source(self) -> QObject | None:
-        return self._source
+        return self._source_ref()
 
     def _set_source(self, source: QObject | None) -> None:
-        if source is self._source:
+        old = self._source_ref()
+        if source is old:
             return
-        if self._source is not None and Shiboken.isValid(self._source):
-            self._source.changed.disconnect(self._reshape)  # type: ignore[attr-defined]
-        self._source = source
+        if old is not None and Shiboken.isValid(old):
+            old.changed.disconnect(self._reshape)  # type: ignore[attr-defined]
+        self._source_ref = weakref.ref(source) if source is not None else _none
         if source is not None:
             source.changed.connect(self._reshape)  # type: ignore[attr-defined]
         self._reshape()
@@ -238,7 +275,7 @@ class Waveform(QQuickItem):
     def _reshape(self) -> None:
         """The bars anew: how many fit, and each one's height."""
         count, first = slots(self.width(), self._bar, self._gap)
-        waveform = getattr(self._source, "peaks", None)
+        waveform = getattr(self._source_ref(), "peaks", None)
         if waveform is None:
             waveform = np.zeros((0, 2), np.float32)
         self._heights = peak_pairs.bars(waveform, count) * float(self.height())
@@ -300,7 +337,9 @@ class Waveform(QQuickItem):
             window.rendererInterface().graphicsApi() == QSGRendererInterface.GraphicsApi.Software
         )
         if software:
-            return self._software_node(old)
+            size = (max(1, math.ceil(self.width())), max(1, math.ceil(self.height())))
+            image = painted(self._rects, size, window.effectiveDevicePixelRatio())
+            return image_node(old, window, image, size)
         return self._strip_node(old)
 
     def _strip_node(self, old: QSGNode | None) -> QSGNode:
@@ -317,29 +356,6 @@ class Waveform(QQuickItem):
         fill(node, self._vertices)
         return node
 
-    def _software_node(self, old: QSGNode | None) -> QSGNode:
-        """A node holding a rectangle node per bar (the software renderer's)."""
-        window = self.window()
-        root = old
-        if root is None:
-            root = QSGNode()
-            self._software = []  # what was made before went with the old node
-        while len(self._software) < len(self._rects):
-            rect = window.createRectangleNode()
-            root.appendChildNode(rect)
-            self._software.append(rect)
-        while len(self._software) > len(self._rects):
-            rect = self._software.pop()
-            root.removeChildNode(rect)
-            Shiboken.delete(rect)
-        for node, (shape, colour) in zip(self._software, self._rects, strict=True):
-            node.setRect(shape)
-            node.setColor(colour)
-        return root
-
-    def releaseResources(self) -> None:  # noqa: N802
-        self._software = []  # Qt deletes the nodes
-
 
 def fill(node: QSGGeometryNode, vertices: NDArray[np.void]) -> None:
     """The node's geometry made `vertices` (VERTEX rows) and marked to be uploaded."""
@@ -349,6 +365,10 @@ def fill(node: QSGGeometryNode, vertices: NDArray[np.void]) -> None:
         data = np.ascontiguousarray(vertices)
         ctypes.memmove(int(geometry.vertexData()), data.ctypes.data, data.nbytes)
     node.markDirty(QSGNode.DirtyStateBit.DirtyGeometry)
+
+
+def _none() -> None:
+    return None
 
 
 _registered: list[bool] = []

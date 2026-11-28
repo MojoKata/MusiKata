@@ -128,12 +128,25 @@ and mutation testing finds them only slowly.
   which they share the work with, is there: made at its first use, it is made on the GUI thread as
   the window loads (`covers.start_image_threads`), never first by a cover's thread, whose making
   of it would take the connection locks. A wait there is the app's stutter, not a freeze.
-- Off the GUI thread, no QObject whose making connects one inside Qt is made while PySide holds
-  the GIL: a `QAudioSink`, made on the GUI thread and moved to the playback thread
-  (`player.Sinks`). A signal emitted, `connect` and `disconnect`, `QFile.moveToTrash`, a sink's
-  `start` and `stop`, and `Shiboken.delete` let go of the GIL while Qt waits on a lock, or take
-  none. `tests/locks.py` holds every connection lock from threads waiting on the GIL, so a test
-  shows a call made with the GIL held waiting on one, and never returning.
+- Off the GUI thread, nothing connects inside Qt while PySide holds the GIL. The GUI thread holds
+  a connection lock while it waits on the GIL whenever Qt calls a Python-made object's
+  `disconnectNotify` under it: as QML's garbage collector disconnects, and as a single-shot
+  connection to one of its signals fires (Qt disconnects it then; a model's `modelReset` did, in
+  a freeze seen). So a `QAudioSink` is made on the GUI thread and moved to the playback thread
+  (`player.Sinks`), its making connecting one; and the engine's `QMediaDevices` is made and
+  connected as the engine is made, on the GUI thread, and moves with it (`player.Engine`):
+  PySide's `connect` lets go of the GIL while Qt connects, but then calls the sender's
+  `connectNotify` itself, with the GIL held, and QMediaDevices' connects it to Qt's own list of
+  devices there, under the locks. Connecting a signal to a signal, a signal's `disconnect(slot)`
+  and `QObject.disconnect(connection)` keep the GIL while Qt waits on the lock, and are used on the
+  GUI thread only. A signal emitted (with any arguments), `connect` to a slot of a sender whose
+  `connectNotify` is QObject's, `QTimer(parent)`, `QMediaDevices(parent)`, `audioOutputs`,
+  `defaultAudioOutput`, `QFile.moveToTrash`, a sink's `start` and `stop`, a `RingDevice` made and
+  read, and `Shiboken.delete` let go of the GIL while Qt waits on a lock, or take none.
+  `tests/locks.py` holds every connection lock from threads waiting on the GIL: `hold` once, which
+  a call made with the GIL held waits on forever, and `keep_holding` over and over, which also
+  catches a call that first waits without the GIL and then takes a lock with it, as `connect`
+  does.
 - The sound device's callback only copies samples out of the ring buffer, at the volume (A4.4).
 
 ## QML

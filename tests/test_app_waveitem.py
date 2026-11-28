@@ -4,8 +4,8 @@ vertices copied into a scene-graph node; the item in a window, its bars followin
 and the bar's waveform in the app, the time under the pointer.
 
 The arithmetic is plain NumPy, tested without a window; the item is drawn offscreen, where Qt Quick
-renders in software and the item gives rectangle nodes, and its geometry node is built and read
-back directly, as the GPU's renderers would take it.
+renders in software and the item paints its bars into an image, and its geometry node is built and
+read back directly, as the GPU's renderers would take it.
 
 Why: the seek bar is where the user looks to find a place in a song; bars that miss the play head,
 a gradient on the wrong side of it, or vertices out of the layout the scene graph reads draw a
@@ -128,7 +128,7 @@ def test_the_bars_follow_the_play_head_and_draw_in_their_colours(view, qtbot):
     assert count == waveitem.slots(320, 2, 1.3)[0]
     assert item.property("played") == count // 2 or item.property("played") == count // 2 + 1
     image = view.grabWindow()
-    assert len(item._software) == count  # the software renderer's rectangles
+    assert len(item._rects) == count  # the bars the software renderer's image is painted with
     played = QColor(image.pixel(12, 20))
     last = int(10 + item._lefts[-1] + 1)
     rest = QColor(image.pixel(last, 20))
@@ -153,7 +153,7 @@ def test_the_bars_are_drawn_anew_when_the_waveform_or_the_size_changes(view, qtb
     item.setWidth(100)
     assert item.property("bars") == waveitem.slots(100, 2, 1.3)[0]
     view.grabWindow()
-    assert len(item._software) == item.property("bars")  # the extra rectangles let go
+    assert len(item._rects) == item.property("bars")
     item.setProperty("barWidth", 3.0)
     item.setProperty("gap", 2.0)
     item.setProperty("playedFrom", QColor("red"))
@@ -161,6 +161,50 @@ def test_the_bars_are_drawn_anew_when_the_waveform_or_the_size_changes(view, qtb
     assert item.property("playedFrom") == QColor("red")
     item.setProperty("source", None)  # none: nothing to draw from
     assert not item._heights.any()
+
+
+def test_bars_more_than_the_first_render_had_are_drawn_in_the_items_place(view, qtbot):
+    """Qt Quick's software renderer places a node added under one it has drawn already without
+    the item's place: the wider waveform's bars all made anew, in a new node, land where the item
+    is, none above it or left of it."""
+    source = Source(np.zeros((0, 2), np.float32))
+    item = shown(view, qtbot, source, 0.0)  # at x 10, y 10, 320 wide
+    item.setWidth(100)
+    view.grabWindow()  # drawn with the few bars 100 pixels hold
+    item.setWidth(320)
+    image = view.grabWindow()
+    assert len(item._rects) == item.property("bars")
+    lit = [x for x in range(340) if QColor(image.pixel(x, 20)).lightness() > 40]
+    assert lit[0] >= 10 and lit[-1] > 300  # the bars across the item, from its left edge
+    above = [x for x in range(340) if QColor(image.pixel(x, 5)).lightness() > 40]
+    assert above == []  # none drawn at the window's top, as if the item were there
+
+
+def nodes(node):
+    """The scene-graph nodes in `node`'s subtree, itself included."""
+    count, child = 1, node.firstChild()
+    while child is not None:
+        count += nodes(child)
+        child = child.nextSibling()
+    return count
+
+
+def test_in_software_however_many_bars_there_are_they_are_one_node(view, qtbot):
+    """Qt Quick's software renderer works out, each frame, the region every opaque node hides and
+    every node's region left to paint. Bars as rectangle nodes, hundreds of every height, made
+    those regions of thousands of rectangles, copied for each node under them: Now Playing's
+    waveform took half a second and gigabytes a frame, and CI's tour was killed at 14 GB (#95).
+    The bars are painted into an image, shown by one node."""
+    source = Source(np.zeros((0, 2), np.float32))
+    item = shown(view, qtbot, source, 0.4)
+    ragged = np.random.default_rng(3).random(peaks.N).astype(np.float32)
+    source.peaks = np.stack([ragged, -ragged], axis=1)
+    source.changed.emit()
+    item.setWidth(1600)
+    item.setHeight(200)
+    assert item.property("bars") > 300
+    view.grabWindow()
+    assert nodes(item.updatePaintNode(None, None)) == 1
 
 
 # ---------- the bar's seek bar in the app ----------

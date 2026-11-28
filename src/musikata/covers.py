@@ -17,7 +17,8 @@ hashes of their covers' paths, sizes and modification times; so a changed cover 
 mosaic, drawn when next shown.
 
 After each scan the cache is trimmed (A2.7, `trim`): a thumbnail or mosaic that no album or folder
-row points at any more is removed, on the scan's thread; a file of any other name is left."""
+row points at any more is removed, with the colour kept beside it (R6.2.2, tints.py), on the scan's
+thread; a file of any other name is left."""
 
 from __future__ import annotations
 
@@ -39,8 +40,9 @@ log = logging.getLogger(__name__)
 
 SIZES = (256, 512)  # a thumbnail's shorter side, in pixels: the grids', the album page's
 MOSAIC = "mosaic/"  # a mosaic's address under the provider, before its pieces' names
-# a cached thumbnail's or mosaic's file: its name (art.thumb_id, mosaic_name), its side, its kind
-CACHED = re.compile(r"(m?[0-9a-f]{32})-[0-9]+\.(?:jpg|png)")
+# a cached thumbnail's or mosaic's file: its name (art.thumb_id, mosaic_name), its side, its kind;
+# or its colour (R6.2.2, tints.py)
+CACHED = re.compile(r"(m?[0-9a-f]{32})-(?:[0-9]+\.(?:jpg|png)|colour)")
 
 
 def mosaic_id(thumbs: list[str]) -> str:
@@ -54,8 +56,9 @@ def mosaic_name(thumbs: list[str]) -> str:
 
 
 def cached_name(file: str) -> str | None:
-    """The name of the thumbnail or mosaic a file of the cache holds, from the file's name; None
-    for a file that isn't one (a thumbnail still being saved, or anything else)."""
+    """The name of the thumbnail or mosaic a file of the cache holds (or its colour, tints.py),
+    from the file's name; None for a file that isn't one (a thumbnail still being saved, or
+    anything else)."""
     found = CACHED.fullmatch(file)
     return found.group(1) if found else None
 

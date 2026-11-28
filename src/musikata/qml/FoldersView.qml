@@ -36,6 +36,7 @@ Item {
     property var ratings: null  // a star clicked in a row rates its song (R10.2)
     property var dragging: null  // folders and files dragged: the selection when the row is in it
     property var organize: null  // Organize files' dialog (R12.2)
+    property var tints: null    // Cards tinted with their covers' colours (R6.2.2)
     property var attention: null  // Show in file manager (R2.9.6), as Needs attention's Show in folder
     property var removing: null  // Move to trash and Ignore this folder (R2.11, R2.11.1); Delete's
     readonly property var folders: library.folders
@@ -375,6 +376,7 @@ Item {
             Component {
                 id: card
                 FolderCard {
+                    tints: view.tints
                     pathChip: cell.pathChip
                     name: cell.name
                     line: cell.line

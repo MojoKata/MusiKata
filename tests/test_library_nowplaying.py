@@ -566,6 +566,24 @@ def test_shuffle_and_repeat_are_kept_on_its_thread_in_the_order_asked(tmp_path, 
     assert nowplaying.Keeping(where, index.read, FakeClock()).playback(shuffle=True) is None
 
 
+def test_the_visualization_is_kept_on_the_same_thread_after_the_writes_before_it(tmp_path, index):
+    """R11.4.5: one thread writes the shared settings, so the visualization's write never
+    overlaps shuffle's."""
+    recorder = Recorder()
+    where = where_in(tmp_path)
+    keeping = nowplaying.Keeping(
+        where, index.read, FakeClock(), set_playback=recorder, set_appearance=recorder
+    )
+    keeping.playback(shuffle=True)
+    assert keeping.appearance(visualization="none").result() is True
+    keeping.close()
+    assert recorder.calls == [{"shuffle": True}, {"visualization": "none"}]
+    assert len(set(recorder.threads)) == 1
+    assert (
+        nowplaying.Keeping(where, index.read, FakeClock()).appearance(visualization="none") is None
+    )
+
+
 def test_a_write_that_breaks_is_logged_and_the_next_one_tries_again(tmp_path, caplog):
     where = where_in(tmp_path)
     keeping = nowplaying.Keeping(where, lambda: 1 / 0, FakeClock(), executor=ThreadPoolExecutor(1))

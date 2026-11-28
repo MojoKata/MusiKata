@@ -3,8 +3,8 @@ import "."
 
 // A folder in Folders' Cards mode (R2.9.4, L06-folders-cards): a wide card with its cover at the
 // left, its name and counts, and its state chip (R2.9.5: "3 to fix", "No tags"); a selected one
-// outlined, its check at the top right. The tint by the cover's colour comes with R6.2.2's colour
-// pick, built with Now Playing (slice 8).
+// outlined, its check at the top right; tinted with its cover's colour (R6.2.2, `tints`), strongest
+// on the left, by the cover.
 Rectangle {
     id: card
     signal tapped(int modifiers)
@@ -17,9 +17,20 @@ Rectangle {
     required property bool selected
     property var pathChip: ({})        // R2.9.5: its chip's text and tone, {} for none
     property alias loading: art.loading
+    property var tints: null
+    readonly property string tint: card.tints !== null ? (card.tints.revision, card.tints.of(card.cover)) : ""
+    readonly property color base: hover.hovered ? Theme.raised : Theme.surface
+    readonly property color shade: card.tint !== "" ? card.tint : card.base
+    readonly property color leftShade: Qt.tint(card.base, Qt.rgba(card.shade.r, card.shade.g, card.shade.b, 0.7))
+    readonly property color rightShade: Qt.tint(card.base, Qt.rgba(card.shade.r, card.shade.g, card.shade.b, 0.3))
     height: 96
     radius: 12
-    color: hover.hovered ? Theme.raised : Theme.surface
+    color: card.base
+    gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0; color: card.leftShade }
+        GradientStop { position: 1; color: card.rightShade }
+    }
     border.color: card.selected || card.playing ? Theme.accent : Theme.border
     border.width: card.selected ? 2 : 1
     Accessible.role: Accessible.ListItem
@@ -41,7 +52,7 @@ Rectangle {
         width: 72
         height: 72
         radius: 8
-        matte: card.color
+        matte: card.leftShade
         source: card.cover
         emptyText: ""
         emptyIcon: "folder"

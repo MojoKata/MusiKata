@@ -51,7 +51,7 @@ from musikata_core.ratings import Writing, set_everything
 from musikata_core.tags import Job, Written
 from musikata_core.tags import save as save_tags
 
-from . import garbage, media, waveitem
+from . import analyzeritem, garbage, media, spectrumitem, waveitem
 from .albumart import AlbumArt, ArtImages
 from .attention import Attention, NameMerge
 from .bridges import Library, Player
@@ -64,6 +64,8 @@ from .firstrun import FirstRun, music_folder
 from .genres import Genres
 from .history import ChangeHistory
 from .infer import InferFromPath
+from .lyrics import Lyrics
+from .nowplayingview import NowPlayingView
 from .organize import OrganizeFiles
 from .player import FALLBACK_RATE, NO_DEVICE, DecodedSong, Engine, Opener
 from .playlists import Playlists
@@ -71,6 +73,7 @@ from .plays import PlayCounts
 from .ratings import Ratings, file_writer
 from .removing import Removing
 from .smart import SmartPlaylists
+from .tints import Tints
 from .waveforms import Waveforms
 
 QML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml", "Main.qml")
@@ -189,6 +192,9 @@ class Shell:
     organize: OrganizeFiles | None = None
     removing: Removing | None = None
     waveforms: Waveforms | None = None
+    now: NowPlayingView | None = None
+    tints: Tints | None = None
+    lyrics: Lyrics | None = None
 
     def close(self) -> None:
         """The window and its engine first, while what they bind to is still there; then the
@@ -199,7 +205,7 @@ class Shell:
             self.player, self.counts, self.library, self.index, self.controls, self.changes,
             self.edit, self.ratings, self.art, self.genres, self.attention, self.names,
             self.copies, self.encodings, self.infer, self.playlists, self.dragging, self.smart,
-            self.organize, self.removing, self.waveforms,
+            self.organize, self.removing, self.waveforms, self.now, self.tints, self.lyrics,
         )  # fmt: skip
 
 
@@ -225,9 +231,13 @@ def close_bridges(
     organize: OrganizeFiles | None = None,
     removing: Removing | None = None,
     waveforms: Waveforms | None = None,
+    now: NowPlayingView | None = None,
+    tints: Tints | None = None,
+    lyrics: Lyrics | None = None,
 ) -> None:
     """Closes what a window bound to, once it has gone: the system's media controls, the playback
-    thread, the waveforms' thread (before the worker processes end), the Edit tags panel's, Album
+    thread, the waveforms' thread (before the worker processes end), the cover colours' thread
+    (before the index closes), the Edit tags panel's, Album
     art's, the merges', Fix encoding…'s and Infer from path's saves and Organize files' moves
     (stopped before their next file) and threads, the playlists' changes (an export stopped) and the
     smart playlists' checks, Needs attention's dismissals and watching, the ratings' save and
@@ -238,6 +248,10 @@ def close_bridges(
     player.close()
     if waveforms is not None:
         waveforms.close()
+    if tints is not None:
+        tints.close()
+    if lyrics is not None:
+        lyrics.close()
     if edit is not None:
         edit.close()
     if art is not None:
@@ -274,7 +288,8 @@ def close_bridges(
     index.close()
     release(
         controls, counts, edit, art, genres, names, copies, encodings, infer, playlists, dragging,
-        smart, organize, removing, attention, ratings, changes, player, waveforms, library,
+        smart, organize, removing, attention, ratings, changes, lyrics, now, player, waveforms,
+        tints, library,
     )  # fmt: skip
 
 
@@ -370,6 +385,24 @@ def load(
     engine = QQmlApplicationEngine()
     covers = Covers(root, index.read, cache)
     engine.addImageProvider("covers", covers)
+    # the covers' colours (R6.2.2), picked off the GUI thread and kept beside their thumbnails
+    tints = Tints(covers.image, cache)
+    # Now Playing (R11.4), its visualization (R11.4.5) and the analyzer's bands and speed (R11.3.1)
+    # as the shared settings keep them
+    look = shared.appearance
+    now = NowPlayingView(
+        player, index.read, shared.playback.replaygain, look.visualization,
+        keep=player.remember_appearance, bands=look.analyzer_bands, seconds=look.analyzer_seconds,
+    )  # fmt: skip
+    # the lyrics of the song shown (R17), the switch kept as the visualization is, saved where the
+    # root's settings say (R13.11) through the batch and the change history
+    save_to = settings.root_lyrics(root) if not missing else settings.LYRICS_SAVE[0]
+    words = Lyrics(
+        player, root, writing, changes, saved=library.saved, on=look.lyrics,
+        keep=player.remember_appearance, setting=lambda: save_to,
+        available=lambda: bool(library.property("available")),
+        legacy=index_playlists.legacy_encoding(),
+    )  # fmt: skip
     thumbs = ArtImages()
     engine.addImageProvider("albumart", thumbs)
     album_art = AlbumArt(
@@ -431,9 +464,14 @@ def load(
             "organize": files,
             "removing": removing,
             "waveforms": waveforms,
+            "nowPlaying": now,
+            "tints": tints,
+            "lyrics": words,
         }  # fmt: skip
     )
     waveitem.register()
+    spectrumitem.register()
+    analyzeritem.register()
     engine.load(QUrl.fromLocalFile(QML))
     objects = engine.rootObjects()
     if not objects or not isinstance(objects[0], QQuickWindow):
@@ -443,7 +481,8 @@ def load(
                       art=album_art, genres=genre_tools, attention=needs, names=names,
                       copies=copies, encodings=fix, infer=infer, playlists=lists,
                       dragging=dragging, smart=smart, organize=files,
-                      removing=removing, waveforms=waveforms)  # fmt: skip
+                      removing=removing, waveforms=waveforms, now=now,
+                      tints=tints, lyrics=words)  # fmt: skip
         raise RuntimeError(f"{QML} didn't load")
     window = objects[0]
     # where the root can't be watched, gaining focus rescans it (R2.4)
@@ -451,7 +490,7 @@ def load(
     return Shell(
         engine, window, library, player, index, controls(player, window, covers.file), counts,
         changes, edit, rating, album_art, genre_tools, needs, names, copies, fix, infer, lists,
-        dragging, smart, files, removing, waveforms,
+        dragging, smart, files, removing, waveforms, now, tints, words,
     )  # fmt: skip
 
 
@@ -580,6 +619,7 @@ def keep_playing(
             kept,
             computer=make or functools.partial(settings.computer_id, path, home, name),
             set_playback=functools.partial(settings.set_playback, path, home, name),
+            set_appearance=functools.partial(settings.set_appearance, path, home, name),
         )
     )
 
@@ -925,11 +965,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         smart = session.shell.smart if session.shell is not None else None
         files = session.shell.organize if session.shell is not None else None
         removing = session.shell.removing if session.shell is not None else None
+        now = session.shell.now if session.shell is not None else None
+        tints = session.shell.tints if session.shell is not None else None
+        words = session.shell.lyrics if session.shell is not None else None
         Tour(
             session.window, session.library, opts.tour, opts.tour_only, player=player,
             history=changes, edit=edit, art=album_art, genres=genre_tools, attention=needs,
             copies=copies, encodings=fix, infer=infer, dragging=dragging, smart=smart,
-            organize=files, removing=removing,
+            organize=files, removing=removing, now=now, tints=tints, lyrics=words,
         ).start()  # fmt: skip
     else:
         session.window.show()

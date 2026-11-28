@@ -231,7 +231,7 @@ def test_version_14_adds_the_waveform_table_and_reads_nothing_again(tmp_path):
         step(conn)
     conn.execute("PRAGMA user_version = 13")
     conn.execute("INSERT INTO song (path, size, mtime_ns) VALUES ('a.flac', 10, 5)")
-    assert db.migrate(conn) == 14
+    db.MIGRATIONS[13](conn)  # version 14 alone
     assert conn.execute("SELECT mtime_ns FROM song").fetchall() == [(5,)]
     assert conn.execute("SELECT count(*) FROM waveform").fetchone() == (0,)
     conn.close()

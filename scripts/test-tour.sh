@@ -7,11 +7,12 @@
 #
 # The demo library (scripts/demo_library.py) is made in build/demo when it isn't there, or has no
 # change history (R4.9), root's settings (R9.5's same genres, R3.3's pattern of the user's own),
-# album in one file (R2.8), copy of Signal Fires (R2.12), album in the wrong encoding (R4.10),
-# P01's playlists (R8) or P02's smart playlist (R8.9) yet. It is the home's Music folder in the
+# album in one file (R2.8), copy of Signal Fires (R2.12) or its lyrics (R17.1), album in the wrong
+# encoding (R4.10), P01's playlists (R8) or P02's smart playlist (R8.9) yet. It is the home's Music folder in the
 # container, so the screens show ~/Music, as on a new user's computer. The tour runs three times,
 # once in each state it has screens for (src/musikata/tour.py): the library; the same root
 # unmounted (X02, R2.10); a first start with nothing configured (X01, R2.1).
+# A crash prints every thread's stack (PYTHONFAULTHANDLER), and a run that fails its exit code.
 #   scripts/test-tour.sh [--tour-only NAMES]
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -26,11 +27,12 @@ if [ ! -d "$DEMO/Music/.musikata/history" ] ||
     ! grep -q '"patterns"' "$DEMO/Music/.musikata/settings.json" 2>/dev/null ||
     [ ! -f "$DEMO/Music/Mara Okafor/Live at the Lantern/Live at the Lantern.cue" ] ||
     [ ! -f "$DEMO/Music/_Incoming/new rips/Signal Fires.flac" ] ||
+    [ ! -f "$DEMO/Music/Lumen Drift/2019 - Glass Harbor/04 - Signal Fires.lrc" ] ||
     [ ! -d "$DEMO/Music/Ñåâåðíûé Âåòåð/Òèõàÿ Ãàâàíü" ] ||
     [ ! -f "$DEMO/Music/Playlists/Evening Focus.m3u8" ] ||
     [ ! -f "$DEMO/Music/Playlists/Four stars and up.m3u8" ]; then
-    # made before it had its history, its settings, its album in one file, its copies, its tags
-    # in the wrong encoding or its playlists: anew
+    # made before it had its history, its settings, its album in one file, its copies, its
+    # lyrics, its tags in the wrong encoding or its playlists: anew
     echo "== the demo library, in $DEMO" >&2
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e PYTHONDONTWRITEBYTECODE=1 \
         -v "$HERE:/src:ro" -v "$SITE:/site:ro" -v "$DEMO:/demo" "$IMG" sh -c \
@@ -42,18 +44,18 @@ tour() {   # MUSIC DATA OUT ARGS...: one run, the demo library at MUSIC, DATA as
     music=$1 data=$2 out=$3
     shift 3
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e MUSIKATA_DATA=/tmp/data \
-        -e QT_QPA_PLATFORM=offscreen -e PYTHONDONTWRITEBYTECODE=1 \
+        -e QT_QPA_PLATFORM=offscreen -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONFAULTHANDLER=1 \
         -v "$HERE:/src:ro" -v "$SITE:/site:ro" -v "$DEMO/Music:$music:ro" -v "$data:/tmp/data" \
         -v "$out:/out" "$IMG" sh -c \
         'cd /src && PYTHONPATH=/src/src:/site exec "$@"' sh "$CPY" -m musikata --tour /out "$@"
 }
 status=0
 # the library: the demo library is ~/Music, given for the run; its index kept in $DATA/library
-tour /tmp/home/Music "$DATA/library" "$OUT" --root /tmp/home/Music "$@" || status=1
+tour /tmp/home/Music "$DATA/library" "$OUT" --root /tmp/home/Music "$@" || { echo "the tour's run ended with $?" >&2; status=1; }
 # X02: the same root, its folder not there (R2.10), shown from the index the first run made
-tour /tmp/elsewhere "$DATA/library" "$OUT/x02" --root /tmp/home/Music "$@" || status=1
+tour /tmp/elsewhere "$DATA/library" "$OUT/x02" --root /tmp/home/Music "$@" || { echo "the tour's run ended with $?" >&2; status=1; }
 # X01: a first start (R2.1): no root given, and an empty data folder, so nothing configured
-tour /tmp/elsewhere "$DATA/first" "$OUT/x01" "$@" || status=1
+tour /tmp/elsewhere "$DATA/first" "$OUT/x01" "$@" || { echo "the tour's run ended with $?" >&2; status=1; }
 for run in x02 x01; do
     for png in "$OUT/$run"/*.png; do
         if [ -e "$png" ]; then mv "$png" "$OUT/"; fi

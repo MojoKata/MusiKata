@@ -65,6 +65,13 @@ def test_each_kind_reads_back_what_the_demo_library_writes(audio, tmp_path, kind
 
 
 @pytest.mark.slow
+def test_a_lossless_songs_bit_depth_is_read_and_a_lossy_ones_is_none(audio):
+    bits = {kind: tags.read(path)[1].bits for kind, path in audio.items()}
+    assert bits == {"mp3": 0, "flac": 16, "aac": 0, "alac": 16, "vorbis": 0, "opus": 0,
+                    "wav": 16, "aiff": 16}  # fmt: skip
+
+
+@pytest.mark.slow
 def test_an_m4a_is_aac_or_alac_by_its_codec(audio):
     assert tags.read(audio["aac"])[1].kind == "aac"
     assert tags.read(audio["alac"])[1].kind == "alac"
