@@ -521,8 +521,9 @@ def test_the_album_and_its_artists_agree_when_shortened_but_the_title_year_and_t
 
 
 def test_a_folder_that_groups_albums_is_one_with_two_or_more_none_of_whose_songs_carry_its_name():
-    """R3.9: two or more album folders beneath it, and no song beneath it whose album artist or
-    artist is its name, as R3.9 compares names, case aside."""
+    """R3.9: two or more album folders beneath it, and songs beneath it tagged with an album
+    artist or artist, none of them its name, as R3.9 compares names, case aside; songs with
+    neither tag are no evidence, so a folder of untagged albums is an artist's."""
     various = ["Various Artists", "Arc Drift", None, "Cinder Fern"]
     assert patterns.grouping("Soundtracks", 5, various)
     assert patterns.grouping("Remixes", 2, ["Lumen Drift"])
@@ -530,7 +531,8 @@ def test_a_folder_that_groups_albums_is_one_with_two_or_more_none_of_whose_songs
     assert not patterns.grouping("Lumen Drift", 4, ["Lumen Drift", None])
     assert not patterns.grouping("Lumen Drift", 2, [None, "lumen drift"])  # as the artist
     assert not patterns.grouping("Lumen_Drift", 2, ["Lumen Drift feat. Ora"])  # a shorter name
-    assert patterns.grouping("Rock", 3, [None, None])
+    assert not patterns.grouping("Rock", 3, [None, None, ""])  # untagged: still an artist's
+    assert patterns.grouping("Rock", 3, [None, "Ada Kerr", None])
     assert patterns.carries("AC/DC", "AC_DC") and not patterns.carries("Lumen", "Lumen Drift")
     assert not patterns.carries("Lumen Drift", "")
 

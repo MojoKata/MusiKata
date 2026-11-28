@@ -16,10 +16,10 @@ Tags match path (R3.9) is kept here too: when a folder is summarized again, its 
 are worked out again first (`match_folder`, patterns.states over their paths and tags, with the
 user's own patterns of the root's settings, kept in `user_pattern`), as a folder's pattern is
 detected from all its songs, so one song changed may change the state of the rest. Whether a folder
-groups albums (`grouping`: two or more album folders beneath it, none of whose songs carries its
-name as album artist or artist), so gives the songs beneath it no album artist or artist, is
-worked out from the songs beneath it and kept on its row (`grouping`); a write that turns it,
-somewhere beneath, works out every folder of songs beneath it again.
+groups albums (`grouping`: two or more album folders beneath it, and songs beneath it tagged with
+an album artist or artist, none of them its name), so gives the songs beneath it no album artist
+or artist, is worked out from the songs beneath it and kept on its row (`grouping`); a write that
+turns it, somewhere beneath, works out every folder of songs beneath it again.
 
 Which picture a folder shows and what its songs share are plain functions (`picture`, `shared`),
 tested without an index; `refresh` reads and writes the rows. Names sort as people read them
@@ -260,8 +260,8 @@ def counts_of(c: sqlite3.Connection, folders: Iterable[str]) -> dict[str, int]:
 
 def grouping(c: sqlite3.Connection, path: str) -> bool:
     """Whether the folder `path` groups albums rather than naming their artist (R3.9,
-    patterns.grouping): two or more folders beneath it hold songs of their own, and none of the
-    songs beneath it carries its name as album artist or artist. Never the root ("")."""
+    patterns.grouping): two or more folders beneath it hold songs of their own, and songs beneath
+    it carry an album artist or artist, none of them its name. Never the root ("")."""
     if not path:
         return False
     where, params = beneath("path", path)

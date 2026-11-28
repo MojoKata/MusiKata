@@ -20,8 +20,8 @@
   read it: MATCH, FIX (and how: `Difference`), or BARE (no tags at all); None when no pattern fits
   it. It judges less than Infer from path writes (`judged`): an album, album artist or artist the
   path shortens agrees (`shortens`: the tag starts with it, or is it with a part in brackets), and
-  a folder that groups albums (`grouping`: two or more album folders beneath it, none of whose
-  songs carries its name as album artist or artist) gives no album artist or artist.
+  a folder that groups albums (`grouping`: two or more album folders beneath it, whose songs
+  carry an album artist or artist but none its name) gives no album artist or artist.
 - **The layout** (R12.1, R12.1.1, A3.3): the same language run the other way, a path made from a
   song's tags for Organize files. `parse(text, naming=True)` takes R12.1's naming forms too
   (`{track:02}`, `{disc-}`, the sort names) and refuses `{*}`, which names nothing; `values_for`
@@ -563,9 +563,12 @@ def carries(tag: str, name: str) -> bool:
 
 def grouping(name: str, albums: int, names: Iterable[str | None]) -> bool:
     """R3.9: whether a folder named `name` groups albums rather than naming their artist: it holds
-    two or more album folders (`albums`, the folders beneath it holding songs of their own) and
-    none of the songs beneath it carries its name as album artist or artist (`names`, theirs)."""
-    return albums >= 2 and not any(n and carries(n, name) for n in names)
+    two or more album folders (`albums`, the folders beneath it holding songs of their own), and
+    of the songs beneath it (`names`: their album artists and artists) at least one carries an
+    album artist or artist and none carries its name. A song with neither tag is no evidence
+    either way, so a folder of untagged albums is still read as their artist's."""
+    tagged = [n for n in names if n]
+    return albums >= 2 and bool(tagged) and not any(carries(n, name) for n in tagged)
 
 
 def token_folder(pattern: Pattern, path: str, token: str) -> str | None:

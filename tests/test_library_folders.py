@@ -460,6 +460,42 @@ def test_a_library_of_nested_and_grouped_folders_is_judged_as_people_file_it(ind
     assert row(index, "", "path_state, path_fix, grouping") == (1, 3, 0)
 
 
+def test_a_folder_of_untagged_albums_is_still_an_artists_and_one_tagged_artist_groups(index):
+    """R3.9: songs with neither album artist nor artist are no evidence: an artist's folder of two
+    albums whose songs carry neither is still read as the album artist's, so they are flagged as
+    missing it; Night Ferry's songs, with an artist and no album artist, make Soundtracks group
+    albums even beside an album folder whose songs carry neither."""
+    untagged = [
+        {"path": f"Orbital Fern/{album}/01 - {title}.flac", "album": album, "track": 1,
+         "title": title}
+        for album, title in (("Spore Theory", "Mycel"), ("Hyphae", "Root"))
+    ] + [
+        {"path": "Soundtracks/Untitled Score/01 - Cue One.flac", "album": "Untitled Score",
+         "track": 1, "title": "Cue One"},
+    ]  # fmt: skip
+    fill(index, [*SHAPES, *untagged])
+    got = states(index)
+    for album, title in (("Spore Theory", "Mycel"), ("Hyphae", "Root")):
+        assert got[f"Orbital Fern/{album}/01 - {title}.flac"] == (
+            1, '[["albumartist", "missing", "Orbital Fern"]]')  # fmt: skip
+    assert row(index, "Orbital Fern", "path_state, path_fix, grouping") == (1, 2, 0)
+    assert got["Soundtracks/Night Ferry/01 - Tide Lantern.ogg"] == (0, None)
+    assert got["Soundtracks/Untitled Score/01 - Cue One.flac"] == (0, None)
+    assert row(index, "Soundtracks", "grouping") == (1,)
+    c = index.read()
+    assert not folders.grouping(c, "Orbital Fern") and folders.grouping(c, "Soundtracks")
+
+
+def test_soundtracks_artist_only_songs_alone_make_it_group_albums(index):
+    """R3.9: one album folder whose songs carry an artist (Night Ferry: no album artist) is
+    evidence enough beside one whose songs carry neither."""
+    score = {"path": "Soundtracks/Untitled Score/01 - Cue One.flac", "album": "Untitled Score",
+             "track": 1, "title": "Cue One"}  # fmt: skip
+    fill(index, [SHAPES[3], score])
+    assert states(index)["Soundtracks/Night Ferry/01 - Tide Lantern.ogg"] == (0, None)
+    assert row(index, "Soundtracks", "grouping") == (1,)
+
+
 def test_whether_a_folder_groups_albums_is_read_from_the_songs_beneath_it(index):
     """R3.9: two or more folders of songs beneath it, none of whose songs carries its name as
     album artist or artist; never the root, nor a folder the index hasn't."""
