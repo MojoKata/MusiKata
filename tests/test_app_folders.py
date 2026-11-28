@@ -112,10 +112,14 @@ def test_a_folder_of_songs_art_line_and_chip():
     assert folders.art_line("T/folder.jpg", 9, 9) == "Cover from folder.jpg, embedded in 9 of 9"
     assert folders.art_line(None, 3, 9) == "Cover embedded in 3 of 9"
     assert folders.art_line(None, 0, 9) == "No cover"
-    assert folders.art_chip("T/f.jpg", 0, 9) == {"text": "Art in folder only", "tone": "info"}
-    assert folders.art_chip(None, 9, 9)["tone"] == "ok"
-    assert folders.art_chip(None, 1, 9)["tone"] == "warn"
-    assert folders.art_chip(None, 0, 9) == {"text": "No art", "tone": "warn"}
+    assert folders.art_chip("T/f.jpg", 0, 9) == {
+        "text": "Folder", "tone": "info", "tip": "Art in f.jpg only, not embedded"}  # fmt: skip
+    assert folders.art_chip(None, 9, 9) == {
+        "text": "Embedded", "tone": "ok", "tip": "Art embedded in 9 of 9 files"}  # fmt: skip
+    assert folders.art_chip("T/f.jpg", 1, 9) == {
+        "text": "Partial", "tone": "warn", "tip": "Art embedded in 1 of 9 files"}  # fmt: skip
+    assert folders.art_chip(None, 0, 9) == {
+        "text": "Missing", "tone": "warn", "tip": "No art, embedded or in the folder"}  # fmt: skip
 
 
 # ---------- where you are ----------
@@ -213,7 +217,8 @@ def test_a_folder_of_songs_has_its_strip_and_marks_the_values_that_differ(view):
     assert view.property("kicker") == "Folder · 3 songs · 4.0 MB · FLAC 44.1 kHz"
     assert view.property("artLine") == "No cover"
     assert view.property("chips") == [  # R3.9: no album or album artist where the path has them
-        {"text": "No art", "tone": "warn"}, {"text": "Tags match path: 0 of 3", "tone": "warn"}
+        {"text": "Missing", "tone": "warn", "tip": "No art, embedded or in the folder"},
+        {"text": "Fixable", "tone": "warn", "tip": "Tags match path for 0 of 3 files"},
     ]  # fmt: skip
     assert rows(view, "numbered", "odd") == [
         ("1 · Neap Tide", []), ("2 · Spring Tide", ["genre"]), ("3 · Slack Water", ["artist"])
@@ -454,36 +459,110 @@ def test_the_song_playing_marks_its_folder_in_the_library(lib):
 # ---------- tags match path (R3.9, R2.9.5, R2.9.7) ----------
 
 
-def test_a_files_chip_says_whether_its_tags_match_its_path_and_how_they_dont():
-    """R3.9, L05, L08: Match, Year missing, Artist case differs, Genre differs; more than one
-    field, Case differs or how many; No tags; none when no pattern fits."""
+def test_a_files_chip_says_in_a_word_whether_its_tags_match_its_path_and_its_tooltip_how():
+    """R3.9, L05, L08: Match, Fixable or Untagged; the tooltip a line for each tag that differs,
+    what the path says and what the tags do (that part left out where the index doesn't know
+    it); none when no pattern fits."""
     from musikata_core.patterns import BARE, FIX, MATCH, Difference
 
     year = Difference("year", "missing", "2022")
-    artist = Difference("artist", "case", "Lumen Drift")
-    genre = Difference("genres", "differs", "Electronic")
-    title = Difference("title", "case", "Ebb & Flow")
-    assert folders.file_chip(MATCH, ()) == {"text": "Match", "tone": "ok"}
-    assert folders.file_chip(FIX, (year,)) == {"text": "Year missing", "tone": "warn"}
-    assert folders.file_chip(FIX, (artist,))["text"] == "Artist case differs"
-    assert folders.file_chip(FIX, (genre,))["text"] == "Genre differs"
-    assert folders.file_chip(FIX, (artist, title))["text"] == "Case differs"
-    assert folders.file_chip(FIX, (artist, year))["text"] == "2 tags differ"
-    assert folders.file_chip(FIX, (year, year))["text"] == "2 tags missing"
-    assert folders.file_chip(BARE, (year,)) == {"text": "No tags", "tone": "err"}
+    artist = Difference("artist", "case", "Lumen Drift", "lumen drift")
+    genre = Difference("genres", "differs", "Ambient", "Electronic")
+    assert folders.file_chip(MATCH, ()) == {
+        "text": "Match", "tone": "ok", "tip": "Its tags match its path"}  # fmt: skip
+    assert folders.file_chip(FIX, (genre,)) == {
+        "text": "Fixable", "tone": "warn",
+        "tip": "Genre differs: the path says Ambient, the tags Electronic"}  # fmt: skip
+    assert folders.file_chip(FIX, (artist, year))["tip"] == (
+        "Artist case differs: the path says Lumen Drift, the tags lumen drift\n"
+        "Year missing: the path says 2022"
+    )
+    assert folders.difference_tip(Difference("album", "differs", "Tide Tables")) == (
+        "Album differs: the path says Tide Tables")  # fmt: skip
+    assert folders.file_chip(BARE, (year,)) == {
+        "text": "Untagged", "tone": "err",
+        "tip": "No tags at all\nYear missing: the path says 2022"}  # fmt: skip
+    assert folders.file_chip(BARE, ())["tip"] == "No tags at all"
     assert folders.file_chip(None, ()) == {}
 
 
+CHIPS = """
+import QtQuick
+import QtQuick.Controls.Basic
+import "."
+Window {
+    width: 300; height: 120
+    property bool shown: chip.ToolTip.visible
+    property string shows: chip.ToolTip.text
+    property string described: chip.Accessible.description
+    property bool plainShown: plain.ToolTip.visible
+    Chip {
+        id: chip; objectName: "chip"; x: 20; y: 20; label: "Fixable"; tone: "warn"
+        tip: "Year missing"
+    }
+    Chip { id: plain; x: 20; y: 70; label: "Match"; tone: "ok" }
+}
+"""
+
+
+@pytest.mark.slow
+def test_a_chips_tooltip_shows_on_hover_and_with_the_focus_and_a_screen_reader_reads_it(qtbot):
+    """R3.9, R2.9.5, R2.9.7: a state's chip says one word and its tooltip the detail, as the app's
+    other controls do theirs: on hover, and while it has the focus (R18.2); its accessible
+    description is the tooltip (R18.1); a chip with no tip has none."""
+    from PySide6.QtCore import QPoint, QUrl
+    from PySide6.QtQml import QQmlComponent, QQmlEngine
+    from PySide6.QtQuick import QQuickItem
+
+    engine = QQmlEngine()
+    qml = os.path.join(os.path.dirname(folders.__file__), "qml", "ChipsTest.qml")
+    component = QQmlComponent(engine)
+    component.setData(CHIPS.encode(), QUrl.fromLocalFile(qml))
+    w = component.create()
+    assert w is not None, component.errorString()
+    try:
+        w.show()
+        qtbot.waitExposed(w)
+        chip = w.findChild(QQuickItem, "chip")
+        assert not w.property("shown") and w.property("shows") == "Year missing"
+        assert w.property("described") == "Year missing"
+        qtbot.mouseMove(w, QPoint(250, 10))  # into the window, then onto the chip
+        qtbot.mouseMove(w, QPoint(30, 30))
+        qtbot.waitUntil(lambda: w.property("shown"))  # after the app's tooltips' delay
+        qtbot.mouseMove(w, QPoint(30, 80))  # over the chip with no tip
+        qtbot.waitUntil(lambda: not w.property("shown"))
+        assert not w.property("plainShown")
+        chip.forceActiveFocus()
+        qtbot.waitUntil(lambda: w.property("shown"))
+        chip.setProperty("tip", "")
+        assert not w.property("shown")
+    finally:
+        w.close()
+        w.deleteLater()
+        engine.deleteLater()
+
+
 def test_a_folders_state_is_a_dot_and_a_chip_and_a_folder_of_songs_says_how_many_match():
-    """R2.9.5 (L04, L06): a dot amber or red, a chip "3 to fix" or "No tags", none when all
-    match; R2.9.7, L02 (L08): Tags match path, or 7 of 9."""
-    assert folders.folder_chip(1, 3) == {"text": "3 to fix", "tone": "warn"}
-    assert folders.folder_chip(2, 3) == {"text": "No tags", "tone": "err"}
+    """R2.9.5 (L04, L06): a dot amber or red, a chip Fixable or Untagged with how many files in
+    its tooltip, none when all match; R2.9.7, L02 (L08): Match, Fixable or Untagged, how many
+    match in its tooltip."""
+    assert folders.folder_chip(1, 3) == {
+        "text": "Fixable", "tone": "warn", "tip": "3 files can be fixed from the path"}  # fmt: skip
+    assert folders.folder_chip(1, 1)["tip"] == "1 file can be fixed from the path"
+    assert folders.folder_chip(2, 3) == {"text": "Untagged", "tone": "err",
+                                         "tip": "Some files have no tags; 3 files to fix from"
+                                                " the path in all"}  # fmt: skip
     assert folders.folder_chip(0, 0) == {} and folders.folder_chip(None, 0) == {}
+    assert folders.folder_chip(1, 0) == {}
     assert folders.TONES == {1: "warn", 2: "err"}
-    assert folders.match_chip([0, 0, None]) == {"text": "Tags match path: 2 of 3", "tone": "warn"}
-    assert folders.match_chip([0, 0]) == {"text": "Tags match path", "tone": "ok"}
-    assert folders.match_chip([0, 2]) == {"text": "Tags match path: 1 of 2", "tone": "err"}
+    assert folders.match_chip([0, 0, None]) == {
+        "text": "Fixable", "tone": "warn", "tip": "Tags match path for 2 of 3 files"}  # fmt: skip
+    assert folders.match_chip([0, 0]) == {
+        "text": "Match", "tone": "ok", "tip": "Tags match path for 2 of 2 files"}  # fmt: skip
+    assert folders.match_chip([0, 2]) == {
+        "text": "Untagged", "tone": "err", "tip": "Tags match path for 1 of 2 files; 1 has no"
+                                                  " tags"}  # fmt: skip
+    assert folders.match_chip([2, 2, 1])["tip"].endswith("for 0 of 3 files; 2 have no tags")
     assert folders.match_chip([None]) == {} and folders.match_chip([]) == {}
 
 
@@ -526,13 +605,22 @@ def test_folders_and_files_carry_their_path_match_and_the_strip_its_chip_and_lin
     v = folders.FolderView(i.read)
     try:
         assert rows(v, "name", "dot", "pathChip") == [
-            ("Lumen Drift", "warn", {"text": "1 to fix", "tone": "warn"})]  # fmt: skip
+            ("Lumen Drift", "warn", {"text": "Fixable", "tone": "warn",
+                                     "tip": "1 file can be fixed from the path"})]  # fmt: skip
         v.open("Lumen Drift/Tide Tables")
         assert rows(v, "pathChip") == [
-            ({"text": "Match", "tone": "ok"},),
-            ({"text": "Album artist case differs", "tone": "warn"},),
+            ({"text": "Match", "tone": "ok", "tip": "Its tags match its path"},),
+            (
+                {
+                    "text": "Fixable",
+                    "tone": "warn",
+                    "tip": "Album artist case differs: the path"
+                    " says Lumen Drift, the tags lumen drift",
+                },
+            ),
         ]
-        assert v.property("chips")[-1] == {"text": "Tags match path: 1 of 2", "tone": "warn"}
+        assert v.property("chips")[-1] == {"text": "Fixable", "tone": "warn",
+                                           "tip": "Tags match path for 1 of 2 files"}  # fmt: skip
         assert v.property("pathLine") == (
             "The path says the album artist is Lumen Drift, but 1 file spells it in lower case."
         )

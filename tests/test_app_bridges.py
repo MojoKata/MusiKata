@@ -152,19 +152,22 @@ def test_an_albums_format_kicker_and_state_chips():
     assert bridges.format_text([(None, None, None, 2)]) == ""
     assert bridges.kicker(False, 2019, "Electronic") == "Album · 2019 · Electronic"
     assert bridges.kicker(True, None, None) == "Compilation"
+    # a word each, the detail in its tooltip
     assert bridges.state_chips(10, 10, "A/cover.jpg") == [
-        {"text": "Art embedded in 10 of 10", "tone": "ok"},
-        {"text": "cover.jpg in folder", "tone": "info"},
+        {"text": "Embedded", "tone": "ok", "tip": "Art embedded in 10 of 10 songs"},
+        {"text": "Folder", "tone": "info", "tip": "cover.jpg in the album's folder"},
     ]
-    assert bridges.state_chips(10, 3, None) == [{"text": "Art embedded in 3 of 10", "tone": "warn"}]
+    assert bridges.state_chips(10, 3, None) == [
+        {"text": "Partial", "tone": "warn", "tip": "Art embedded in 3 of 10 songs"}]  # fmt: skip
     assert bridges.state_chips(2, 0, "folder.png") == [
-        {"text": "No art embedded", "tone": "info"},
-        {"text": "folder.png in folder", "tone": "info"},
+        {"text": "Unembedded", "tone": "info", "tip": "No song has its art embedded"},
+        {"text": "Folder", "tone": "info", "tip": "folder.png in the album's folder"},
     ]
     # L02's tags match path (R3.9): every song, some, or none known
-    assert bridges.state_chips(2, 2, None, [0, 0])[-1] == {"text": "Tags match path", "tone": "ok"}
+    assert bridges.state_chips(2, 2, None, [0, 0])[-1] == {
+        "text": "Match", "tone": "ok", "tip": "Tags match path for 2 of 2 files"}  # fmt: skip
     assert bridges.state_chips(2, 2, None, [0, 1])[-1] == {
-        "text": "Tags match path: 1 of 2", "tone": "warn"}  # fmt: skip
+        "text": "Fixable", "tone": "warn", "tip": "Tags match path for 1 of 2 files"}  # fmt: skip
     assert len(bridges.state_chips(2, 2, None, [None, None])) == 1
 
 
@@ -243,7 +246,8 @@ def test_an_albums_page_says_what_it_holds(lib):
         "2 songs · 9 min · FLAC 44.1 kHz",
     ]
     assert page.property("cover").startswith("image://covers/")
-    assert page.property("chips")[0] == {"text": "Art embedded in 1 of 2", "tone": "warn"}
+    assert page.property("chips")[0] == {
+        "text": "Partial", "tone": "warn", "tip": "Art embedded in 1 of 2 songs"}  # fmt: skip
     songs = page.property("songs")
     assert [songs.row(i)["title"] for i in range(songs.count)] == ["Tidewater", "Glass Harbor"]
     assert songs.queue_from(0) == (songs._ids, "Glass Harbor")  # what a double click queues

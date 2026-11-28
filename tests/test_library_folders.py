@@ -374,7 +374,7 @@ def test_a_write_keeps_each_songs_path_match_and_each_folders_worst_beneath(inde
     got = states(index)
     assert got["Lumen Drift/Tide Tables/01 - Neap Tide.flac"] == (0, None)
     assert got["Lumen Drift/Tide Tables/03 - Slack Water.flac"] == (
-        1, '[["albumartist", "case", "Lumen Drift"]]')  # fmt: skip
+        1, '[["albumartist", "case", "Lumen Drift", "lumen drift"]]')  # fmt: skip
     assert got["_Incoming/new rips/track01.mp3"] == (2, None)  # no tags, no pattern fits
     assert got["_Incoming/new rips/Signal Fires.flac"] == (None, None)
     by = {p: (s, n) for p, s, n in index.read().execute(
@@ -406,18 +406,192 @@ def test_the_users_own_patterns_are_kept_and_every_folder_worked_out_again_when_
     user = ["{artist}/{album}/{track} - {title}"]
     assert index.write(lambda c: folders.set_user_patterns(c, user)).result()
     assert folders.user_patterns(index.read()) == user
-    assert states(index)[moon] == (1, '[["artist", "case", "Lumen Drift"]]')
+    assert states(index)[moon] == (1, '[["artist", "case", "Lumen Drift", "lumen drift"]]')
     assert not index.write(lambda c: folders.set_user_patterns(c, user)).result()
     assert index.write(lambda c: folders.set_user_patterns(c, [])).result()
     assert folders.user_patterns(index.read()) == []
 
 
+OST = " (Original Soundtrack)"
+MOJIBAKE = "Ñåâåðíûé Âåòåð"  # a name in the wrong encoding (R4.10), as the folder spells it too
+SHAPES = [
+    {"path": "Lumen Drift/2019 - Glass Harbor/01 - Tidewater.flac", "albumartist": LD,
+     "artist": LD, "album": "Glass Harbor", "year": 2019, "track": 1, "title": "Tidewater"},
+    {"path": "Lumen Drift/Remixes/Glass Harbor/01 - Atlas Copper.flac", "albumartist": LD,
+     "artist": LD, "album": "Glass Harbor Remixed", "track": 1, "title": "Atlas Copper"},
+    {"path": "Lumen Drift/Remixes/Tide Tables/01 - Silver Signal.mp3", "albumartist": LD,
+     "artist": LD, "album": "Tide Tables Remixed", "track": 1, "title": "Silver Signal"},
+    {"path": "Soundtracks/Night Ferry/01 - Tide Lantern.ogg", "artist": "Cinder Fern",
+     "album": "Night Ferry" + OST, "compilation": True, "track": 1, "title": "Tide Lantern"},
+    {"path": "Soundtracks/Paper Satellites/01 - Static Orbit.m4a", "albumartist":
+     "Various Artists", "artist": "Wire Glass", "album": "Paper Satellites" + OST, "track": 1,
+     "title": "Static Orbit"},
+    {"path": "Soundtracks/The Long Signal/01 - Iron Meridian.flac", "albumartist": "Ada Kerr",
+     "artist": "Moon Ember", "album": "The Long Signal" + OST, "track": 1,
+     "title": "Iron Meridian"},
+    {"path": f"{MOJIBAKE}/Òèõàÿ Ãàâàíü/01 - Òóìàí.mp3", "artist": MOJIBAKE,
+     "album": "Òèõàÿ Ãàâàíü", "track": 1, "title": "Òóìàí"},
+    {"path": "Mara Okafor/Kindling/01 - Embers.flac", "artist": "Mara Okafor",
+     "album": "Kindling", "track": 1, "title": "Embers"},
+    {"path": "Mara Okafor/Salt & Ember/01 - Brine.flac", "artist": "Mara Okafor",
+     "album": "Salt & Ember", "track": 1, "title": "Brine"},
+]  # fmt: skip
+
+
+def test_a_library_of_nested_and_grouped_folders_is_judged_as_people_file_it(index):
+    """R3.9: a folder above an album that isn't its artist (Remixes, Soundtracks) gives no album
+    artist, and a folder's shorter name of the album agrees; a folder in the wrong encoding whose
+    songs have no album artist, and an artist's folder whose songs all lack the album artist tag,
+    are still flagged."""
+    fill(index, SHAPES)
+    got = states(index)
+    flagged = {p: d for p, (s, d) in got.items() if s}
+    assert flagged == {
+        f"{MOJIBAKE}/Òèõàÿ Ãàâàíü/01 - Òóìàí.mp3": f'[["albumartist", "missing", "{MOJIBAKE}"]]',
+        "Mara Okafor/Kindling/01 - Embers.flac":
+            '[["albumartist", "missing", "Mara Okafor"]]',
+        "Mara Okafor/Salt & Ember/01 - Brine.flac":
+            '[["albumartist", "missing", "Mara Okafor"]]',
+    }  # fmt: skip
+    assert set(got) == {s["path"] for s in SHAPES}
+    assert row(index, "Soundtracks", "path_state, path_fix, grouping") == (0, 0, 1)
+    assert row(index, "Lumen Drift", "path_state, path_fix, grouping") == (0, 0, 0)
+    assert row(index, "Lumen Drift/Remixes", "grouping") == (1,)
+    assert row(index, "", "path_state, path_fix, grouping") == (1, 3, 0)
+
+
+def test_a_folder_of_untagged_albums_is_still_an_artists_and_one_tagged_artist_groups(index):
+    """R3.9: songs with neither album artist nor artist are no evidence: an artist's folder of two
+    albums whose songs carry neither is still read as the album artist's, so they are flagged as
+    missing it; Night Ferry's songs, with an artist and no album artist, make Soundtracks group
+    albums even beside an album folder whose songs carry neither."""
+    untagged = [
+        {"path": f"Orbital Fern/{album}/01 - {title}.flac", "album": album, "track": 1,
+         "title": title}
+        for album, title in (("Spore Theory", "Mycel"), ("Hyphae", "Root"))
+    ] + [
+        {"path": "Soundtracks/Untitled Score/01 - Cue One.flac", "album": "Untitled Score",
+         "track": 1, "title": "Cue One"},
+    ]  # fmt: skip
+    fill(index, [*SHAPES, *untagged])
+    got = states(index)
+    for album, title in (("Spore Theory", "Mycel"), ("Hyphae", "Root")):
+        assert got[f"Orbital Fern/{album}/01 - {title}.flac"] == (
+            1, '[["albumartist", "missing", "Orbital Fern"]]')  # fmt: skip
+    assert row(index, "Orbital Fern", "path_state, path_fix, grouping") == (1, 2, 0)
+    assert got["Soundtracks/Night Ferry/01 - Tide Lantern.ogg"] == (0, None)
+    assert got["Soundtracks/Untitled Score/01 - Cue One.flac"] == (0, None)
+    assert row(index, "Soundtracks", "grouping") == (1,)
+    c = index.read()
+    assert not folders.grouping(c, "Orbital Fern") and folders.grouping(c, "Soundtracks")
+
+
+def test_soundtracks_artist_only_songs_alone_make_it_group_albums(index):
+    """R3.9: one album folder whose songs carry an artist (Night Ferry: no album artist) is
+    evidence enough beside one whose songs carry neither."""
+    score = {"path": "Soundtracks/Untitled Score/01 - Cue One.flac", "album": "Untitled Score",
+             "track": 1, "title": "Cue One"}  # fmt: skip
+    fill(index, [SHAPES[3], score])
+    assert states(index)["Soundtracks/Night Ferry/01 - Tide Lantern.ogg"] == (0, None)
+    assert row(index, "Soundtracks", "grouping") == (1,)
+
+
+def test_whether_a_folder_groups_albums_is_read_from_the_songs_beneath_it(index):
+    """R3.9: two or more folders of songs beneath it, none of whose songs carries its name as
+    album artist or artist; never the root, nor a folder the index hasn't."""
+    fill(index, SHAPES)
+    c = index.read()
+    grouping = {p: folders.grouping(c, p) for p in (
+        "Soundtracks", "Lumen Drift/Remixes", "Lumen Drift", "Mara Okafor", MOJIBAKE,
+        "Soundtracks/Night Ferry", "", "Nope")}  # fmt: skip
+    assert [p for p, g in grouping.items() if g] == ["Soundtracks", "Lumen Drift/Remixes"]
+    asked = folders.Groupings(c)
+    assert asked.around("Soundtracks/Night Ferry") == {"Soundtracks"}
+    assert asked.around("Lumen Drift/Remixes/Tide Tables") == {"Lumen Drift/Remixes"}
+    assert asked.known == {"Soundtracks/Night Ferry": False, "Soundtracks": True,
+                           "Lumen Drift/Remixes/Tide Tables": False,
+                           "Lumen Drift/Remixes": True, "Lumen Drift": False}  # fmt: skip
+
+
+def test_a_write_that_turns_whether_a_folder_groups_albums_works_out_its_songs_again(index):
+    """R3.9: a second album folder makes Soundtracks group albums, so the first's songs lose the
+    album artist it gave them; a song beneath it tagged with its name makes it an artist's again;
+    the second album gone, it is one artist's album folder."""
+    ferry = "Soundtracks/Night Ferry/01 - Tide Lantern.ogg"
+    fill(index, [SHAPES[3]])
+    assert states(index)[ferry] == (1, '[["albumartist", "missing", "Soundtracks"]]')
+    assert row(index, "Soundtracks", "grouping") == (0,)
+    fill(index, [SHAPES[4]])
+    assert states(index)[ferry] == (0, None)
+    assert row(index, "Soundtracks", "path_state, path_fix, grouping") == (0, 0, 1)
+    fill(index, [dict(SHAPES[4], albumartist="Soundtracks")])
+    assert states(index)[ferry] == (1, '[["albumartist", "missing", "Soundtracks"]]')
+    assert row(index, "Soundtracks", "path_state, path_fix, grouping") == (1, 1, 0)
+    fill(index, [SHAPES[4]])
+    assert states(index)[ferry] == (0, None)
+    index.write(lambda c: scanner._remove(c, [SHAPES[4]["path"]], {}, None)).result()
+    assert states(index)[ferry] == (1, '[["albumartist", "missing", "Soundtracks"]]')
+    assert row(index, "Soundtracks", "path_state, path_fix, grouping") == (1, 1, 0)
+
+
+def tagged(path, seed, **frames):
+    """A WAV (`wav`) with ID3 frames: TPE1, TPE2, TALB, TRCK, TIT2, each text."""
+    import mutagen.id3
+    import mutagen.wave
+
+    wav(path, seed)
+    f = mutagen.wave.WAVE(str(path))
+    f.add_tags()
+    for name, text in frames.items():
+        f.tags.add(getattr(mutagen.id3, name)(encoding=3, text=text))
+    f.save()
+
+
+@pytest.mark.slow
+def test_an_index_of_slice_8_loses_its_false_flags_as_its_songs_are_read_again(tmp_path):
+    """Version 16 (R3.9): an index whose states were worked out by the eager matching keeps them
+    until its songs are read again; the migration marks every song to be, so the next scan works
+    out every folder's states again, and whether each folder groups albums."""
+    music = tmp_path / "Music"
+    songs = [
+        ("Soundtracks/Night Ferry/01 - Tide Lantern.wav", "Night Ferry" + OST),
+        ("Soundtracks/Paper Satellites/01 - Static Orbit.wav", "Paper Satellites" + OST),
+    ]
+    for n, (rel, album) in enumerate(songs, 1):
+        title = rel.rpartition(" - ")[2][:-4]
+        tagged(music / rel, n, TPE1="Cinder Fern", TPE2="Various Artists", TALB=album,
+               TRCK="1", TIT2=title)  # fmt: skip
+    path = str(tmp_path / "musikata.db")
+    c = db.connect(path)
+    for step in db.MIGRATIONS[:15]:
+        step(c)
+    c.execute("PRAGMA user_version = 15")
+    eager = '[["albumartist", "differs", "Soundtracks"]]'
+    for n, (rel, _album) in enumerate(songs, 1):
+        st = os.stat(music / rel)
+        c.execute(
+            "INSERT INTO song (id, path, folder, size, mtime_ns, path_state, path_diff)"
+            " VALUES (?, ?, ?, ?, ?, 1, ?)",
+            (n, rel, rel.rpartition("/")[0], st.st_size, st.st_mtime_ns, eager),
+        )
+    assert db.migrate(c) == len(db.MIGRATIONS)
+    assert c.execute("SELECT DISTINCT mtime_ns FROM song").fetchall() == [(-1,)]
+    c.close()
+    index = db.Index(path)
+    assert scan(music, index).changed == 2
+    assert set(states(index).values()) == {(0, None)}
+    assert row(index, "Soundtracks", "path_state, path_fix, grouping") == (0, 0, 1)
+    index.close()
+
+
 def test_how_a_song_differs_is_kept_as_json_and_read_back_whatever_the_column_holds():
     from musikata_core.patterns import Difference
 
-    diffs = (Difference("year", "missing", "2022"), Difference("artist", "case", "Ünïcode"))
+    diffs = (Difference("year", "missing", "2022"), Difference("artist", "case", "Ünïcode", "ü"))
     text = folders.diff_text(diffs)
     assert folders.diffs_of(text) == diffs and "Ünïcode" in text
+    assert [d.old for d in folders.diffs_of(text)] == ["", "ü"]  # the tag's value, when it has one
+    assert folders.diffs_of('[["year", "missing", "2022"]]') == diffs[:1]  # kept without it
     assert folders.diff_text(()) is None
     for broken in (None, "", "not json", "{}", '[["a", "b"], 3]', "[[1, 2, 3]]"):
         got = folders.diffs_of(broken)

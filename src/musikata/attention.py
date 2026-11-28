@@ -67,7 +67,15 @@ from musikata_core.duplicates import Plan
 from musikata_core.tags import Batch, Failed, Job, Outcome, Written
 from musikata_core.tags.tools import Planned, Song
 
-from .duplicates import Duplicates, badge_text, bar_text, copy_rows, heading_text, move_label
+from .duplicates import (
+    Duplicates,
+    badge_text,
+    badge_tip,
+    bar_text,
+    copy_rows,
+    heading_text,
+    move_label,
+)
 from .encodings import FixEncoding
 from .history import LABELS, NAMES, ChangeHistory
 from .infer import InferFromPath
@@ -80,7 +88,7 @@ log = logging.getLogger(__name__)
 ONLINE_LATER = "Finding covers online comes in a later version"  # R16.4.1: #27
 SHOWN = 3  # the entries a folded group's line names
 ROLES = ("type", "group", "kind", "title", "detail", "cover", "icon", "actions", "open",
-         "summary", "note", "count", "tone", "badge", "copies")  # fmt: skip
+         "summary", "note", "count", "tone", "badge", "badgeTip", "copies")  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -181,11 +189,12 @@ def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dic
     group of copies (R2.12) its badge and a row per copy, as `choice` (the copy kept, those
     checked; duplicates.initial when None) has them."""
     who = e.artist or "Unknown artist"
-    badge, copies = "", []
+    badge, tip, copies = "", "", []
     if e.kind == attention.COPIES:
         group = duplicates.Group(e.copies, e.likely, e.why)
         kept, checked = choice if choice is not None else duplicates.initial(group)
         detail, badge, copies = heading_text(e), badge_text(e), copy_rows(e, kept, checked)
+        tip = badge_tip(e)
         actions = [_action("review", "Review…")]
         icon = "album"
     elif e.kind in (attention.COVER_NONE, attention.COVER_SMALL):
@@ -233,7 +242,7 @@ def entry_row(e: Entry, choice: tuple[int, frozenset[int]] | None = None) -> dic
         "detail": detail, "cover": cover_url(e.thumb) if e.album is not None else "",
         "icon": icon, "actions": [*actions, IGNORE], "open": True, "summary": "", "note": "",
         "count": 0, "tone": "err" if e.kind == attention.UNREADABLE else "", "badge": badge,
-        "copies": copies,
+        "badgeTip": tip, "copies": copies,
     }  # fmt: skip
 
 
@@ -287,7 +296,8 @@ def group_row(group: Group, entries: Sequence[Entry], opened: bool) -> dict[str,
         "type": "group", "group": group.key, "kind": "", "title": group.label,
         "detail": group.heading, "cover": "", "icon": "", "open": opened,
         "actions": [group.action] if group.action else [], "summary": summary_text(group, entries),
-        "note": group.note, "count": len(entries), "tone": "", "badge": "", "copies": [],
+        "note": group.note, "count": len(entries), "tone": "", "badge": "", "badgeTip": "",
+        "copies": [],
     }  # fmt: skip
 
 

@@ -316,7 +316,8 @@ def test_an_index_of_slice_7_3_gains_when_each_song_was_added_from_its_files_tim
     assert c.execute("SELECT path, mtime_ns, added FROM song ORDER BY path").fetchall() == [
         ("a.flac", 1700000000000000000, 1_700_000_000.0), ("b.flac", -1, None)
     ]  # fmt: skip
-    db.MIGRATIONS[14](c)
+    for step in db.MIGRATIONS[14:]:  # the song table as write_batch writes it
+        step(c)
     info = AudioInfo("flac", 1.0, 900, 44100, 2)
     read = scanner.Read(scanner.Seen("b.flac", 1, 1_600_000_000 * 10**9), Tags(), info, "h")
     c.execute("BEGIN")
@@ -354,4 +355,20 @@ def test_an_index_of_slice_8_2_gains_each_songs_bit_depth_and_its_songs_are_read
     assert c.execute("SELECT path, bits FROM song ORDER BY path").fetchall() == [
         ("a.flac", 24), ("b.mp3", None)
     ]  # fmt: skip
+    c.close()
+
+
+@pytest.mark.slow
+def test_an_index_of_slice_8_gains_whether_each_folder_groups_albums_and_is_read_again(tmp_path):
+    """Version 16 (R3.9): `folder.grouping`, whether each folder groups albums, NULL until the
+    next scan works it out; R3.9's states are worked out again as every song is read again."""
+    c = db.connect(str(tmp_path / "musikata.db"))
+    for step in db.MIGRATIONS[:15]:
+        step(c)
+    c.execute("PRAGMA user_version = 15")
+    c.execute("INSERT INTO song (path, size, mtime_ns, path_state) VALUES ('a.flac', 1, 5, 1)")
+    c.execute("INSERT INTO folder (path, name, name_key, fold) VALUES ('', '', '', '')")
+    assert db.migrate(c) == len(db.MIGRATIONS) == 16
+    assert c.execute("SELECT mtime_ns, path_state FROM song").fetchall() == [(-1, 1)]
+    assert c.execute("SELECT grouping FROM folder").fetchall() == [(None,)]
     c.close()

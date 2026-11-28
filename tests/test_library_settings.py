@@ -825,3 +825,139 @@ def test_the_mini_player_set_keeps_its_other_places_and_the_file_valid_under_its
     newer = tmp_path / "newer.json"
     newer.write_text(json.dumps({"format": 2}))
     assert not settings.set_mini_player(str(newer), HOME, "PC", layout="disc")
+
+
+# ---------- the equalizer (R19.5) ----------
+
+EQUALIZER = {  # A2.10's example
+    "on": True, "preset": "Car", "by_genre": True,
+    "presets": [
+        {"name": "Car", "kind": "graphic", "preamp": -2.0,
+         "gains": [4.0, 3.5, 1.5, 0.0, -1.0, 0.0, 1.0, 2.0, 2.5, 2.0]},
+        {"name": "Late night", "kind": "parametric", "preamp": -3.0,
+         "bands": [{"type": "low-shelf", "freq": 100, "gain": 3.0, "q": 0.7},
+                   {"type": "high-cut", "freq": 12000, "q": 0.7}]},
+    ],
+    "genres": {"Classical": "Classical", "Jazz": "Jazz", "Electronic": "Late night"},
+}  # fmt: skip
+
+
+def test_the_equalizer_is_read_from_its_group_as_a2_10s_example_has_it():
+    from musikata_core.audio.eq import Band
+    from musikata_core.audio.presets import Preset
+
+    got = parse({"format": 1, "equalizer": EQUALIZER})
+    assert got.problems == ()
+    assert got.equalizer == settings.Equalizer(
+        True, "Car", True,
+        (Preset("Car", "graphic", -2.0, gains=(4.0, 3.5, 1.5, 0.0, -1.0, 0.0, 1.0, 2.0, 2.5, 2.0)),
+         Preset("Late night", "parametric", -3.0,
+                (Band("low-shelf", 100, 3.0, 0.7), Band("high-cut", 12000, 0.0, 0.7)))),
+        {"Classical": "Classical", "Jazz": "Jazz", "Electronic": "Late night"},
+    )  # fmt: skip
+
+
+def test_the_equalizer_is_off_at_flat_by_default_with_the_built_in_genres_matched():
+    got = parse({"format": 1}).equalizer
+    assert got == settings.Equalizer()
+    assert (got.on, got.preset, got.by_genre, got.presets) == (False, "Flat", False, ())
+    assert got.genres["Classical"] == "Classical" and got.genres["Rock"] == "Rock"
+
+
+def _eq_with(**changed):
+    return {**EQUALIZER, **changed}
+
+
+@pytest.mark.parametrize(
+    "group, check, problem",
+    [
+        ([], lambda e: e == settings.Equalizer(), "equalizer isn't a group"),
+        (_eq_with(on="yes"), lambda e: e.on is False, "equalizer.on isn't true or false"),
+        (_eq_with(by_genre=1), lambda e: e.by_genre is False, "equalizer.by_genre isn't true"),
+        (_eq_with(preset=" car "), lambda e: e.preset == "Car", ""),  # as a person writes it
+        (_eq_with(preset="rock"), lambda e: e.preset == "Rock", ""),
+        (_eq_with(preset="Gone"), lambda e: e.preset == "Flat", "equalizer.preset isn't a preset"),
+        (_eq_with(preset=3), lambda e: e.preset == "Flat", "equalizer.preset isn't a preset"),
+        (_eq_with(presets={}), lambda e: e.presets == () and e.preset == "Flat",
+         "equalizer.presets isn't a list"),
+        (_eq_with(presets=["Car"]), lambda e: e.presets == (), "isn't a preset: 'Car'"),
+        (_eq_with(presets=[{"kind": "graphic"}]), lambda e: e.presets == (), ".name isn't a name"),
+        (_eq_with(preset="A", genres={},
+                  presets=[{"name": "A", "kind": "Graphic", "gains": [0] * 10}]),
+         lambda e: e.presets[0].kind == "graphic" and e.presets[0].preamp == 0, ""),
+        (_eq_with(presets=[{"name": "A", "kind": "shelf", "bands": []}]), lambda e: e.presets == (),
+         ".kind isn't parametric or graphic"),
+        (_eq_with(presets=[{"name": "A", "kind": "graphic", "preamp": "-3 dB",
+                            "gains": ["1", 2, "3,5", 0, 0, 0, 0, 0, 0, 20]}]),
+         lambda e: e.presets[0].gains[:3] == (1, 2, 3.5) and e.presets[0].gains[9] == 12
+         and e.presets[0].preamp == -3, "gains[9] is out of -12 to 12"),
+        (_eq_with(presets=[{"name": "A", "kind": "graphic", "gains": [0] * 9}]),
+         lambda e: e.presets == (), ".gains isn't ten gains"),
+        (_eq_with(presets=[{"name": "A", "kind": "graphic", "gains": [0] * 9 + [True]}]),
+         lambda e: e.presets == (), "gains[9] isn't a number"),
+        (_eq_with(presets=[{"name": "A", "kind": "parametric", "bands": []}]),
+         lambda e: e.presets == (), ".bands holds no band"),
+        (_eq_with(presets=[{"name": "A", "kind": "parametric", "bands": "LS 100"}]),
+         lambda e: e.presets == (), ".bands isn't a list of bands"),
+        (_eq_with(presets=[{"name": "A", "kind": "parametric",
+                            "bands": [{"type": "Low Shelf", "freq": "100", "gain": 3, "q": 0.7},
+                                      {"type": "notch", "freq": 100, "q": 1}, 5]}]),
+         lambda e: e.presets[0].bands[0].type == "low-shelf" and len(e.presets[0].bands) == 1,
+         ".type isn't one of"),
+        (_eq_with(presets=[{"name": "A", "kind": "parametric",
+                            "bands": [{"type": "bell", "freq": 5, "gain": -30, "q": 0}]}]),
+         lambda e: (e.presets[0].bands[0].freq, e.presets[0].bands[0].gain,
+                    e.presets[0].bands[0].q) == (20, -12, 0.1), ".freq is out of 20 to 20000"),
+        (_eq_with(presets=[{"name": "A", "kind": "parametric",
+                            "bands": [{"type": "bell", "freq": None, "gain": 1, "q": 1}]}]),
+         lambda e: e.presets == (), ".freq isn't a number"),
+        (_eq_with(presets=[{"name": "A", "kind": "parametric",
+                            "bands": [{"type": "bell", "freq": 100 * i, "q": 1}
+                                      for i in range(1, 13)]}]),
+         lambda e: len(e.presets[0].bands) == 10, "more than 10 bands: the first 10 kept"),
+        (_eq_with(presets=[{"name": "A", "kind": "graphic", "gains": [0] * 10,
+                            "from_bands": "x"}]),
+         lambda e: e.presets[0].from_bands is None, ".from_bands isn't a list of bands"),
+        (_eq_with(presets=[EQUALIZER["presets"][0], EQUALIZER["presets"][0]]),
+         lambda e: len(e.presets) == 1, "is named as one before it"),
+        (_eq_with(presets=[{**EQUALIZER["presets"][0], "name": "rock"}]),
+         lambda e: e.presets == (), "is named as one before it"),  # a built-in's name
+        (_eq_with(genres=[]), lambda e: e.genres["Rock"] == "Rock",
+         "equalizer.genres isn't a group of genres"),
+        (_eq_with(genres={}), lambda e: e.genres == {}, ""),  # every genre taken off the table
+        (_eq_with(genres={"Ambient": "Gone", "Rock": 3, " Pop ": "pop"}),
+         lambda e: e.genres == {"Pop": "Pop"}, "equalizer.genres.Ambient isn't a preset"),
+    ],
+)  # fmt: skip
+def test_the_equalizer_broken_in_another_case_type_or_shape(group, check, problem):
+    got = parse({"format": 1, "equalizer": group})
+    assert check(got.equalizer), got.equalizer
+    assert (problem in " ".join(got.problems)) if problem else got.problems == ()
+
+
+def test_the_equalizer_set_keeps_the_rest_of_the_file_and_what_it_doesnt_know(tmp_path):
+    from musikata_core.audio import presets
+
+    path = tmp_path / "settings.json"
+    old = {
+        **EQUALIZER,
+        "later": 1,
+        "presets": [{**EQUALIZER["presets"][0], "colour": "red"}, EQUALIZER["presets"][1]],
+    }
+    path.write_text(json.dumps({"format": 1, "equalizer": old, "appearance": {"lyrics": True}}))
+    assert settings.set_equalizer(str(path), HOME, "PC", on=False)
+    assert settings.set_equalizer(str(path), HOME, "PC", preset="Late night", by_genre=False)
+    kept = settings.load(str(path), HOME).equalizer
+    rock, _ = presets.to_graphic(presets.find("Rock", ()), "Rock (graphic)")
+    assert settings.set_equalizer(str(path), HOME, "PC", presets=[*kept.presets, rock])
+    doc = json.loads(path.read_text())
+    assert doc["appearance"] == {"lyrics": True} and doc["equalizer"]["later"] == 1
+    assert doc["equalizer"]["presets"][0]["colour"] == "red"  # a preset's unknown field kept
+    with open(SCHEMA, encoding="utf-8") as f:
+        jsonschema.validate(doc, json.load(f))
+    again = settings.load(str(path), HOME).equalizer
+    assert (again.on, again.preset, again.by_genre) == (False, "Late night", False)
+    assert again.presets == (*kept.presets, rock) and again.genres == kept.genres
+    newer = tmp_path / "newer.json"
+    newer.write_text(json.dumps({"format": 2}))
+    assert not settings.set_equalizer(str(newer), HOME, "PC", on=True)

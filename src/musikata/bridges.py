@@ -28,8 +28,9 @@ from typing import Any, Protocol
 from PySide6.QtCore import Property as QtProperty
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 
-from musikata_core import albums, db, nowplaying, scanner, settings, watch, workers
-from musikata_core.audio import gain
+from musikata_core import albums, db, genres, nowplaying, scanner, settings, watch, workers
+from musikata_core.audio import eq, gain, presets
+from musikata_core.audio.eq import Band, Tone
 from musikata_core.audio.played import Listening
 from musikata_core.audio.queue import Entry, Queue
 from musikata_core.audio.stream import Recent
@@ -238,17 +239,20 @@ def kicker(compilation: bool, year: int | None, genre: str | None) -> str:
 def state_chips(
     songs: int, embedded: int, folder_image: str | None, path_states: Sequence[int | None] = ()
 ) -> list[dict[str, str]]:
-    """An album's state chips (R2.6, L02), each its text and tone ("ok", "warn", "info", "err"):
-    the art embedded in its songs, its folder's cover image, and whether its songs' tags match
-    their paths (R3.9, `path_states`: each song's)."""
+    """An album's state chips (R2.6, L02), each a word, its tone ("ok", "warn", "info", "err")
+    and its tooltip: the art embedded in its songs (Embedded in every one, Partial, Unembedded),
+    its folder's cover image (Folder), and whether its songs' tags match their paths (R3.9,
+    `path_states`: each song's; folders.match_chip)."""
+    tip = f"Art embedded in {embedded:,} of {plural(songs, 'song')}"
     if embedded == songs:
-        out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "ok"}]
+        out = [{"text": "Embedded", "tone": "ok", "tip": tip}]
     elif embedded:
-        out = [{"text": f"Art embedded in {embedded} of {songs}", "tone": "warn"}]
+        out = [{"text": "Partial", "tone": "warn", "tip": tip}]
     else:
-        out = [{"text": "No art embedded", "tone": "info"}]
+        out = [{"text": "Unembedded", "tone": "info", "tip": "No song has its art embedded"}]
     if folder_image:
-        out.append({"text": f"{folder_image.rpartition('/')[2]} in folder", "tone": "info"})
+        name = folder_image.rpartition("/")[2]
+        out.append({"text": "Folder", "tone": "info", "tip": f"{name} in the album's folder"})
     matched = match_chip(path_states)
     return [*out, matched] if matched else out
 
@@ -1629,7 +1633,17 @@ class Player(QObject):
     visualization (`queueList`, R11.4.3), the song played last above the one playing there. Each
     is changed through the slots that take it (`playRowOf`, `removeRowOf`, `moveRowOf`, …): a
     row's song played, taken out, or moved; and **Clear** takes out every song but the one
-    playing (`clearQueue`)."""
+    playing (`clearQueue`).
+
+    The equalizer (R19) plays as `equalizer`, the shared settings' group, has it (R19.5): each
+    song asked of the engine is told its tone first, its preset picked by its genres when Choose
+    by genre is on (R19.4, `presets.Choice`), and told again when that changes while it plays,
+    which the engine makes heard at once. What the Equalizer panel (R19.2) will bind: on or off
+    (`equalizerOn`, `setEqualizerOn`), the preset playing and why (`equalizerPreset`,
+    `equalizerChosenBy`), choosing one (`choosePreset`), its bands set and heard before they are
+    saved (`setBands`), and how far the level is held down to keep from clipping (`headroom`,
+    R19.1), as the engine says the filter it built at the device's rate applies it. On or off and
+    the preset chosen are kept in the shared settings."""
 
     changed = Signal()  # the song: its path, words, playing, paused, the length, the error
     positionChanged = Signal()
@@ -1645,6 +1659,8 @@ class Player(QObject):
     _stop = Signal()
     _set_gain = Signal(float)
     _choose = Signal(str)
+    _equalize = Signal(int, object)  # a song's ticket, and the tone it plays (None: off)
+    equalizerChanged = Signal()  # on or off, the preset playing, its bands, the headroom
 
     def __init__(
         self,
@@ -1656,8 +1672,18 @@ class Player(QObject):
         rng: random.Random | None = None,
         playback: settings.Playback | None = None,
         clock: Clock | None = None,
+        equalizer: settings.Equalizer | None = None,
     ) -> None:
         super().__init__(parent)
+        kept = equalizer if equalizer is not None else settings.Equalizer()
+        self.equalizer = presets.Choice(
+            kept.on, kept.preset, kept.by_genre, kept.presets, kept.genres, key=genres.key
+        )
+        self._told_tone: Tone | None = None  # the tone the engine was told for the song playing
+        self._follow_tone: tuple[int, int | None, Tone | None] = (0, None, None)  # and the
+        # song told to follow it: its ticket, song and tone
+        self._rate = 0  # the device's rate, as the engine last said building a filter (0: none)
+        self._applied: dict[Tone, float] = {}  # the headroom of each filter it built, by tone
         self._settings = playback if playback is not None else settings.Playback()
         self._listening = Listening(clock if clock is not None else SystemClock())
         self._counts: PlayCounts | None = None
@@ -1708,6 +1734,8 @@ class Player(QObject):
         self._stop.connect(self._engine.stop)
         self._set_gain.connect(self._engine.set_volume)
         self._choose.connect(self._engine.choose_device)
+        self._equalize.connect(self._engine.equalize)
+        self._engine.equalized.connect(self._on_equalized)
         self._choose.emit(self._settings.device or "")  # heard as the thread starts
         self._engine.began.connect(self._on_began)
         self._engine.joined.connect(self._on_joined)
@@ -1886,6 +1914,12 @@ class Player(QObject):
         thread that keeps shuffle and repeat, so the two never write the file at once."""
         if self._keeping is not None:
             self._keeping.appearance(**fields)
+
+    def _remember_equalizer(self, **fields: object) -> None:
+        """On or off, or the preset chosen (R19.5): kept in the shared settings on the same
+        thread."""
+        if self._keeping is not None:
+            self._keeping.equalizer(**fields)
 
     def remember_mini(self, **fields: object) -> None:
         """The mini player's layout, Stay on top or a layout's place (R15.2, R15.3): kept in the
@@ -2227,7 +2261,7 @@ class Player(QObject):
         before = self.queue.played[-1].song if self.queue.played else None
         after = self.queue.following()
         level = self._replaygain(entry.song, before, after.song if after is not None else None)
-        self._start_engine(self._whole(info.path), entry.key, level, at)
+        self._start_engine(self._whole(info.path), entry.key, level, at, entry.song)
         self._queue_changed()
 
     def _cue(self) -> None:
@@ -2260,11 +2294,17 @@ class Player(QObject):
             self.nowPlaying.emit(path)
 
     def _start_engine(
-        self, path: str, key: int | None = None, level: float | None = None, at: float = 0.0
+        self,
+        path: str,
+        key: int | None = None,
+        level: float | None = None,
+        at: float = 0.0,
+        song: int | None = None,
     ) -> None:
-        """The engine plays `path`, the queue's entry `key` (None: outside the queue), under a new
-        ticket, at ReplayGain `level` (None: a file not in the index, as songs without tags play),
-        from `at` seconds into it; what follows it is told after."""
+        """The engine plays `path`, the queue's entry `key` (None: outside the queue) of `song`,
+        under a new ticket, at ReplayGain `level` (None: a file not in the index, as songs without
+        tags play), from `at` seconds into it, the equalizer at its tone; what follows it is told
+        after."""
         if not self._started:
             self._thread.start()
             self._started = True
@@ -2272,7 +2312,10 @@ class Player(QObject):
         self._playing(key)
         self._level = self._replaygain(None, None, None) if level is None else level
         self._begun_at = self._position = at
+        self._told_tone = self.equalizer.tone(self._genres_of(song), self._requested)
+        self._equalize.emit(self._requested, self._told_tone)
         self._play.emit(path, self._requested, self._level, at)
+        self.equalizerChanged.emit()
 
     def _replaygain(self, song: int | None, before: int | None, after: int | None) -> float:
         """The multiplier ReplayGain gives `song` (R7.5), played between `before` and `after` in
@@ -2380,8 +2423,114 @@ class Player(QObject):
                 level = self._replaygain(entry.song, current.song, after_song)
         if ticket:
             self._follows.add(ticket)
+            song = entry.song if entry is not None else None
+            tone = self.equalizer.tone(self._genres_of(song), ticket)
+            self._follow_tone = (ticket, song, tone)
+            self._equalize.emit(ticket, tone)
         self._followed, self._told_level, self._told_path = (ticket, key), level, path
         self._follow.emit(self._requested, ticket, path, level)
+
+    # ---------- the equalizer (R19) ----------
+
+    def _genres_of(self, song: int | None) -> list[str]:
+        """A song's genres in its order (R9.2); none for a file outside the index."""
+        if song is None or self._read is None:
+            return []
+        return [
+            r[0]
+            for r in self._read().execute(
+                "SELECT genre FROM song_genre WHERE song_id = ? ORDER BY position", (song,)
+            )
+        ]
+
+    def _shown_song(self) -> int | None:
+        entry = self.queue.current
+        return entry.song if entry is not None and self._info is not None else None
+
+    def _pick(self) -> presets.Pick:
+        """The preset the song shown plays, and why (R19.4)."""
+        return self.equalizer.pick(self._genres_of(self._shown_song()), self._requested)
+
+    def _retone(self) -> None:
+        """The equalizer changed: the engine told the tone of the song playing, and of the song
+        to follow it, where they changed (it makes them heard at once); and QML told."""
+        if self._requested:
+            tone = self.equalizer.tone(self._genres_of(self._shown_song()), self._requested)
+            if tone != self._told_tone:
+                self._told_tone = tone
+                self._equalize.emit(self._requested, tone)
+        ticket, song, told = self._follow_tone
+        if ticket and ticket in self._follows:
+            tone = self.equalizer.tone(self._genres_of(song), ticket)
+            if tone != told:
+                self._follow_tone = (ticket, song, tone)
+                self._equalize.emit(ticket, tone)
+        self.equalizerChanged.emit()
+
+    @Slot(bool)
+    def setEqualizerOn(self, on: bool) -> None:  # noqa: N802
+        """The equalizer's switch (R19.1): kept (R19.5), heard at once."""
+        if on != self.equalizer.on:
+            self.equalizer.on = on
+            self._remember_equalizer(on=on)
+            self._retone()
+
+    @Slot(str)
+    def choosePreset(self, name: str) -> None:  # noqa: N802
+        """A preset chosen by hand (R19.3, R19.4): kept as the one chosen, and while Choose by
+        genre is on, played for the song playing alone; its bands as saved. A name that isn't a
+        preset's does nothing."""
+        if self.equalizer.choose(name, self._requested):
+            self._remember_equalizer(preset=name)
+            self._retone()
+
+    @Slot(float, list)
+    def setBands(self, preamp: float, bands: list[Any]) -> None:  # noqa: N802
+        """The preset playing with its preamp and bands as set (R19.3): `bands` the parametric
+        bands, each {"type", "freq", "gain", "q"} (A2.10's), or a graphic preset's ten slider
+        gains; heard at once, not kept until it is saved."""
+        name = self._pick().preset
+        problems: list[str] = []
+        if len(bands) == len(presets.GRAPHIC_FREQS) and all(
+            isinstance(b, int | float) for b in bands
+        ):
+            self.equalizer.set_bands(name, preamp, None, [float(b) for b in bands])
+        else:
+            read = [presets.band_of(b, f"bands[{i}]", problems) for i, b in enumerate(bands)]
+            kept: list[Band] = [b for b in read if b is not None]
+            if not kept:
+                log.warning("bands set that aren't bands: %s", "; ".join(problems))
+                return
+            self.equalizer.set_bands(name, preamp, kept)
+        self._retone()
+
+    def _get_equalizer_on(self) -> bool:
+        return self.equalizer.on
+
+    def _get_equalizer_preset(self) -> str:
+        return self._pick().preset
+
+    def _get_equalizer_chosen_by(self) -> str:
+        return self._pick().why
+
+    @Slot(object, int, float)
+    def _on_equalized(self, tone: Tone, rate: int, headroom: float) -> None:
+        """The engine built `tone`'s filter at the device's `rate`, holding the level down by
+        `headroom`: what the panel shows (R19.1)."""
+        if rate != self._rate:
+            self._rate, self._applied = rate, {}
+        self._applied[tone] = headroom
+        self.equalizerChanged.emit()
+
+    def _get_headroom(self) -> float:
+        """The headroom of the preset playing as the engine applies it: as it said for a filter it
+        built, else worked out at the device's rate it last said; at 48 kHz before it has built
+        any."""
+        preset = self.equalizer.preset(self._pick().preset)
+        tone = presets.tone(preset)
+        if tone in self._applied:
+            return self._applied[tone]
+        return eq.headroom(tone, self._rate) if self._rate else presets.headroom_of(preset)
 
     # ---------- what the engine says ----------
 
@@ -2422,6 +2571,7 @@ class Player(QObject):
             return
         self._playing(entry.key)
         self._level = self._told_level
+        self._told_tone = self._follow_tone[2] if self._follow_tone[0] == ticket else None
         self._error = ""
         self._show(info, info.path)
         self._on, self._paused = True, False
@@ -2429,6 +2579,7 @@ class Player(QObject):
         self._listening.begin(entry.song, self._length)  # a new play (R7.6), repeat One's too
         self.changed.emit()
         self._queue_changed()
+        self.equalizerChanged.emit()
 
     @Slot(float)
     def _on_moved(self, seconds: float) -> None:
@@ -2599,3 +2750,10 @@ class Player(QObject):
     upNext = QtProperty(QObject, _get_up_next, constant=True)
     upNextOpen = QtProperty(bool, _get_up_next_open, notify=queueChanged)
     queueList = QtProperty(QObject, _get_queue_list, constant=True)  # Now Playing's (R11.4.3)
+    equalizerOn = QtProperty(bool, _get_equalizer_on, notify=equalizerChanged)  # R19.1
+    equalizerPreset = QtProperty(str, _get_equalizer_preset, notify=equalizerChanged)  # playing
+    # why it plays (R19.4): "chosen" in the panel, by its "genre", or for this "song"
+    equalizerChosenBy = QtProperty(str, _get_equalizer_chosen_by, notify=equalizerChanged)
+    # dB the level is held down to keep from clipping (R19.1): "−2.7 dB more"; 0 when it isn't;
+    # as the engine applies it, at the device's rate
+    headroom = QtProperty(float, _get_headroom, notify=equalizerChanged)

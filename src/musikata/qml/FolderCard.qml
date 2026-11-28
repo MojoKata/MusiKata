@@ -2,9 +2,9 @@ import QtQuick
 import "."
 
 // A folder in Folders' Cards mode (R2.9.4, L06-folders-cards): a wide card with its cover at the
-// left, its name and counts, and its state chip (R2.9.5: "3 to fix", "No tags"); a selected one
-// outlined, its check at the top right; tinted with its cover's colour (R6.2.2, `tints`), strongest
-// on the left, by the cover.
+// left, its name and counts, and its state chip (R2.9.5: "Fixable" or "Untagged", how many files
+// in its tooltip); a selected one outlined, its check at the top right; tinted with its cover's
+// colour (R6.2.2, `tints`), strongest on the left, by the cover.
 Rectangle {
     id: card
     signal tapped(int modifiers)
@@ -15,7 +15,7 @@ Rectangle {
     required property string cover
     required property bool playing
     required property bool selected
-    property var pathChip: ({})        // R2.9.5: its chip's text and tone, {} for none
+    property var pathChip: ({})        // R2.9.5: its chip's text, tone and tip, {} for none
     property alias loading: art.loading
     property var tints: null
     readonly property string tint: card.tints !== null ? (card.tints.revision, card.tints.of(card.cover)) : ""
@@ -82,6 +82,7 @@ Rectangle {
         visible: card.pathChip.text !== undefined
         label: card.pathChip.text || ""
         tone: card.pathChip.tone || "info"
+        tip: card.pathChip.tip || ""
     }
     Check {
         anchors.right: parent.right

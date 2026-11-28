@@ -60,6 +60,7 @@ Item {
             required property string group
             required property string kind
             required property string badge
+            required property string badgeTip
             required property var copies
             required property string title
             required property string detail
@@ -178,7 +179,7 @@ Item {
                 color: Theme.surface
                 border.color: Theme.border
                 Accessible.role: Accessible.Grouping
-                Accessible.name: row.title + ", " + row.badge
+                Accessible.name: row.title + ", " + row.badgeTip
                 Cover {
                     x: 16
                     y: 14
@@ -222,6 +223,7 @@ Item {
                     y: 19
                     label: row.badge
                     tone: row.badge === "Likely" ? "warn" : "ok"
+                    tip: row.badgeTip
                 }
                 Row {
                     id: copiesActions

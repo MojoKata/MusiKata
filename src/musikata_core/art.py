@@ -317,8 +317,8 @@ class Candidate:
 class Current:
     """The album's cover now (R5.1's first found): its identity, bytes and what they are (all
     None for none), its line ("Current · 1200 × 1200 JPEG · 318 KB") and where it is ("Embedded
-    in 10 of 10", "cover.jpg in the folder"), with that chip's tone ("ok" when every song has
-    it embedded, else "warn")."""
+    in 10 of 10", "cover.jpg in the folder": that chip's tooltip), with that chip's word
+    (Embedded, Partial, Folder) and tone ("ok" when every song has it embedded, else "warn")."""
 
     key: str | None = None
     data: bytes | None = None
@@ -326,6 +326,7 @@ class Current:
     line: str = "No album art"
     where: str = ""
     tone: str = "warn"
+    word: str = ""
 
 
 @dataclass(frozen=True)
@@ -380,6 +381,7 @@ def current_of(songs: Sequence[SongArt], images: Sequence[FolderImage]) -> Curre
         picture = next(c for c in covers if c is not None and counts[key_of(c.data)] == best)
         n, total = best, len(songs)
         where, tone = f"Embedded in {n:,} of {total:,}", "ok" if n == total else "warn"
+        word = "Embedded" if n == total else "Partial"
         data = picture.data
     else:
         usable = [i for i in _ordered_images(images) if i.data and is_image(i.name)]
@@ -387,11 +389,11 @@ def current_of(songs: Sequence[SongArt], images: Sequence[FolderImage]) -> Curre
             return Current()
         image = usable[0]
         data = image.data or b""
-        where, tone = f"{image.name} in the folder", "warn"
+        where, tone, word = f"{image.name} in the folder", "warn", "Folder"
     info = sniff(data)
     what = f"{info.width} × {info.height} {KIND_TEXT[info.kind]}" if info else "unreadable"
     return Current(key_of(data), data, info, f"Current · {what} · {size_text(len(data))}", where,
-                   tone)  # fmt: skip
+                   tone, word)  # fmt: skip
 
 
 def gather(

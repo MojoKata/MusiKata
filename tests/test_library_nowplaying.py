@@ -599,6 +599,21 @@ def test_the_mini_players_layout_and_places_are_kept_on_the_same_thread(tmp_path
     assert nowplaying.Keeping(where, index.read, FakeClock()).mini_player(layout="disc") is None
 
 
+def test_the_equalizer_is_kept_on_the_same_thread(tmp_path, index):
+    """R19.5: its writes of the shared settings never overlap the others'."""
+    recorder = Recorder()
+    where = where_in(tmp_path)
+    keeping = nowplaying.Keeping(
+        where, index.read, FakeClock(), set_playback=recorder, set_equalizer=recorder
+    )
+    keeping.playback(shuffle=True)
+    assert keeping.equalizer(on=True).result() is True
+    keeping.close()
+    assert recorder.calls == [{"shuffle": True}, {"on": True}]
+    assert len(set(recorder.threads)) == 1
+    assert nowplaying.Keeping(where, index.read, FakeClock()).equalizer(on=True) is None
+
+
 def test_a_write_that_breaks_is_logged_and_the_next_one_tries_again(tmp_path, caplog):
     where = where_in(tmp_path)
     keeping = nowplaying.Keeping(where, lambda: 1 / 0, FakeClock(), executor=ThreadPoolExecutor(1))

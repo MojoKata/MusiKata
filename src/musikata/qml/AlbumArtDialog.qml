@@ -156,8 +156,9 @@ Item {
             anchors.top: currentLine.bottom
             anchors.topMargin: 10
             visible: label !== ""
-            label: dialog.art.current.where || ""
+            label: dialog.art.current.word || ""
             tone: dialog.art.current.tone || "warn"
+            tip: dialog.art.current.where || ""
         }
 
         // the covers found (R5.2), the drop zone and what an image added couldn't be

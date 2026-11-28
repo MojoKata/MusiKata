@@ -31,8 +31,18 @@ for the same reason: connecting to them takes those locks with the GIL held.
 The GUI thread talks to the engine by queued signals only (the `Player` bridge, bridges.py), and
 hears back the same way; each song asked for carries a ticket of the bridge's, which comes back
 with what the engine says of it. What opens a song and which device it plays on are given to the
-engine, so a test can hand in generated audio and Qt's device of its choice. The equalizer is
-slice 9's (R19)."""
+engine, so a test can hand in generated audio and Qt's device of its choice.
+
+Each song comes with the tone the equalizer plays for it (R19, A4.4; `equalize`, told before the
+song is asked for), which the feed filters in after ReplayGain, on the way into the ring, here on
+the playback thread where the samples are made. A tone changed while its song plays is heard at
+once: at the next turn of the loop (so a slider dragged builds one filter a turn, the latest), the
+filter is built, 3 to 8 ms of NumPy's FFTs at 44.1 and 48 kHz (45 ms for the longest at
+192 kHz), while the device plays from its own buffer of 250 ms and the ring is untouched, and
+then the feed filters again what the ring held from where the device has got to, the first
+blocks at once and the rest as the loop goes round. Each filter built is kept for the songs
+after (`eq.Designs`), and its headroom said to the GUI thread (`equalized`), so the panel shows
+the level held down as it is applied, at the device's rate (R19.1)."""
 
 from __future__ import annotations
 
@@ -56,6 +66,7 @@ from shiboken6 import Shiboken
 
 from musikata_core.audio import gain, stream
 from musikata_core.audio.decode import DecodeError, Decoder
+from musikata_core.audio.eq import Designs, Tone
 from musikata_core.audio.join import Feed, Playing, Song
 from musikata_core.audio.stream import Recent, Stream
 
@@ -219,6 +230,8 @@ class Engine(QObject):
     ended = Signal(int)  # the ticket, played to its end with nothing after it
     stopped = Signal(int)  # the ticket, stopped before its end
     failed = Signal(int, str)  # the ticket, and why it couldn't play
+    equalized = Signal(object, int, float)  # a tone's filter built: the tone, the device's rate,
+    # and the dB it holds the level down by (R19.1), for the panel to show what is applied
 
     def __init__(
         self,
@@ -252,6 +265,9 @@ class Engine(QObject):
         self.make_sink: SinkMaker = QAudioSink
         # the analyzer's ring (A4.3): what the device took, for the spectrum's views (A5.2)
         self.analyzer = Recent()
+        self.designs = Designs()  # the equalizer's filters built (A4.4), kept for the next songs
+        self._tones: dict[int, Tone | None] = {}  # each song's tone as told, by ticket (R19)
+        self._retones: dict[int, Tone | None] = {}  # tones changed for songs in the stream
 
     @Slot()
     def setup(self) -> None:
@@ -273,6 +289,23 @@ class Engine(QObject):
         song plays on it."""
         self._chosen = chosen
 
+    @Slot(int, object)
+    def equalize(self, ticket: int, tone: Tone | None) -> None:
+        """The song asked for, or to be asked for, with `ticket` plays `tone` (None: the
+        equalizer off, R19.1). One in the stream changes at the next turn of the loop, heard at
+        once; the latest asked by then is the one built."""
+        self._tones[ticket] = tone
+        if self._feed is not None:
+            self._retones[ticket] = tone
+
+    def _built(self, tone: Tone | None) -> None:
+        """`tone`'s filter at the stream's rate, built now (or found built), and said: the
+        headroom it applies is the device's rate's (R19.1)."""
+        if tone is None or self._feed is None:
+            return
+        rate = self._feed.stream.rate
+        self.equalized.emit(tone, rate, self.designs(tone, rate).headroom)
+
     @Slot(str, int, float, float)
     def play(self, path: str, ticket: int, level: float = 1.0, at: float = 0.0) -> None:
         """Plays the file at `path` from `at` seconds into it (0: its start; R1.8's restored
@@ -292,8 +325,11 @@ class Engine(QObject):
             return
         ring = Stream(rate, channels)
         self.analyzer.start(rate, channels)
-        self._feed = Feed(ring, lambda p: self._opener(p, rate, channels))
-        self._feed.start(ticket, path, song, level, round(max(0.0, at) * rate))
+        self._tones = {t: v for t, v in self._tones.items() if t >= ticket}
+        self._feed = Feed(ring, lambda p: self._opener(p, rate, channels), designs=self.designs)
+        tone = self._tones.get(ticket)
+        self._built(tone)
+        self._feed.start(ticket, path, song, level, round(max(0.0, at) * rate), tone)
         if not self._fill(ring.ring.capacity):  # the whole ring before the first pull
             return
         if not self._open_sink(device, fmt, ring, start=True):
@@ -330,6 +366,9 @@ class Engine(QObject):
         """The song asked for with `after` is to be followed by `path`, asked for with `ticket`
         (0: by nothing), joined to it with no gap (A4.2), its samples multiplied by `level`."""
         if self._feed is not None:
+            self._tones = {t: v for t, v in self._tones.items() if t >= after}
+            self._built(self._tones.get(ticket))  # built now, not as it joins
+            self._feed.retone(ticket, self._tones.get(ticket))
             self._feed.follow(after, ticket, path, level)
 
     @Slot(int, float)
@@ -418,6 +457,10 @@ class Engine(QObject):
     def _tick(self) -> None:
         if self._sink is None or self._feed is None:
             return
+        retones, self._retones = self._retones, {}
+        for ticket, tone in retones.items():
+            self._built(tone)
+            self._feed.retone(ticket, tone)
         if not self._fill():
             return
         error = self._sink.error()
@@ -497,6 +540,9 @@ class Engine(QObject):
         if failure is not None:
             self._fail(failure.why, failure.ticket)
             return
+        heard = self._feed.heard
+        if heard is not None:  # its filter at the new device's rate
+            self._built(self._tones.get(heard.ticket))
         if not self._fill(ring.ring.capacity) or not self._open_sink(device, fmt, ring, False):
             return
         log.warning(
@@ -534,6 +580,7 @@ class Engine(QObject):
         if self._feed is not None:
             self._feed.close()
             self._feed = None
+        self._retones = {}
         self._reported = -1.0
         if self._paused:
             self._paused = False

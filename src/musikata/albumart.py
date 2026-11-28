@@ -803,7 +803,7 @@ class AlbumArt(QObject):
         current = self._album.current if self._album is not None else art.Current()
         source = f"image://albumart/large-{current.key}?{self._generation}" if current.key else ""
         return {"source": source, "line": current.line if self._album is not None else "",
-                "where": current.where, "tone": current.tone}  # fmt: skip
+                "where": current.where, "tone": current.tone, "word": current.word}  # fmt: skip
 
     def _get_candidates(self) -> list[dict[str, Any]]:
         if self._album is None:

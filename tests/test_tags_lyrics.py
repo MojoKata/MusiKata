@@ -144,10 +144,13 @@ def test_any_text_parses_and_never_raises(text):
 
 
 @given(st.lists(st.tuples(st.floats(0, 5999, allow_nan=False), st.text("ab ,'", min_size=1))))
+@example(
+    [(1.055, "a")]
+)  # 105.50000000000001 hundredths: written as 1.06, though round(t, 2) is 1.05
 def test_timed_lines_written_as_lrc_read_back_at_their_times(entries):
     entries = [(t, " ".join(words.split())) for t, words in entries if words.split()]
     found = lyrics.parse(lyrics.lrc_of(entries))
-    assert [(round(t, 2), w) for t, w in sorted(entries, key=lambda e: e[0])] == [
+    assert [(round(t * 100) / 100, w) for t, w in sorted(entries, key=lambda e: e[0])] == [
         (pytest.approx(line.time, abs=0.006), line.text) for line in found.lines
     ]
 

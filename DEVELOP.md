@@ -34,9 +34,9 @@ its screens are in the tour, and each of its modules reaches the coverage of `te
 | [6](https://github.com/MojoKata/MusiKata/issues/23) | Tidying | album art, Needs attention, duplicates, encodings, genres (R5, R9, R2.8, R2.12) |
 | [7](https://github.com/MojoKata/MusiKata/issues/24) | Files | tags from paths, organizing, playlists, removing songs (R3, R12, R8, R2.11) |
 | [8](https://github.com/MojoKata/MusiKata/issues/25) | Now Playing | the waveform, the analyzer, lyrics, the mini player (R11, R17, R15) |
-| [9](https://github.com/MojoKata/MusiKata/issues/26) | Sound and settings | the equalizer, the sleep timer, the Settings dialog (R19, R7.10, R13) |
+| [9](https://github.com/MojoKata/MusiKata/issues/26) | Sound and settings | the equalizer, the sleep timer, the app log, the Settings dialog (R19, R7.10, R14, R13) |
 | [10](https://github.com/MojoKata/MusiKata/issues/27) | Online | looking up covers, tags and lyrics (R16, R17.4) |
-| [11](https://github.com/MojoKata/MusiKata/issues/28) | Release | updates (R1.9), accessibility (R18), the size and speed targets (R1.11), signing, the first field test |
+| [11](https://github.com/MojoKata/MusiKata/issues/28) | Release | updates (R1.9), accessibility (R18), the window's own header and buttons (R6.4), the size and speed targets (R1.11), signing, the first field test |
 
 ## The first release
 

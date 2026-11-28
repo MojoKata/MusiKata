@@ -6,7 +6,8 @@ import "."
 // artist, genre, year, a value that differs from the rest of the folder marked), as `columns` and
 // `songs` say. Selected, it is highlighted; the song playing has its title in the accent. A click
 // selects it (Ctrl/⌘ and Shift as everywhere), a double click plays it. Its path-match chip (R3.9:
-// Match, Year missing, No tags…) ends the row, in the column `columns` has last.
+// Match, Fixable or Untagged, how its tags differ in its tooltip) ends the row, in the column
+// `columns` has last.
 Rectangle {
     id: row
     signal tapped(int modifiers)
@@ -24,7 +25,7 @@ Rectangle {
     required property int rating
     required property string time
     required property var odd           // the fields whose values differ from the folder's
-    property var pathChip: ({})        // its path-match chip (R3.9): text and tone, {} for none
+    property var pathChip: ({})        // its path-match chip (R3.9): text, tone and tip, {} for none
     required property bool playing
     required property bool selected
     height: songs ? 40 : 36
@@ -100,5 +101,6 @@ Rectangle {
         visible: row.pathChip.text !== undefined
         label: row.pathChip.text || ""
         tone: row.pathChip.tone || "info"
+        tip: row.pathChip.tip || ""
     }
 }
