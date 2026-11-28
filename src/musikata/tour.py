@@ -260,6 +260,39 @@ def analyzers(item: QQuickItem) -> list[Analyzer]:
     return found
 
 
+def _waiting_on(item: QQuickItem, tints: bool) -> None:
+    """Says on stderr what a step waits on, and the memory the tour's processes hold: CI's tour
+    of #95 was killed for its memory while N01 waited."""
+    found = []
+
+    def walk(at: QQuickItem) -> None:
+        if not at.isVisible():
+            return
+        if at.property("loading") is True:
+            found.append(f"{type(at).__name__} {at.objectName()!r} {at.property('source')!s:.80}")
+        for child in at.childItems():
+            walk(child)
+
+    walk(item)
+    print(
+        f"the tour waits: tints {tints}, {_memory()}, loading {found}", file=sys.stderr, flush=True
+    )
+
+
+def _memory() -> str:
+    """Each of the tour's processes' resident memory, from /proc, in MB."""
+    held = []
+    for pid in os.listdir("/proc"):
+        try:
+            with open(f"/proc/{pid}/status", encoding="utf-8") as f:
+                fields = dict(line.split(":", 1) for line in f if ":" in line)
+        except OSError:
+            continue
+        if "VmRSS" in fields:
+            held.append(f"{fields['Name'].strip()} {int(fields['VmRSS'].split()[0]) // 1024}")
+    return "MB " + ", ".join(held)
+
+
 def _quit(code: int) -> None:
     QGuiApplication.exit(code)
 
@@ -397,6 +430,8 @@ class Tour(QObject):
         name = self.steps[self._i][0]
         if loading(self.win.contentItem()) or (self.tints is not None and self.tints.busy):
             if self._waited < PATIENCE:
+                if self._waited % 2000 == 0:
+                    _waiting_on(self.win.contentItem(), self.tints is not None and self.tints.busy)
                 self._waited += POLL
                 QTimer.singleShot(POLL, self._settle)
                 return
@@ -415,7 +450,11 @@ class Tour(QObject):
         for fault in layout.faults(self.win):
             self.faults.append(f"{name} at {w} x {h}: {fault['line']}")
         # each screen and size taken, and when, so a tour that stops says where
-        print(f"the tour: {name} at {w} x {h}, {time.monotonic():.1f}", file=sys.stderr, flush=True)
+        print(
+            f"the tour: {name} at {w} x {h}, {time.monotonic():.1f}, {_memory()}",
+            file=sys.stderr,
+            flush=True,
+        )
         self._size += 1
         if self._size < len(SIZES):
             self._at_size()
